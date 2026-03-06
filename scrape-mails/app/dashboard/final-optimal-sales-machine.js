@@ -52,20 +52,30 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signO
 import Head from 'next/head';
 import { useRouter } from 'next/navigation';
 
-// Firebase setup
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
-};
+// Firebase setup - with safety check
+let app, db, auth;
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
-const auth = getAuth(app);
+if (typeof window !== 'undefined') {
+  try {
+    const firebaseConfig = {
+      apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+      authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+      measurementId: process.env.FIREBASE_MEASUREMENT_ID
+    };
+
+    if (firebaseConfig.apiKey && firebaseConfig.projectId) {
+      app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+      db = getFirestore(app);
+      auth = getAuth(app);
+    }
+  } catch (error) {
+    console.error('Firebase init failed:', error);
+  }
+}
 
 // ✅ YOUR ACTUAL INITIAL PITCH
 const DEFAULT_TEMPLATE_A = {
@@ -412,6 +422,11 @@ export default function Dashboard() {
 
   // Auth effect
   useEffect(() => {
+    if (!auth) {
+      setLoadingAuth(false);
+      return;
+    }
+    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoadingAuth(false);
@@ -421,11 +436,11 @@ export default function Dashboard() {
       }
     });
     return unsubscribe;
-  }, []);
+  }, [auth]);
 
   // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH
   const loadContactsFromFirestore = useCallback(async (userId) => {
-    if (!userId) return;
+    if (!userId || !db) return;
     setLoadingContacts(true);
     try {
       // Query contacts collection with ordering
@@ -520,11 +535,11 @@ export default function Dashboard() {
     } finally {
       setLoadingContacts(false);
     }
-  }, [fieldMappings, senderName, whatsappTemplate]);
-  
+  }, [fieldMappings, senderName, whatsappTemplate, updateContactStatus]);
+
   // ✅ UPDATE CONTACT STATUS (with history tracking)
   const updateContactStatus = useCallback(async (contactId, newStatus, note = '') => {
-    if (!user?.uid || !contactId || !newStatus) {
+    if (!user?.uid || !contactId || !newStatus || !db) {
       console.warn('Missing required data for status update');
       return false;
     }
@@ -630,7 +645,7 @@ export default function Dashboard() {
       return false;
     }
   }, [user, contactStatuses, whatsappLinks]);
-  
+
   // ✅ HANDLE CSV UPLOAD WITH FIRESTORE INTEGRATION
   const handleCsvUpload = useCallback(async (e) => {
     setValidEmails(0);
@@ -770,7 +785,7 @@ export default function Dashboard() {
       setValidWhatsApp(validPhoneContacts.length);
       
       // ✅ SAVE TO FIRESTORE INSTEAD OF JUST SETTING STATE
-      if (user?.uid) {
+      if (user?.uid && db) {
         try {
           setStatus('💾 Saving contacts to database...');
           await saveContactsToFirestore(validPhoneContacts, user.uid);
@@ -792,11 +807,11 @@ export default function Dashboard() {
       setCsvContent(normalizedContent);
     };
     reader.readAsText(file);
-  }, [user, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, fieldMappings, clickStats]);
+  }, [user, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, fieldMappings, clickStats, saveContactsToFirestore]);
   
   // ✅ SAVE CONTACTS TO FIRESTORE ON CSV UPLOAD
   const saveContactsToFirestore = useCallback(async (contacts, userId) => {
-    if (!userId || contacts.length === 0) return;
+    if (!userId || contacts.length === 0 || !db) return;
     
     try {
       // Get existing contacts mapping by email/phone
@@ -966,7 +981,7 @@ ${senderName}`
       setResearchingCompany(null);
       setAiStatus('available');
     }
-  }, [useAI, whatsappLinks]);
+  }, [useAI, whatsappLinks, senderName]);
 
   // ✅ STATUS BADGE COMPONENT
   const StatusBadge = ({ status, small = false }) => {
@@ -1101,7 +1116,7 @@ ${senderName}`
 
   // ✅ HANDLE CALL
   const handleCall = useCallback((phone) => {
-    if (!phone) return;
+    if (!phone || typeof window === 'undefined') return;
     window.open(`tel:${phone}`, '_blank');
   }, []);
 
@@ -1204,8 +1219,10 @@ ${senderName}`
           <p className="text-gray-400 mb-8">Your Business • Your Templates • Advanced Analytics</p>
           <button
             onClick={() => {
-              const provider = new GoogleAuthProvider();
-              signInWithPopup(auth, provider);
+              if (auth) {
+                const provider = new GoogleAuthProvider();
+                signInWithPopup(auth, provider);
+              }
             }}
             className="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-semibold transition-colors"
           >
@@ -1266,7 +1283,11 @@ ${senderName}`
               <p className="font-semibold">{user.displayName}</p>
             </div>
             <button
-              onClick={() => signOut(auth)}
+              onClick={() => {
+                if (auth) {
+                  signOut(auth);
+                }
+              }}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm transition-colors"
             >
               Sign Out
