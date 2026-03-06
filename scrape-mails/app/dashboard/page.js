@@ -1071,7 +1071,6 @@ function PersonalizationPreview({ bullets, company, contact, onApply, onRegenera
 // MAIN DASHBOARD COMPONENT (Production Architecture)
 // ============================================================================
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 
 export default function Dashboard() {
   // ============================================================================
