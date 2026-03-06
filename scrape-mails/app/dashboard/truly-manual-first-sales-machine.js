@@ -106,7 +106,7 @@ Best,
   }
 };
 
-export default function TrulyManualFirstSalesMachine() {
+function TrulyManualFirstSalesMachine() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('targets');
@@ -1390,3 +1390,5 @@ export default function TrulyManualFirstSalesMachine() {
     </div>
   );
 }
+
+export default TrulyManualFirstSalesMachine;
