@@ -254,7 +254,7 @@ export default function FinalOptimalSalesMachine() {
   };
 
   const launchCampaign = async () => {
-    if (!db || !campaign || targets.length === 0) return;
+    if (!db || targets.length === 0) return;
     
     setIsProcessing(true);
     
@@ -264,6 +264,7 @@ export default function FinalOptimalSalesMachine() {
         targets: targets,
         status: 'active',
         createdAt: serverTimestamp(),
+        createdBy: user.uid, // Add user ID for security
         kpis: { sent: 0, replies: 0, meetings: 0 }
       });
       
@@ -306,19 +307,44 @@ export default function FinalOptimalSalesMachine() {
   };
 
   const sendEmail = async (target, template, campaignId, targetIndex) => {
+    const decisionMaker = target.decisionMakers[0];
+    if (!decisionMaker) throw new Error('No decision maker found');
+    
     const personalizedSubject = personalizeTemplate(template.subject, target);
     const personalizedBody = personalizeTemplate(template.body, target);
     
-    console.log(`Sending to: ${target.decisionMakers[0]?.email}`);
-    console.log(`Subject: ${personalizedSubject}`);
-    
-    await updateDoc(doc(db, 'campaigns', campaignId), {
-      [`targets.${targetIndex}.status`]: 'sent',
-      [`targets.${targetIndex}.sentAt`]: serverTimestamp(),
-      'kpis.sent': increment(1)
-    });
-    
-    return { messageId: `msg_${Date.now()}`, status: 'sent' };
+    try {
+      // Actually send the email
+      const response = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: decisionMaker.email,
+          subject: personalizedSubject,
+          body: personalizedBody
+        })
+      });
+      
+      const result = await response.json();
+      
+      console.log(`Email sent to: ${decisionMaker.email}`);
+      console.log(`Message ID: ${result.messageId}`);
+      console.log(`Mode: ${result.mode}`);
+      
+      // Update campaign in Firebase
+      await updateDoc(doc(db, 'campaigns', campaignId), {
+        [`targets.${targetIndex}.status`]: 'sent',
+        [`targets.${targetIndex}.sentAt`]: serverTimestamp(),
+        [`targets.${targetIndex}.messageId`]: result.messageId,
+        'kpis.sent': increment(1)
+      });
+      
+      return { messageId: result.messageId, status: 'sent' };
+      
+    } catch (error) {
+      console.error(`Failed to send to ${decisionMaker.email}:`, error);
+      throw error;
+    }
   };
 
   const extractDomain = (website) => {
