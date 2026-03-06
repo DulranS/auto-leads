@@ -266,7 +266,7 @@ export async function generatePersonalization(request) {
     const template = templateData.template;
 
     // Generate personalization
-    const personalization = generatePersonalization(decisionMaker, research, template);
+    const personalization = generatePersonalizationContent(decisionMaker, research, template);
 
     // Render template with personalization
     const renderedEmail = renderTemplate(template, {
@@ -290,7 +290,7 @@ export async function generatePersonalization(request) {
   }
 }
 
-function generatePersonalization(decisionMaker, research, template) {
+function generatePersonalizationContent(decisionMaker, research, template) {
   const personalization = {};
 
   // Generate observation (1 factual observation)
