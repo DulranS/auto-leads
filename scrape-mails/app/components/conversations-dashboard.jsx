@@ -1,47 +1,15 @@
-// app/components/conversations-dashboard.tsx - Conversations tab for dashboard
+// app/components/conversations-dashboard.jsx - Conversations tab for dashboard
 'use client';
 import { useState, useEffect } from 'react';
 
-interface Conversation {
-  id: string;
-  lead_id: string;
-  company_name: string;
-  contact_name: string;
-  email: string;
-  status: string;
-  last_reply_intent?: string;
-  total_replies: number;
-  follow_up_count: number;
-  last_contacted_at: string;
-  conversations: Array<{
-    message_type: string;
-    subject: string;
-    body: string;
-    intent_classification?: string;
-    ai_response_sent: boolean;
-    created_at: string;
-  }>;
-}
-
-interface FollowUpItem {
-  id: string;
-  lead_id: string;
-  company_name: string;
-  contact_name: string;
-  email: string;
-  scheduled_for: string;
-  follow_up_number: number;
-  status: string;
-}
-
-export default function ConversationsDashboard({ userId }: { userId: string }) {
-  const [activeTab, setActiveTab] = useState<'replies' | 'hot' | 'queue' | 'stats'>('replies');
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [hotLeads, setHotLeads] = useState<Conversation[]>([]);
-  const [followUpQueue, setFollowUpQueue] = useState<FollowUpItem[]>([]);
-  const [stats, setStats] = useState<any>(null);
+export default function ConversationsDashboard({ userId }) {
+  const [activeTab, setActiveTab] = useState('replies');
+  const [conversations, setConversations] = useState([]);
+  const [hotLeads, setHotLeads] = useState([]);
+  const [followUpQueue, setFollowUpQueue] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState(null);
 
   useEffect(() => {
     if (userId) {
@@ -78,7 +46,7 @@ export default function ConversationsDashboard({ userId }: { userId: string }) {
     }
   };
 
-  const getIntentColor = (intent?: string) => {
+  const getIntentColor = (intent) => {
     switch (intent) {
       case 'interested': return 'text-green-600 bg-green-50';
       case 'needs_more_info': return 'text-blue-600 bg-blue-50';
@@ -89,7 +57,7 @@ export default function ConversationsDashboard({ userId }: { userId: string }) {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status) => {
     switch (status) {
       case 'hot': return 'text-green-600 bg-green-50';
       case 'warm': return 'text-yellow-600 bg-yellow-50';
@@ -100,7 +68,7 @@ export default function ConversationsDashboard({ userId }: { userId: string }) {
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString() + ' ' + 
            new Date(dateString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
