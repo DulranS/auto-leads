@@ -2,52 +2,54 @@
 
 /**
  * ============================================================================
- * COMPLETE MANUAL-FIRST B2B SALES MACHINE - FINAL IMPLEMENTATION
+ * AI-ENHANCED B2B SALES MACHINE - STRATEGIC IMPLEMENTATION
  * ============================================================================
  * 
- * CORE REQUIREMENT: When AI systems are down, you lose ZERO functionality.
- * Every single feature must work 100% manually through the UI.
+ * TIGHT ICP DEFINITION:
+ * - Industry: SaaS companies 20-200 employees
+ * - Size: Series A-C funding stages ($2M-$50M raised)
+ * - Geo: North America & Europe primarily
+ * - Pain: Scaling customer acquisition without burning cash
+ * - Trigger: Recent funding round, product launch, or hiring growth
  * 
- * COMPLETE MANUAL CONTROLS:
- * 1. Manual target management (add/edit/delete/import/export)
- * 2. Manual decision maker management (add/edit/delete/verify)
- * 3. Manual template management (create/edit/delete/duplicate)
- * 4. Manual campaign management (create/launch/pause/resume)
- * 5. Manual sequence management (timing/follow-ups)
- * 6. Manual email composition (edit every word)
- * 7. Manual send approval (review each email)
- * 8. Manual KPI tracking (track everything by hand)
- * 9. Manual data management (export/import/backup)
+ * STRATEGIC WORKFLOW:
+ * 1. Pick 50 qualified target companies (small batch = manageable testing)
+ * 2. 2-minute research per company (headline + one recent trigger link)
+ * 3. Find 1-2 decision makers per account (name, role, LinkedIn URL)
+ * 4. Verify each email (format + MX/basic deliverability)
+ * 5. Create 2 personalization bullets (1 observation, 1 impact)
+ * 6. Use 3 controlled templates only (<120 words each)
+ * 7. Launch with controlled cadence (Day0, Day3, Day5, Day7)
+ * 8. Auto-exit rules (replied/booked → remove; bounced → pause)
+ * 9. Weekly KPI monitoring with auto-pause triggers
+ * 10. Move non-responders to nurture sequence (30-60 days)
  * 
- * STRATEGIC BUSINESS VALUE:
- * - Target: SaaS companies 20-200 employees
- * - Focus: Series A-C funding stages
- * - Value: 15-25 qualified leads/month
- * - Cost: $20-65/month total
- * - ROI: 150x-750x
+ * AI USAGE: Optional enhancement for speed and scale, never required
+ * MANUAL OVERRIDE: Every feature works 100% without AI
  * 
- * DISAPPOINTING REAL WORLD PROTECTION:
- * - AI down? Every feature works manually
- * - API limits? Manual mode engaged
- * - Budget cut? Reduce AI, keep all functionality
- * - Need control? Every feature has manual override
+ * MINIMAL TECH STACK:
+ * - LinkedIn: Target research and decision maker finding
+ * - Apollo.io: Contact enrichment and verification
+ * - Calendly: Meeting scheduling
+ * - HubSpot: CRM and sequence management
+ * - WhatsApp: Multi-channel follow-up
  */
 
 import dynamic from 'next/dynamic';
 
-const CompleteManualFirstSalesMachine = dynamic(() => import('./complete-manual-first-sales-machine'), {
+const AIEnhancedSalesMachine = dynamic(() => import('./ai-enhanced-sales-machine'), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-        <p>Loading Complete Manual-First Sales Machine...</p>
-        <p className="text-sm text-gray-400 mt-2">Every feature works 100% without AI</p>
+        <p>Loading AI-Enhanced Sales Machine...</p>
+        <p className="text-sm text-gray-400 mt-2">Strategic AI + Complete Manual Control</p>
       </div>
     </div>
   )
 });
 
 export default function Home() {
-  return <CompleteManualFirstSalesMachine />;
+  return <AIEnhancedSalesMachine />;
 }
