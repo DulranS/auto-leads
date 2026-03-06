@@ -5,7 +5,7 @@
 ### 1. ✅ Hardcoded Secret Key (CRITICAL)
 **Issue:** Secret key was hardcoded in `app/page.js`
 ```javascript
-const SECRET_KEY = 'admin-secret248#'; // ❌ EXPOSED
+const SECRET_KEY = process.env.ACCESS_SECRET_KEY; // ✅ Use environment variable
 ```
 
 **Fix:** 
