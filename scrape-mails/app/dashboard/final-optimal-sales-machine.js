@@ -372,6 +372,7 @@ export default function Dashboard() {
   const [followUpLeads, setFollowUpLeads] = useState({});
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [sentLeads, setSentLeads] = useState([]);
+  const [sentEmails, setSentEmails] = useState([]);
   const [loadingSentLeads, setLoadingSentLeads] = useState(false);
   const [followUpHistory, setFollowUpHistory] = useState({});
   const [followUpFilter, setFollowUpFilter] = useState('all');
@@ -1148,6 +1149,14 @@ ${senderName}`
             await updateContactStatus(contact.contactId, 'contacted', 'Email sent via bulk send');
             setKpis(prev => ({ ...prev, sent: prev.sent + 1 }));
             setLastSent(prev => ({ ...prev, [contact.email]: new Date().toISOString() }));
+            setSentEmails(prev => [...prev, {
+              id: `email_${Date.now()}_${Math.random()}`,
+              to: contact.email,
+              subject,
+              body,
+              sentAt: new Date().toISOString(),
+              contactId: contact.contactId
+            }]);
           }
           
           return response.ok;
@@ -1173,7 +1182,7 @@ ${senderName}`
     } finally {
       setIsSending(false);
     }
-  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent]);
+  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent, setSentEmails]);
 
   if (loadingAuth) {
     return (
