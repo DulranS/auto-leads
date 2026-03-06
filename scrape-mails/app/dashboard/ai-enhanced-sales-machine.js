@@ -1147,7 +1147,7 @@ export default function AIEnhancedSalesMachine() {
                     </div>
                     <div className="flex justify-between">
                       <span>Templates:</span>
-                      <span>3 controlled (<120 words)</span>
+                      <span>3 controlled (&lt;120 words)</span>
                     </div>
                   </div>
                 </div>
