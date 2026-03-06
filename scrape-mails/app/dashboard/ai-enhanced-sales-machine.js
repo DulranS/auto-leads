@@ -355,7 +355,7 @@ export default function AIEnhancedSalesMachine() {
           d.id === dmId 
             ? { ...d, emailVerification: result.data }
             : d
-        ))
+        )
       });
     } catch (error) {
       console.error('Email verification failed:', error);
