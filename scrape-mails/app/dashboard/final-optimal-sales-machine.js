@@ -350,6 +350,7 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
 export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
 export default function Dashboard() {
+  // STATE INITIALIZATION
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
@@ -419,24 +420,6 @@ export default function Dashboard() {
   // ✅ KPI State
   const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
   const [activeTab, setActiveTab] = useState('targets');
-
-  // Auth effect
-  useEffect(() => {
-    if (!auth) {
-      setLoadingAuth(false);
-      return;
-    }
-    
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoadingAuth(false);
-      if (user) {
-        setSenderName(user.displayName || 'Team');
-        loadContactsFromFirestore(user.uid);
-      }
-    });
-    return unsubscribe;
-  }, [auth]);
 
   // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH
   const loadContactsFromFirestore = useCallback(async (userId) => {
@@ -512,22 +495,67 @@ export default function Dashboard() {
       let archivedCount = 0;
       if (contactsToArchive.length > 0) {
         console.log(`🗄️ Auto-archiving ${contactsToArchive.length} irrelevant contacts (>30 days)`);
-        for (const contact of contactsToArchive) {
+        // Mark contacts as archived in local state first
+        const updatedContacts = contacts.map(contact => {
+          if (contactsToArchive.includes(contact)) {
+            return { ...contact, status: 'archived', lastUpdated: new Date() };
+          }
+          return contact;
+        });
+        
+        // Update local state immediately
+        setWhatsappLinks(updatedContacts);
+        
+        // Update statuses
+        const updatedStatuses = { ...statuses };
+        const updatedHistory = { ...history };
+        contactsToArchive.forEach(contact => {
+          updatedStatuses[contact.contactId] = 'archived';
+          updatedHistory[contact.contactId] = [
+            ...(updatedHistory[contact.contactId] || []),
+            {
+              status: 'archived',
+              timestamp: new Date(),
+              note: 'Auto-archived: >30 days inactive'
+            }
+          ];
+        });
+        setContactStatuses(updatedStatuses);
+        setStatusHistory(updatedHistory);
+        
+        // Then update in Firestore (async, non-blocking)
+        contactsToArchive.forEach(async (contact) => {
           try {
-            await updateContactStatus(contact.contactId, 'archived', 'Auto-archived: >30 days inactive');
-            archivedCount++;
+            if (db && user?.uid) {
+              const contactsRef = collection(db, 'users', user.uid, 'contacts');
+              const q = query(contactsRef, where('email', '==', contact.email || null));
+              const snapshot = await getDocs(q);
+              if (!snapshot.empty) {
+                await updateDoc(doc(db, 'users', user.uid, 'contacts', snapshot.docs[0].id), {
+                  status: 'archived',
+                  lastUpdated: serverTimestamp(),
+                  statusHistory: [
+                    ...(contact.statusHistory || []),
+                    {
+                      status: 'archived',
+                      timestamp: new Date(),
+                      note: 'Auto-archived: >30 days inactive'
+                    }
+                  ]
+                });
+              }
+            }
           } catch (err) {
             console.error(`Failed to archive contact ${contact.contactId}:`, err);
           }
-        }
-        setArchivedContactsCount(archivedCount);
-        // Reload contacts after cleanup
-        return loadContactsFromFirestore(userId);
+        });
+        
+        setArchivedContactsCount(contactsToArchive.length);
+      } else {
+        setWhatsappLinks(contacts);
+        setContactStatuses(statuses);
+        setStatusHistory(history);
       }
-      
-      setWhatsappLinks(contacts);
-      setContactStatuses(statuses);
-      setStatusHistory(history);
       
     } catch (error) {
       console.error('Failed to load contacts from Firestore:', error);
@@ -535,7 +563,7 @@ export default function Dashboard() {
     } finally {
       setLoadingContacts(false);
     }
-  }, [fieldMappings, senderName, whatsappTemplate, updateContactStatus]);
+  }, [fieldMappings, senderName, whatsappTemplate, user, db]);
 
   // ✅ UPDATE CONTACT STATUS (with history tracking)
   const updateContactStatus = useCallback(async (contactId, newStatus, note = '') => {
@@ -645,6 +673,122 @@ export default function Dashboard() {
       return false;
     }
   }, [user, contactStatuses, whatsappLinks]);
+
+  // ✅ SAVE CONTACTS TO FIRESTORE ON CSV UPLOAD
+  const saveContactsToFirestore = useCallback(async (contacts, userId) => {
+    if (!userId || contacts.length === 0 || !db) return;
+    
+    try {
+      // Get existing contacts mapping by email/phone
+      const existingContacts = {};
+      const contactsRef = collection(db, 'users', userId, 'contacts');
+      const snapshot = await getDocs(contactsRef);
+      
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const key = data.email?.toLowerCase().trim() || `phone_${data.phone}`;
+        existingContacts[key] = { id: doc.id, ...data };
+      });
+      
+      // Process each contact from CSV
+      for (const contact of contacts) {
+        const contactKey = contact.email?.toLowerCase().trim() || `phone_${contact.phone}`;
+        const now = new Date();
+        
+        // Prepare contact data for Firestore
+        const contactData = {
+          business: contact.business || '',
+          address: contact.address || '',
+          phone: contact.phone || '',
+          email: contact.email || null,
+          place_id: contact.place_id || '',
+          website: contact.website || '',
+          instagram: contact.instagram || '',
+          twitter: contact.twitter || '',
+          facebook: contact.facebook || '',
+          youtube: contact.youtube || '',
+          tiktok: contact.tiktok || '',
+          linkedin_company: contact.linkedin_company || '',
+          linkedin_ceo: contact.linkedin_ceo || '',
+          linkedin_founder: contact.linkedin_founder || '',
+          contact_page_found: contact.contact_page_found || 'No',
+          social_media_score: contact.social_media_score || '0',
+          email_primary: contact.email_primary || contact.email || '',
+          phone_primary: contact.phone_primary || contact.phone || '',
+          lead_quality_score: contact.lead_quality_score || '0',
+          contact_confidence: contact.contact_confidence || 'Low',
+          best_contact_method: contact.best_contact_method || 'Email',
+          decision_maker_found: contact.decision_maker_found || 'No',
+          tech_stack_detected: contact.tech_stack_detected || '',
+          company_size_indicator: contact.company_size_indicator || 'unknown',
+          lastUpdated: serverTimestamp(),
+          source: 'csv_upload'
+        };
+        
+        // Determine status logic
+        if (existingContacts[contactKey]) {
+          // Existing contact - preserve status unless it's archived
+          const existing = existingContacts[contactKey];
+          if (existing.status !== 'archived') {
+            contactData.status = existing.status;
+            contactData.statusHistory = existing.statusHistory || [];
+            contactData.notes = existing.notes || [];
+            contactData.lastContacted = existing.lastContacted || null;
+          } else {
+            // Reactivate archived contact
+            contactData.status = 'new';
+            contactData.statusHistory = [
+              ...(existing.statusHistory || []),
+              { status: 'archived', timestamp: existing.lastUpdated || now, note: 'Previously archived' },
+              { status: 'new', timestamp: now, note: 'Reactivated via new CSV upload' }
+            ];
+          }
+          contactData.createdAt = existing.createdAt || now;
+          
+          // Update existing document
+          await updateDoc(doc(db, 'users', userId, 'contacts', existing.id), contactData);
+        } else {
+          // New contact - set initial status
+          contactData.status = 'new';
+          contactData.statusHistory = [{
+            status: 'new',
+            timestamp: now,
+            note: 'Imported via CSV upload'
+          }];
+          contactData.notes = [];
+          contactData.createdAt = serverTimestamp();
+          contactData.lastContacted = null;
+          
+          // Create new document
+          await addDoc(contactsRef, contactData);
+        }
+      }
+      
+      // Reload contacts after save - but avoid circular dependency
+      // Instead of calling loadContactsFromFirestore, just update the local state
+      const updatedContacts = contacts.map(contact => ({
+        ...contact,
+        status: 'new', // Default status for new uploads
+        lastUpdated: new Date()
+      }));
+      
+      setWhatsappLinks(updatedContacts);
+      
+      const updatedStatuses = {};
+      const updatedHistory = {};
+      updatedContacts.forEach(contact => {
+        updatedStatuses[contact.contactId] = contact.status;
+        updatedHistory[contact.contactId] = contact.statusHistory || [];
+      });
+      
+      setContactStatuses(updatedStatuses);
+      setStatusHistory(updatedHistory);
+      
+    } catch (error) {
+      console.error('Failed to save contacts to Firestore:', error);
+      throw error;
+    }
+  }, [db]);
 
   // ✅ HANDLE CSV UPLOAD WITH FIRESTORE INTEGRATION
   const handleCsvUpload = useCallback(async (e) => {
@@ -807,106 +951,7 @@ export default function Dashboard() {
       setCsvContent(normalizedContent);
     };
     reader.readAsText(file);
-  }, [user, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, fieldMappings, clickStats, saveContactsToFirestore]);
-  
-  // ✅ SAVE CONTACTS TO FIRESTORE ON CSV UPLOAD
-  const saveContactsToFirestore = useCallback(async (contacts, userId) => {
-    if (!userId || contacts.length === 0 || !db) return;
-    
-    try {
-      // Get existing contacts mapping by email/phone
-      const existingContacts = {};
-      const contactsRef = collection(db, 'users', userId, 'contacts');
-      const snapshot = await getDocs(contactsRef);
-      
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        const key = data.email?.toLowerCase().trim() || `phone_${data.phone}`;
-        existingContacts[key] = { id: doc.id, ...data };
-      });
-      
-      // Process each contact from CSV
-      for (const contact of contacts) {
-        const contactKey = contact.email?.toLowerCase().trim() || `phone_${contact.phone}`;
-        const now = new Date();
-        
-        // Prepare contact data for Firestore
-        const contactData = {
-          business: contact.business || '',
-          address: contact.address || '',
-          phone: contact.phone || '',
-          email: contact.email || null,
-          place_id: contact.place_id || '',
-          website: contact.website || '',
-          instagram: contact.instagram || '',
-          twitter: contact.twitter || '',
-          facebook: contact.facebook || '',
-          youtube: contact.youtube || '',
-          tiktok: contact.tiktok || '',
-          linkedin_company: contact.linkedin_company || '',
-          linkedin_ceo: contact.linkedin_ceo || '',
-          linkedin_founder: contact.linkedin_founder || '',
-          contact_page_found: contact.contact_page_found || 'No',
-          social_media_score: contact.social_media_score || '0',
-          email_primary: contact.email_primary || contact.email || '',
-          phone_primary: contact.phone_primary || contact.phone || '',
-          lead_quality_score: contact.lead_quality_score || '0',
-          contact_confidence: contact.contact_confidence || 'Low',
-          best_contact_method: contact.best_contact_method || 'Email',
-          decision_maker_found: contact.decision_maker_found || 'No',
-          tech_stack_detected: contact.tech_stack_detected || '',
-          company_size_indicator: contact.company_size_indicator || 'unknown',
-          lastUpdated: serverTimestamp(),
-          source: 'csv_upload'
-        };
-        
-        // Determine status logic
-        if (existingContacts[contactKey]) {
-          // Existing contact - preserve status unless it's archived
-          const existing = existingContacts[contactKey];
-          if (existing.status !== 'archived') {
-            contactData.status = existing.status;
-            contactData.statusHistory = existing.statusHistory || [];
-            contactData.notes = existing.notes || [];
-            contactData.lastContacted = existing.lastContacted || null;
-          } else {
-            // Reactivate archived contact
-            contactData.status = 'new';
-            contactData.statusHistory = [
-              ...(existing.statusHistory || []),
-              { status: 'archived', timestamp: existing.lastUpdated || now, note: 'Previously archived' },
-              { status: 'new', timestamp: now, note: 'Reactivated via new CSV upload' }
-            ];
-          }
-          contactData.createdAt = existing.createdAt || now;
-          
-          // Update existing document
-          await updateDoc(doc(db, 'users', userId, 'contacts', existing.id), contactData);
-        } else {
-          // New contact - set initial status
-          contactData.status = 'new';
-          contactData.statusHistory = [{
-            status: 'new',
-            timestamp: now,
-            note: 'Imported via CSV upload'
-          }];
-          contactData.notes = [];
-          contactData.createdAt = serverTimestamp();
-          contactData.lastContacted = null;
-          
-          // Create new document
-          await addDoc(contactsRef, contactData);
-        }
-      }
-      
-      // Reload contacts after save
-      await loadContactsFromFirestore(userId);
-      
-    } catch (error) {
-      console.error('Failed to save contacts to Firestore:', error);
-      throw error;
-    }
-  }, [loadContactsFromFirestore]);
+  }, [user, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, fieldMappings, clickStats, db]);
 
   // ✅ SEND SAFETY RULES
   const checkSendSafety = useCallback(() => {
@@ -1198,6 +1243,24 @@ ${senderName}`
       setIsSending(false);
     }
   }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent, setSentEmails]);
+
+  // Auth effect - MOVED AFTER ALL CALLBACK DECLARATIONS
+  useEffect(() => {
+    if (!auth) {
+      setLoadingAuth(false);
+      return;
+    }
+    
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoadingAuth(false);
+      if (user) {
+        setSenderName(user.displayName || 'Team');
+        loadContactsFromFirestore(user.uid);
+      }
+    });
+    return unsubscribe;
+  }, [auth, loadContactsFromFirestore]);
 
   if (loadingAuth) {
     return (
