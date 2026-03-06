@@ -2,35 +2,24 @@
 
 /**
  * ============================================================================
- * SYNDICATE SOLUTIONS - ENTERPRISE B2B GROWTH ENGINE
+ * B2B GROWTH ENGINE - ENTERPRISE DASHBOARD WITH AI INTEGRATION
  * ============================================================================
- * 
- * ARCHITECTURE:
- * 1. Core Business Logic (your original robust codebase)
- * 2. AI Enhancement Layer (graceful degradation)
- * 3. Firebase Integration (client-side only)
- * 4. Enterprise Error Handling
- * 
- * This preserves ALL your original functionality while adding AI as an
- * enhancement layer that can be disabled without breaking anything.
+ * Combines stable authentication with full enterprise functionality
  */
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 
-// Firebase imports - CLIENT-SIDE ONLY INITIALIZATION
+// Firebase imports
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, query, where, getDocs, updateDoc, deleteDoc, orderBy, limit, addDoc, arrayUnion, increment } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 
-// ============================================================================
-// FIREBASE INITIALIZATION - ENTERPRISE GRADE
-// ============================================================================
+// Initialize Firebase with error handling (client-side only)
 let app;
 let db;
 let auth;
 
-// Client-side only Firebase initialization with enterprise error handling
 if (typeof window !== 'undefined') {
   try {
     const firebaseConfig = {
@@ -47,23 +36,20 @@ if (typeof window !== 'undefined') {
       app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
       db = getFirestore(app);
       auth = getAuth(app);
-      console.log('✅ Firebase initialized successfully');
     } else {
-      console.warn('⚠️ Firebase configuration incomplete - running in demo mode');
+      console.warn('Firebase configuration incomplete - using mock services');
       db = null;
       auth = null;
     }
   } catch (error) {
-    console.error('❌ Firebase initialization failed:', error);
+    console.error('Firebase initialization error:', error);
     db = null;
     auth = null;
   }
-} else {
-  console.log('🔄 Firebase initialization deferred to client-side');
 }
 
 // ============================================================================
-// YOUR ORIGINAL BUSINESS TEMPLATES (UNCHANGED)
+// YOUR ACTUAL TEMPLATES & BUSINESS LOGIC
 // ============================================================================
 const DEFAULT_TEMPLATE_A = {
   subject: 'Quick question for {{business_name}}',
@@ -143,7 +129,7 @@ Quick question – are you currently working on any digital work that's delayed 
 Reply YES or NO.`;
 
 // ============================================================================
-// YOUR ORIGINAL CONTACT STATUS WORKFLOW (UNCHANGED)
+// CONTACT STATUS DEFINITIONS (Business-Driven Workflow)
 // ============================================================================
 const CONTACT_STATUSES = [
   { id: 'new', label: '🆕 New Lead', color: 'gray', description: 'Never contacted' },
@@ -176,7 +162,7 @@ const STATUS_TRANSITIONS = {
 };
 
 // ============================================================================
-// YOUR ORIGINAL UTILITY FUNCTIONS (UNCHANGED)
+// UTILITY FUNCTIONS
 // ============================================================================
 function formatForDialing(raw) {
   if (!raw || raw === 'N/A') return null;
@@ -263,129 +249,19 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
   return result;
 };
 
-// Export templates for API use
-export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
-
 // ============================================================================
-// AI ENHANCEMENT LAYER - GRACEFUL DEGRADATION
-// ============================================================================
-class AIEnhancementLayer {
-  constructor() {
-    this.enabled = true;
-    this.fallbackMode = false;
-  }
-
-  async researchCompany(companyName, website) {
-    if (!this.enabled || this.fallbackMode) {
-      return this.getFallbackResearch(companyName);
-    }
-
-    try {
-      // Mock AI research - replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      return {
-        strategy: `Focus on their recent ${companyName} projects and mention how automation could improve their workflow.`,
-        insights: [
-          'Company appears to be growing rapidly',
-          'Likely needs scalable solutions', 
-          'Decision maker seems responsive to innovation'
-        ],
-        approach: 'Direct value proposition with clear ROI',
-        subjectLine: `Innovation opportunity for ${companyName}`,
-        emailTemplate: `Hi {{first_name}},\n\nBased on my research of ${companyName}, I noticed...\n\n[Personalized content based on AI analysis]\n\nBest regards,\n{{sender_name}}`,
-        confidence: 85
-      };
-    } catch (error) {
-      console.warn('AI research failed, using fallback:', error);
-      this.fallbackMode = true;
-      return this.getFallbackResearch(companyName);
-    }
-  }
-
-  getFallbackResearch(companyName) {
-    return {
-      strategy: `Focus on ${companyName}'s business needs and offer tailored solutions`,
-      insights: [
-        'Business likely needs digital optimization',
-        'May benefit from automation solutions',
-        'Consider their specific industry challenges'
-      ],
-      approach: 'Value-first approach with clear benefits',
-      subjectLine: `Quick question for ${companyName}`,
-      emailTemplate: `Hi {{first_name}},\n\nI'm reaching out to ${companyName} because...\n\n[Manual research content]\n\nBest regards,\n{{sender_name}}`,
-      confidence: 60,
-      fallback: true
-    };
-  }
-
-  async generatePredictiveScore(contactData) {
-    if (!this.enabled || this.fallbackMode) {
-      return this.getFallbackScore(contactData);
-    }
-
-    try {
-      // Mock predictive scoring
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const score = Math.floor(Math.random() * 40) + 60; // 60-100 range
-      return {
-        score,
-        replyProbability: Math.floor(Math.random() * 30) + 70, // 70-100%
-        recommendedAction: score > 80 ? 'Contact immediately' : 'Wait for optimal time',
-        confidence: 75
-      };
-    } catch (error) {
-      console.warn('Predictive scoring failed, using fallback:', error);
-      return this.getFallbackScore(contactData);
-    }
-  }
-
-  getFallbackScore(contactData) {
-    const score = contactData.email ? 70 : 50;
-    return {
-      score,
-      replyProbability: 65,
-      recommendedAction: 'Standard outreach sequence',
-      confidence: 50,
-      fallback: true
-    };
-  }
-
-  enable() {
-    this.enabled = true;
-    this.fallbackMode = false;
-  }
-
-  disable() {
-    this.enabled = false;
-  }
-
-  getStatus() {
-    return {
-      enabled: this.enabled,
-      fallbackMode: this.fallbackMode,
-      status: this.enabled ? (this.fallbackMode ? '⚠️ Degraded' : '✅ Active') : '❌ Disabled'
-    };
-  }
-}
-
-// ============================================================================
-// MAIN DASHBOARD COMPONENT - ENTERPRISE ARCHITECTURE
+// MAIN DASHBOARD COMPONENT
 // ============================================================================
 export default function Dashboard() {
-  // Component refs for cleanup
-  const mountedRef = useRef(true);
-  const aiLayerRef = useRef(new AIEnhancementLayer());
-
-  // AUTHENTICATION STATE
+  // AUTH & NAVIGATION STATE
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [authError, setAuthError] = useState(null);
   const router = useRouter();
   const pathname = usePathname();
+  const mountedRef = useRef(true);
 
-  // YOUR ORIGINAL CORE STATE (PRESERVED)
+  // CORE FUNCTIONALITY STATE
   const [csvContent, setCsvContent] = useState('');
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [senderName, setSenderName] = useState('Dulran Samarasinghe');
@@ -394,6 +270,13 @@ export default function Dashboard() {
   const [templateB, setTemplateB] = useState(DEFAULT_TEMPLATE_B);
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [smsTemplate, setSmsTemplate] = useState(DEFAULT_SMS_TEMPLATE);
+  const [instagramTemplate, setInstagramTemplate] = useState(`Hi {{business_name}} 👋
+I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
+Would you be open to a quick chat about how we can help?
+No pressure at all.`);
+  const [twitterTemplate, setTwitterTemplate] = useState(`Hi {{business_name}} 👋
+I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
+Would you be open to a quick chat?`);
   const [fieldMappings, setFieldMappings] = useState({});
   const [previewRecipient, setPreviewRecipient] = useState(null);
   const [validEmails, setValidEmails] = useState(0);
@@ -411,7 +294,7 @@ export default function Dashboard() {
   const [smsConsent, setSmsConsent] = useState(true);
   const [abResults, setAbResults] = useState({ a: { opens: 0, clicks: 0, sent: 0 }, b: { opens: 0, clicks: 0, sent: 0 } });
 
-  // YOUR ORIGINAL CONTACT MANAGEMENT STATE (PRESERVED)
+  // CONTACT STATUS MANAGEMENT STATE
   const [contactStatuses, setContactStatuses] = useState({});
   const [statusHistory, setStatusHistory] = useState({});
   const [statusFilter, setStatusFilter] = useState('all');
@@ -421,39 +304,19 @@ export default function Dashboard() {
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [archivedContactsCount, setArchivedContactsCount] = useState(0);
 
-  // YOUR ORIGINAL FOLLOW-UP STATE (PRESERVED)
-  const [repliedLeads, setRepliedLeads] = useState({});
-  const [followUpLeads, setFollowUpLeads] = useState({});
-  const [showFollowUpModal, setShowFollowUpModal] = useState(false);
-  const [sentLeads, setSentLeads] = useState([]);
-  const [loadingSentLeads, setLoadingSentLeads] = useState(false);
-  const [followUpHistory, setFollowUpHistory] = useState({});
-  const [followUpFilter, setFollowUpFilter] = useState('all');
-  const [followUpStats, setFollowUpStats] = useState({
-    totalSent: 0,
-    totalReplied: 0,
-    readyForFollowUp: 0,
-    alreadyFollowedUp: 0,
-    awaitingReply: 0,
-    interestedLeads: 0
-  });
+  // AI FEATURES STATE (Graceful degradation)
+  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
+  const [researchingCompany, setResearchingCompany] = useState(null);
+  const [researchResults, setResearchResults] = useState({});
+  const [showResearchModal, setShowResearchModal] = useState(false);
+  const [interestedLeadsList, setInterestedLeadsList] = useState([]);
+  const [sendTimeOptimization, setSendTimeOptimization] = useState(null);
+  const [predictiveScores, setPredictiveScores] = useState({});
+  const [sentimentAnalysis, setSentimentAnalysis] = useState({});
+  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
+  const [smartFollowUpSuggestions, setSmartFollowUpSuggestions] = useState({});
 
-  // YOUR ORIGINAL ADVANCED FEATURES STATE (PRESERVED)
-  const [dailyEmailCount, setDailyEmailCount] = useState(0);
-  const [loadingDailyCount, setLoadingDailyCount] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [contactFilter, setContactFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('score');
-  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
-  const [instagramTemplate, setInstagramTemplate] = useState(`Hi {{business_name}} 👋
-I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
-Would you be open to a quick chat about how we can help?
-No pressure at all.`);
-  const [twitterTemplate, setTwitterTemplate] = useState(`Hi {{business_name}} 👋
-I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
-Would you be open to a quick chat?`);
-
-  // YOUR ORIGINAL FOLLOW-UP TEMPLATES (PRESERVED)
+  // ENHANCED FOLLOW-UP OPTIONS
   const [followUpTemplates, setFollowUpTemplates] = useState([
     {
       id: 'followup_1',
@@ -484,33 +347,18 @@ Would you be open to a quick chat?`);
     }
   ]);
 
-  // AI ENHANCEMENT STATE (NEW LAYER)
-  const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
-  const [researchingCompany, setResearchingCompany] = useState(null);
-  const [researchResults, setResearchResults] = useState({});
-  const [showResearchModal, setShowResearchModal] = useState(false);
-  const [interestedLeadsList, setInterestedLeadsList] = useState([]);
-  const [predictiveScores, setPredictiveScores] = useState({});
-  const [sentimentAnalysis, setSentimentAnalysis] = useState({});
-  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
-  const [smartFollowUpSuggestions, setSmartFollowUpSuggestions] = useState({});
-
   // UI STATE
   const [activeTab, setActiveTab] = useState('outreach');
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [contactFilter, setContactFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('score');
+  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
 
-  // ============================================================================
-  // AUTHENTICATION FUNCTIONS (ENTERPRISE GRADE)
-  // ============================================================================
+  // AUTHENTICATION FUNCTIONS
   const signInWithGoogle = async () => {
     if (!auth) {
-      setAuthError('Firebase Auth not available - running in demo mode');
-      // Demo mode - create mock user
-      setUser({
-        uid: 'demo-user',
-        email: 'demo@syndicatesolutions.com',
-        displayName: 'Demo User'
-      });
+      setAuthError('Firebase Auth not available');
       return;
     }
 
@@ -518,40 +366,80 @@ Would you be open to a quick chat?`);
       setAuthError(null);
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      console.log('✅ User signed in:', result.user.email);
+      console.log('User signed in:', result.user);
     } catch (error) {
-      console.error('❌ Sign-in error:', error);
+      console.error('Sign-in error:', error);
       setAuthError(error.message);
     }
   };
 
   const handleSignOut = async () => {
-    if (!auth) {
-      setUser(null);
-      setAuthError(null);
-      return;
-    }
+    if (!auth) return;
 
     try {
       await signOut(auth);
       setUser(null);
       setAuthError(null);
-      console.log('✅ User signed out');
     } catch (error) {
-      console.error('❌ Sign-out error:', error);
+      console.error('Sign-out error:', error);
       setAuthError(error.message);
     }
   };
 
-  // ============================================================================
-  // YOUR ORIGINAL FIRESTORE FUNCTIONS (PRESERVED)
-  // ============================================================================
-  const loadContactsFromFirestore = useCallback(async (userId) => {
-    if (!userId || !db) {
-      console.warn('Firestore not available - using demo mode');
-      return;
+  // Load settings from Firestore
+  const loadSettings = async (userId) => {
+    if (!mountedRef.current || !db) return;
+
+    try {
+      const docRef = doc(db, 'users', userId, 'settings', 'templates');
+      const snap = await getDoc(docRef);
+
+      if (snap.exists() && mountedRef.current) {
+        const data = snap.data();
+        setSenderName(data.senderName || 'Dulran Samarasinghe');
+        setTemplateA(data.templateA || DEFAULT_TEMPLATE_A);
+        setTemplateB(data.templateB || DEFAULT_TEMPLATE_B);
+        setWhatsappTemplate(data.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE);
+        setSmsTemplate(data.smsTemplate || DEFAULT_SMS_TEMPLATE);
+        setInstagramTemplate(data.instagramTemplate || instagramTemplate);
+        setTwitterTemplate(data.twitterTemplate || twitterTemplate);
+        setAbTestMode(data.abTestMode || false);
+        setSmsConsent(data.smsConsent !== false);
+      }
+    } catch (error) {
+      console.warn('Failed to load settings:', error);
     }
-    
+  };
+
+  // Save settings to Firestore
+  const saveSettings = useCallback(async () => {
+    if (!user?.uid || !mountedRef.current || !db) return;
+
+    try {
+      const docRef = doc(db, 'users', user.uid, 'settings', 'templates');
+      await setDoc(docRef, {
+        senderName,
+        templateA,
+        templateB,
+        whatsappTemplate,
+        smsTemplate,
+        instagramTemplate,
+        twitterTemplate,
+        abTestMode,
+        smsConsent,
+        lastUpdated: serverTimestamp()
+      });
+      setStatus('Settings saved successfully!');
+      setTimeout(() => setStatus(''), 3000);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      setStatus('Failed to save settings');
+    }
+  }, [user?.uid, senderName, templateA, templateB, whatsappTemplate, smsTemplate, instagramTemplate, twitterTemplate, abTestMode, smsConsent]);
+
+  // LOAD CONTACTS FROM FIRESTORE
+  const loadContactsFromFirestore = useCallback(async (userId) => {
+    if (!userId || !db) return;
     setLoadingContacts(true);
     try {
       const contactsRef = collection(db, 'users', userId, 'contacts');
@@ -613,9 +501,9 @@ Would you be open to a quick chat?`);
       setStatusHistory(history);
       
     } catch (error) {
-      console.error('❌ Failed to load contacts from Firestore:', error);
+      console.error('Failed to load contacts from Firestore:', error);
       if (mountedRef.current) {
-        setStatus('Failed to load contact database. Running in demo mode.');
+        setStatus('Failed to load contact database. Check console for details.');
       }
     } finally {
       if (mountedRef.current) {
@@ -624,15 +512,11 @@ Would you be open to a quick chat?`);
     }
   }, [fieldMappings, senderName, whatsappTemplate]);
 
+  // UPDATE CONTACT STATUS
   const updateContactStatus = useCallback(async (contactId, newStatus, note = '') => {
     if (!user?.uid || !contactId || !newStatus || !db) {
-      console.warn('Firestore not available - status update simulated');
-      // Simulate status update in local state
-      if (mountedRef.current) {
-        setContactStatuses(prev => ({ ...prev, [contactId]: newStatus }));
-        setStatus(`✅ Status updated to ${newStatus} (demo mode)`);
-      }
-      return true;
+      console.warn('Missing required data for status update');
+      return false;
     }
     
     const currentStatus = contactStatuses[contactId] || 'new';
@@ -640,7 +524,7 @@ Would you be open to a quick chat?`);
         !STATUS_TRANSITIONS[currentStatus]?.includes(newStatus) &&
         currentStatus !== 'archived') {
       const validTransitions = STATUS_TRANSITIONS[currentStatus] || [];
-      console.warn(`⚠️ Invalid status transition: ${currentStatus} -> ${newStatus}. Valid:`, validTransitions);
+      console.warn(`Invalid status transition: ${currentStatus} -> ${newStatus}. Valid:`, validTransitions);
       if (mountedRef.current) {
         alert(`Cannot change status from "${currentStatus}" to "${newStatus}".\nValid next statuses: ${validTransitions.join(', ') || 'none'}`);
       }
@@ -670,7 +554,7 @@ Would you be open to a quick chat?`);
       }
       
       if (!contactDocRef) {
-        console.error('❌ Contact not found in Firestore:', contactId);
+        console.error('Contact not found in Firestore:', contactId);
         if (mountedRef.current) {
           alert('Contact not found in database. Please refresh and try again.');
         }
@@ -723,7 +607,7 @@ Would you be open to a quick chat?`);
       return true;
       
     } catch (error) {
-      console.error('❌ Failed to update contact status:', error);
+      console.error('Failed to update contact status:', error);
       if (mountedRef.current) {
         alert(`Failed to update status: ${error.message}`);
       }
@@ -731,9 +615,7 @@ Would you be open to a quick chat?`);
     }
   }, [user, contactStatuses, whatsappLinks]);
 
-  // ============================================================================
-  // YOUR ORIGINAL CSV PROCESSING (PRESERVED)
-  // ============================================================================
+  // CSV PROCESSING
   const processCSV = (text) => {
     const lines = text.trim().split('\n');
     if (lines.length < 2) return;
@@ -785,6 +667,7 @@ Would you be open to a quick chat?`);
     setFieldMappings(initialMappings);
   };
 
+  // HANDLE CSV UPLOAD
   const handleCsvUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -801,70 +684,84 @@ Would you be open to a quick chat?`);
     reader.readAsText(file);
   }, [templateA, templateB, whatsappTemplate, smsTemplate]);
 
-  // ============================================================================
-  // AI ENHANCEMENT FUNCTIONS (NEW LAYER)
-  // ============================================================================
+  // AI FEATURE WRAPPERS (Graceful degradation)
   const handleAIResearch = async (contact) => {
     if (!aiFeaturesEnabled) {
-      setStatus('⚠️ AI features are disabled. Use manual research mode.');
+      setStatus('AI features are currently disabled. Using manual mode.');
       return;
     }
-
+    
     try {
       setResearchingCompany(contact.email);
-      setStatus('🧠 Researching company with AI...');
+      setStatus('🧠 Researching company...');
       
-      const aiLayer = aiLayerRef.current;
-      const results = await aiLayer.researchCompany(contact.business, contact.website);
+      // Mock AI research - replace with actual API call
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const mockResults = {
+        strategy: `Focus on their recent ${contact.business} projects and mention how automation could improve their workflow.`,
+        insights: [
+          'Company appears to be growing rapidly',
+          'Likely needs scalable solutions',
+          'Decision maker seems responsive to innovation'
+        ],
+        approach: 'Direct value proposition with clear ROI',
+        subjectLine: `Innovation opportunity for ${contact.business}`,
+        emailTemplate: `Hi {{first_name}},\n\nBased on my research of ${contact.business}, I noticed...\n\n[Personalized content based on AI analysis]\n\nBest regards,\n${senderName}`
+      };
       
       setResearchResults(prev => ({
         ...prev,
-        [contact.email]: results
+        [contact.email]: mockResults
       }));
       
-      const aiStatus = aiLayer.getStatus();
-      setStatus(`✅ AI Research complete! (${aiStatus.status})`);
+      setStatus('✅ Research completed successfully!');
       setShowResearchModal(true);
       
     } catch (error) {
-      console.error('❌ AI Research error:', error);
-      setStatus('❌ AI research failed. Please use manual research.');
+      console.error('AI Research error:', error);
+      setStatus('❌ AI research failed. Please try manual research.');
       setAiFeaturesEnabled(false); // Disable AI on failure
     } finally {
       setResearchingCompany(null);
     }
   };
 
-  const handlePredictiveScoring = async () => {
-    if (!aiFeaturesEnabled) {
-      setStatus('⚠️ AI features are disabled. Using manual scoring.');
+  // Auth state monitoring
+  useEffect(() => {
+    if (!auth) {
+      console.warn('Auth not available - skipping auth state monitoring');
+      setLoadingAuth(false);
       return;
     }
 
-    try {
-      setStatus('🔮 Generating predictive scores...');
-      const aiLayer = aiLayerRef.current;
-      const newScores = {};
-      
-      for (const contact of whatsappLinks.slice(0, 10)) {
-        if (contact.email) {
-          const score = await aiLayer.generatePredictiveScore(contact);
-          newScores[contact.email] = score;
-        }
-      }
-      
-      setPredictiveScores(prev => ({ ...prev, ...newScores }));
-      setStatus('✅ Predictive scoring completed!');
-      
-    } catch (error) {
-      console.error('❌ Predictive scoring error:', error);
-      setStatus('❌ Predictive scoring failed. Using manual scoring.');
-    }
-  };
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      if (!mountedRef.current) return;
 
-  // ============================================================================
-  // YOUR ORIGINAL FILTERING FUNCTIONS (PRESERVED)
-  // ============================================================================
+      if (currentUser) {
+        setUser(currentUser);
+        loadSettings(currentUser.uid);
+        loadContactsFromFirestore(currentUser.uid);
+      } else {
+        setUser(null);
+      }
+      setLoadingAuth(false);
+    });
+
+    return () => {
+      unsubscribe();
+      mountedRef.current = false;
+    };
+  }, [loadContactsFromFirestore, loadSettings]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Filter contacts
   const getFilteredContacts = useCallback(() => {
     let filtered = [...whatsappLinks];
     
@@ -898,54 +795,7 @@ Would you be open to a quick chat?`);
     return filtered;
   }, [whatsappLinks, searchQuery, statusFilter, contactFilter, sortBy]);
 
-  // ============================================================================
-  // AUTH STATE MONITORING (ENTERPRISE GRADE)
-  // ============================================================================
-  useEffect(() => {
-    if (!auth) {
-      console.warn('⚠️ Auth not available - running in demo mode');
-      setLoadingAuth(false);
-      // Auto-login in demo mode
-      setTimeout(() => {
-        if (mountedRef.current) {
-          setUser({
-            uid: 'demo-user',
-            email: 'demo@syndicatesolutions.com',
-            displayName: 'Demo User'
-          });
-        }
-      }, 1000);
-      return;
-    }
-
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      if (!mountedRef.current) return;
-
-      if (currentUser) {
-        setUser(currentUser);
-        loadContactsFromFirestore(currentUser.uid);
-      } else {
-        setUser(null);
-      }
-      setLoadingAuth(false);
-    });
-
-    return () => {
-      unsubscribe();
-      mountedRef.current = false;
-    };
-  }, [loadContactsFromFirestore]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // ============================================================================
-  // UI COMPONENTS (PRESERVED + ENHANCED)
-  // ============================================================================
+  // Status Badge Component
   const StatusBadge = ({ status, small = false }) => {
     const statusInfo = CONTACT_STATUSES.find(s => s.id === status) || CONTACT_STATUSES[0];
     const sizeClasses = small ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm';
@@ -969,6 +819,7 @@ Would you be open to a quick chat?`);
     );
   };
 
+  // Status Dropdown Component
   const StatusDropdown = ({ contact, compact = false }) => {
     const currentStatus = contact.status || 'new';
     const statusInfo = CONTACT_STATUSES.find(s => s.id === currentStatus) || CONTACT_STATUSES[0];
@@ -998,15 +849,12 @@ Would you be open to a quick chat?`);
     );
   };
 
-  // ============================================================================
-  // RENDER METHOD (ENTERPRISE ARCHITECTURE)
-  // ============================================================================
   if (loadingAuth) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <div>Loading Syndicate Solutions Dashboard...</div>
+          <div>Loading Dashboard...</div>
         </div>
       </div>
     );
@@ -1017,8 +865,8 @@ Would you be open to a quick chat?`);
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="max-w-md w-full mx-auto p-6 bg-gray-800 rounded-lg shadow-lg">
           <div className="text-center">
-            <h1 className="text-2xl font-bold mb-4">Syndicate Solutions</h1>
-            <p className="text-gray-400 mb-6">B2B Growth Engine - Enterprise Dashboard</p>
+            <h1 className="text-2xl font-bold mb-4">Welcome to Auto-Leads</h1>
+            <p className="text-gray-400 mb-6">Please sign in to access your dashboard</p>
             
             {authError && (
               <div className="mb-4 p-3 bg-red-900/50 border border-red-500 rounded-lg text-red-200 text-sm">
@@ -1028,7 +876,8 @@ Would you be open to a quick chat?`);
 
             <button
               onClick={signInWithGoogle}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center gap-2"
+              disabled={!auth}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition duration-200 flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -1036,12 +885,14 @@ Would you be open to a quick chat?`);
                 <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                 <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
-              Sign In with Google
+              Sign in with Google
             </button>
 
-            <div className="mt-4 text-xs text-gray-500">
-              {!auth ? 'Demo mode: Firebase not configured' : 'Enterprise-grade authentication'}
-            </div>
+            {!auth && (
+              <div className="mt-4 text-sm text-gray-400">
+                Firebase is not properly configured. Please check your environment variables.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1056,15 +907,12 @@ Would you be open to a quick chat?`);
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold">Syndicate Solutions Dashboard</h1>
-              <p className="text-gray-400 text-sm">B2B Growth Engine - Enterprise Edition</p>
+              <p className="text-gray-400 text-sm">B2B Growth Engine</p>
             </div>
             <div className="flex items-center gap-4">
-              <div className="text-right">
-                <div className="text-sm text-gray-300">{user.displayName || user.email}</div>
-                <div className="text-xs text-gray-500">
-                  {db ? '🟢 Firebase Connected' : '🟡 Demo Mode'}
-                </div>
-              </div>
+              <span className="text-sm text-gray-300">
+                Welcome, {user.displayName || user.email}
+              </span>
               <button
                 onClick={handleSignOut}
                 className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-200"
@@ -1080,7 +928,7 @@ Would you be open to a quick chat?`);
       <div className="container mx-auto px-6 py-6">
         {/* Navigation Tabs */}
         <div className="flex space-x-1 mb-6 border-b border-gray-700">
-          {['outreach', 'contacts', 'ai-features', 'analytics', 'settings'].map((tab) => (
+          {['outreach', 'analytics', 'ai-features', 'settings'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1113,10 +961,8 @@ Would you be open to a quick chat?`);
                 <p className="text-2xl font-bold">{whatsappLinks.length}</p>
               </div>
               <div className="bg-gray-800 p-4 rounded-lg">
-                <h3 className="text-sm font-medium text-gray-400 mb-1">AI Status</h3>
-                <p className="text-2xl font-bold">
-                  {aiLayerRef.current.getStatus().status.split(' ')[0]}
-                </p>
+                <h3 className="text-sm font-medium text-gray-400 mb-1">Active Campaigns</h3>
+                <p className="text-2xl font-bold">{abTestMode ? '2' : '1'}</p>
               </div>
             </div>
 
@@ -1155,6 +1001,12 @@ Would you be open to a quick chat?`);
                     />
                     <span className="text-sm">A/B Test Mode</span>
                   </label>
+                  <button
+                    onClick={saveSettings}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition duration-200"
+                  >
+                    Save Settings
+                  </button>
                 </div>
               </div>
 
@@ -1273,10 +1125,7 @@ Would you be open to a quick chat?`);
                 </button>
                 {status && (
                   <div className={`p-3 rounded-lg text-sm ${
-                    status.includes('success') || status.includes('✅') ? 'bg-green-900/50 text-green-200' : 
-                    status.includes('⚠️') ? 'bg-amber-900/50 text-amber-200' :
-                    status.includes('❌') ? 'bg-red-900/50 text-red-200' :
-                    'bg-blue-900/50 text-blue-200'
+                    status.includes('success') ? 'bg-green-900/50 text-green-200' : 'bg-blue-900/50 text-blue-200'
                   }`}>
                     {status}
                   </div>
@@ -1286,114 +1135,48 @@ Would you be open to a quick chat?`);
           </div>
         )}
 
-        {activeTab === 'contacts' && (
+        {activeTab === 'analytics' && (
           <div className="space-y-6">
             <div className="bg-gray-800 p-6 rounded-lg">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">Contact Management</h2>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    placeholder="Search contacts..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 text-sm"
-                  />
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm"
-                  >
-                    <option value="all">All Statuses</option>
-                    {CONTACT_STATUSES.map(status => (
-                      <option key={status.id} value={status.id}>
-                        {status.label}
-                      </option>
-                    ))}
-                  </select>
+              <h2 className="text-xl font-semibold mb-4">Campaign Analytics</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-lg font-medium mb-3">A/B Test Results</h3>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                      <span className="text-blue-400">Template A</span>
+                      <div className="text-sm">
+                        <span>Sent: {abResults.a.sent}</span>
+                        <span className="ml-4">Opens: {abResults.a.opens}</span>
+                        <span className="ml-4">Clicks: {abResults.a.clicks}</span>
+                      </div>
+                    </div>
+                    {abTestMode && (
+                      <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span className="text-green-400">Template B</span>
+                        <div className="text-sm">
+                          <span>Sent: {abResults.b.sent}</span>
+                          <span className="ml-4">Opens: {abResults.b.opens}</span>
+                          <span className="ml-4">Clicks: {abResults.b.clicks}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium mb-3">Performance Metrics</h3>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between p-2 bg-gray-700 rounded">
+                      <span>Open Rate</span>
+                      <span>{abResults.a.sent > 0 ? ((abResults.a.opens / abResults.a.sent) * 100).toFixed(1) : 0}%</span>
+                    </div>
+                    <div className="flex justify-between p-2 bg-gray-700 rounded">
+                      <span>Click Rate</span>
+                      <span>{abResults.a.opens > 0 ? ((abResults.a.clicks / abResults.a.opens) * 100).toFixed(1) : 0}%</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              {whatsappLinks.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
-                  <div className="text-4xl mb-2">📥</div>
-                  <p>No contacts imported yet</p>
-                  <p className="text-sm mt-1">Upload a CSV file to get started</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-700">
-                        <th className="text-left py-3 px-4">Business</th>
-                        <th className="text-left py-3 px-4">Contact</th>
-                        <th className="text-left py-3 px-4">Status</th>
-                        <th className="text-left py-3 px-4">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {getFilteredContacts().slice(0, 10).map((contact) => (
-                        <tr key={contact.id} className="border-b border-gray-700">
-                          <td className="py-3 px-4">
-                            <div className="font-medium">{contact.business}</div>
-                            {contact.website && (
-                              <a
-                                href={contact.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-400 hover:text-blue-300 text-xs"
-                              >
-                                Visit Website
-                              </a>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            {contact.email && (
-                              <div className="text-gray-300">{contact.email}</div>
-                            )}
-                            {contact.phone && (
-                              <div className="text-gray-400">+{contact.phone}</div>
-                            )}
-                          </td>
-                          <td className="py-3 px-4">
-                            <StatusBadge status={contact.status} small />
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex gap-2">
-                              {contact.email && (
-                                <a
-                                  href={`mailto:${contact.email}`}
-                                  className="px-2 py-1 bg-purple-700 hover:bg-purple-600 text-white rounded text-xs transition"
-                                >
-                                  Email
-                                </a>
-                              )}
-                              {contact.phone && (
-                                <a
-                                  href={contact.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2 py-1 bg-green-700 hover:bg-green-600 text-white rounded text-xs transition"
-                                >
-                                  WhatsApp
-                                </a>
-                              )}
-                              <button
-                                onClick={() => handleAIResearch(contact)}
-                                disabled={!aiFeaturesEnabled}
-                                className="px-2 py-1 bg-indigo-700 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded text-xs transition"
-                                title="AI Research"
-                              >
-                                🧠
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
             </div>
           </div>
         )}
@@ -1402,22 +1185,15 @@ Would you be open to a quick chat?`);
           <div className="space-y-6">
             <div className="bg-gray-800 p-6 rounded-lg">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-semibold">AI Enhancement Layer</h2>
+                <h2 className="text-xl font-semibold">AI Features</h2>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 rounded text-xs font-medium ${
                     aiFeaturesEnabled ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'
                   }`}>
-                    {aiLayerRef.current.getStatus().status}
+                    {aiFeaturesEnabled ? '✅ AI Enabled' : '❌ AI Disabled'}
                   </span>
                   <button
-                    onClick={() => {
-                      setAiFeaturesEnabled(!aiFeaturesEnabled);
-                      if (aiFeaturesEnabled) {
-                        aiLayerRef.current.disable();
-                      } else {
-                        aiLayerRef.current.enable();
-                      }
-                    }}
+                    onClick={() => setAiFeaturesEnabled(!aiFeaturesEnabled)}
                     className={`px-3 py-1 rounded text-sm font-medium transition ${
                       aiFeaturesEnabled 
                         ? 'bg-red-700 hover:bg-red-600 text-white' 
@@ -1433,8 +1209,8 @@ Would you be open to a quick chat?`);
                 <div className="bg-amber-900/20 border border-amber-800 rounded-lg p-4 mb-4">
                   <h3 className="text-amber-300 font-medium mb-2">⚠️ AI Features Disabled</h3>
                   <p className="text-amber-200 text-sm">
-                    AI features are currently disabled. All manual features continue to work normally. 
-                    Enable AI to access company research, predictive scoring, and smart follow-ups.
+                    AI features are currently disabled. You can continue using all manual features, and enable AI when ready.
+                    The system will gracefully fallback to manual mode if AI services are unavailable.
                   </p>
                 </div>
               )}
@@ -1462,8 +1238,14 @@ Would you be open to a quick chat?`);
                   <h3 className="font-medium mb-2 text-purple-400">🔮 Predictive Scoring</h3>
                   <p className="text-gray-300 text-sm mb-3">AI predicts lead conversion probability</p>
                   <button
-                    onClick={handlePredictiveScoring}
-                    disabled={!aiFeaturesEnabled || whatsappLinks.length === 0}
+                    onClick={() => {
+                      if (!aiFeaturesEnabled) {
+                        setStatus('Enable AI features to use predictive scoring');
+                        return;
+                      }
+                      setStatus('Predictive scoring coming soon...');
+                    }}
+                    disabled={!aiFeaturesEnabled}
                     className="w-full py-2 bg-purple-700 hover:bg-purple-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded text-sm transition"
                   >
                     Score All Leads
@@ -1540,52 +1322,6 @@ Would you be open to a quick chat?`);
           </div>
         )}
 
-        {activeTab === 'analytics' && (
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-semibold mb-4">Campaign Analytics</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-lg font-medium mb-3">A/B Test Results</h3>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                      <span className="text-blue-400">Template A</span>
-                      <div className="text-sm">
-                        <span>Sent: {abResults.a.sent}</span>
-                        <span className="ml-4">Opens: {abResults.a.opens}</span>
-                        <span className="ml-4">Clicks: {abResults.a.clicks}</span>
-                      </div>
-                    </div>
-                    {abTestMode && (
-                      <div className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                        <span className="text-green-400">Template B</span>
-                        <div className="text-sm">
-                          <span>Sent: {abResults.b.sent}</span>
-                          <span className="ml-4">Opens: {abResults.b.opens}</span>
-                          <span className="ml-4">Clicks: {abResults.b.clicks}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium mb-3">Performance Metrics</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between p-2 bg-gray-700 rounded">
-                      <span>Open Rate</span>
-                      <span>{abResults.a.sent > 0 ? ((abResults.a.opens / abResults.a.sent) * 100).toFixed(1) : 0}%</span>
-                    </div>
-                    <div className="flex justify-between p-2 bg-gray-700 rounded">
-                      <span>Click Rate</span>
-                      <span>{abResults.a.opens > 0 ? ((abResults.a.clicks / abResults.a.opens) * 100).toFixed(1) : 0}%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
         {activeTab === 'settings' && (
           <div className="space-y-6">
             <div className="bg-gray-800 p-6 rounded-lg">
@@ -1596,7 +1332,7 @@ Would you be open to a quick chat?`);
                   <div className="space-y-2 text-sm">
                     <div><strong>Email:</strong> {user.email}</div>
                     {user.displayName && <div><strong>Name:</strong> {user.displayName}</div>}
-                    <div className="text-green-400">✓ Authentication active</div>
+                    {user.emailVerified && <div className="text-green-400">✓ Email verified</div>}
                   </div>
                 </div>
                 <div>
@@ -1629,33 +1365,134 @@ Would you be open to a quick chat?`);
                       <input
                         type="checkbox"
                         checked={aiFeaturesEnabled}
-                        onChange={(e) => {
-                          setAiFeaturesEnabled(e.target.checked);
-                          if (e.target.checked) {
-                            aiLayerRef.current.enable();
-                          } else {
-                            aiLayerRef.current.disable();
-                          }
-                        }}
+                        onChange={(e) => setAiFeaturesEnabled(e.target.checked)}
                         className="rounded"
                       />
                       <span>Enable AI features (experimental)</span>
                     </label>
                     <p className="text-sm text-gray-400">
                       AI features include company research, predictive scoring, and smart follow-ups. 
-                      Manual features always work even if AI is disabled.
+                      Manual features will always work even if AI is disabled.
                     </p>
                   </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-medium mb-2">System Status</h3>
-                  <div className="space-y-2 text-sm">
-                    <div><strong>Firebase:</strong> {db ? '🟢 Connected' : '🟡 Demo Mode'}</div>
-                    <div><strong>AI Layer:</strong> {aiLayerRef.current.getStatus().status}</div>
-                    <div><strong>Authentication:</strong> 🟢 Active</div>
-                  </div>
+                <button
+                  onClick={saveSettings}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition duration-200"
+                >
+                  Save All Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Contacts Management */}
+        {(activeTab === 'outreach' || activeTab === 'analytics') && whatsappLinks.length > 0 && (
+          <div className="space-y-6">
+            <div className="bg-gray-800 p-6 rounded-lg">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Contact Management</h2>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Search contacts..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 text-sm"
+                  />
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white text-sm"
+                  >
+                    <option value="all">All Statuses</option>
+                    {CONTACT_STATUSES.map(status => (
+                      <option key={status.id} value={status.id}>
+                        {status.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="text-left py-3 px-4">Business</th>
+                      <th className="text-left py-3 px-4">Contact</th>
+                      <th className="text-left py-3 px-4">Status</th>
+                      <th className="text-left py-3 px-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getFilteredContacts().slice(0, 10).map((contact) => (
+                      <tr key={contact.id} className="border-b border-gray-700">
+                        <td className="py-3 px-4">
+                          <div className="font-medium">{contact.business}</div>
+                          {contact.website && (
+                            <a
+                              href={contact.website}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 text-xs"
+                            >
+                              Visit Website
+                            </a>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          {contact.email && (
+                            <div className="text-gray-300">{contact.email}</div>
+                          )}
+                          {contact.phone && (
+                            <div className="text-gray-400">+{contact.phone}</div>
+                          )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <StatusBadge status={contact.status} small />
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            {contact.email && (
+                              <a
+                                href={`mailto:${contact.email}`}
+                                className="px-2 py-1 bg-purple-700 hover:bg-purple-600 text-white rounded text-xs transition"
+                              >
+                                Email
+                              </a>
+                            )}
+                            {contact.phone && (
+                              <a
+                                href={contact.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2 py-1 bg-green-700 hover:bg-green-600 text-white rounded text-xs transition"
+                              >
+                                WhatsApp
+                              </a>
+                            )}
+                            <button
+                              onClick={() => handleAIResearch(contact)}
+                              disabled={!aiFeaturesEnabled}
+                              className="px-2 py-1 bg-indigo-700 hover:bg-indigo-600 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded text-xs transition"
+                            >
+                              AI Research
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {getFilteredContacts().length > 10 && (
+                <div className="text-center py-4 text-gray-400">
+                  Showing 10 of {getFilteredContacts().length} contacts
+                </div>
+              )}
             </div>
           </div>
         )}
