@@ -418,7 +418,7 @@ export default function Dashboard() {
   const [sendSafety, setSendSafety] = useState({ maxPerDay: 50, currentDaySent: 0, paused: false });
   
   // ✅ KPI State
-  const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
+  const [kpis, setKpis] = useState({ sent: 0, replies: 0, Meetings: 0, bounces: 0, opens: 0, clicks: 0 });
   const [activeTab, setActiveTab] = useState('targets');
 
   // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH - FIXED DEPENDENCIES
@@ -1385,7 +1385,7 @@ ${senderName}`
               <p className="text-blue-300 text-sm font-medium">Sent</p>
               <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
                 <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
                 </svg>
               </div>
             </div>
@@ -1399,7 +1399,7 @@ ${senderName}`
               <p className="text-green-300 text-sm font-medium">Replies</p>
               <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
                 <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 1.664-1.344 3.015-3 3.015s3 .664 3 3.015 3 3.015c0-1.398.884-2.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7c0-.6.398-.884-1.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 1.664-1.344 3.015-3 3.015s3 .664 3 3.015 3 3.015c0-1.398.884-2.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7c0-.6.398-.884-1.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7z" />
                 </svg>
               </div>
             </div>
@@ -1415,7 +1415,7 @@ ${senderName}`
               <p className="text-purple-300 text-sm font-medium">Meetings</p>
               <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
                 <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4z" />
                 </svg>
               </div>
             </div>
@@ -1431,7 +1431,7 @@ ${senderName}`
               <p className="text-red-300 text-sm font-medium">Bounces</p>
               <div className="w-8 h-8 bg-red-500/20 rounded-full flex items-center justify-center">
                 <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
             </div>
@@ -1460,22 +1460,22 @@ ${senderName}`
               <span className="flex items-center justify-center space-x-2">
                 {tab === 'targets' && (
                   <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3 3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3 3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
                   </svg>
                 )}
                 {tab === 'templates' && (
                   <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2z" />
                   </svg>
                 )}
                 {tab === 'send' && (
                   <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
                   </svg>
                 )}
                 {tab === 'analytics' && (
                   <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 00-2 2H8a2 2 0 00-2 2v4a2 2 0 002 2h2a2 2 0 002-2V9z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 00-2 2H8a2 2 0 00-2 2v4a2 2 0 002 2h2a2 2 0 002-2V9z" />
                   </svg>
                 )}
                 <span className="hidden sm:inline lg:inline font-medium">
@@ -1507,7 +1507,7 @@ ${senderName}`
                   />
                   <label htmlFor="csv-upload" className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-3 rounded-xl cursor-pointer transition-all duration-300 transform hover:scale-105 shadow-lg shadow-blue-500/25 font-semibold flex items-center justify-center space-x-2">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2h6a2 2 0 002-2v4a2 2 0 002 2z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2h6a2 2 0 002-2v4a2 2 0 002 2z" />
                     </svg>
                     <span>Upload CSV</span>
                   </label>
@@ -1524,7 +1524,7 @@ ${senderName}`
                   <div className="flex justify-center">
                     <label htmlFor="csv-upload" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl cursor-pointer transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25 font-semibold text-lg flex items-center space-x-3">
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4A2 2 0 002 2h6a2 2 0 002 2v4a2 2 0 002 2z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4A2 2 0 002 2h6a2 2 0 002 2v4a2 2 0 002 2z" />
                       </svg>
                       <span>Get Started</span>
                     </label>
@@ -1552,14 +1552,14 @@ ${senderName}`
                             <h3 className="font-bold text-white text-base lg:text-lg mb-2 truncate">{contact.business}</h3>
                             <div className="flex items-center text-sm text-gray-400 mb-2">
                               <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
                               </svg>
                               <span className="truncate">+{contact.phone}</span>
                             </div>
                             {contact.email && (
                               <div className="flex items-center text-xs text-blue-400 mb-2">
                                 <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
                                 </svg>
                                 <span className="truncate">{contact.email}</span>
                               </div>
@@ -1616,7 +1616,7 @@ ${senderName}`
                               title="Direct call"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
                               </svg>
                               <span className="hidden sm:inline lg:inline">Call</span>
                             </button>
@@ -1641,7 +1641,7 @@ ${senderName}`
                                 title="AI Research"
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l.536.536m0 0l-.536.536" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l.536.536m0 0l-.536.536" />
                                 </svg>
                                 <span className="hidden sm:inline lg:inline">
                                   {researchingCompany === contact.contactId ? '⏳' : '🧠'} AI Research
@@ -1674,7 +1674,7 @@ ${senderName}`
                       <h3 className="text-lg lg:text-xl font-semibold text-blue-300">Your Initial Pitch</h3>
                       <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
                         <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2z" />
                         </svg>
                       </div>
                     </div>
@@ -1710,7 +1710,7 @@ ${senderName}`
                       <h3 className="text-lg lg:text-xl font-semibold text-purple-300">AI-Enhanced Templates</h3>
                       <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
                         <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 3h4.674M12 3h4.674M12 3v4.674M16 3h4.674M12 3v4.674M16 3v4.674M12 8v4.674M16 8v4.674M12 8v4.674M16 8v4.674M12 13v4.674M16 13v4.674M12 13v4.674M16 13v4.674" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 3h4.674M12 3h4.674M12 3v4.674M16 3h4.674M12 3v4.674M16 3v4.674M12 8v4.674M16 8v4.674M12 8v4.674M16 8v4.674M12 13v4.674M16 13v4.674M12 13v4.674M16 13v4.674" />
                         </svg>
                       </div>
                     </div>
@@ -1764,7 +1764,7 @@ ${senderName}`
                   ) : (
                     <>
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
                       </svg>
                       <span>Send to All Valid Emails</span>
                     </>
@@ -1778,7 +1778,7 @@ ${senderName}`
                     <h3 className="text-lg lg:text-xl font-semibold text-blue-300">Preview: {previewRecipient.business}</h3>
                     <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm-2 0a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm-2 0a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z" />
                       </svg>
                     </div>
                   </div>
@@ -1804,7 +1804,7 @@ ${senderName}`
                   <div className="text-center">
                     <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
                       <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
                       </svg>
                     </div>
                     <p className="text-2xl lg:text-3xl font-bold text-white mb-1">{validEmails}</p>
@@ -1828,7 +1828,7 @@ ${senderName}`
                   <div className="text-center">
                     <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
                       <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3-3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3-3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
                       </svg>
                     </div>
                     <p className="text-2xl lg:text-3xl font-bold text-white mb-1">{whatsappLinks.length}</p>
@@ -1854,7 +1854,7 @@ ${senderName}`
                     <h3 className="text-lg lg:text-xl font-semibold text-blue-300">System Status</h3>
                     <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 012 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 012 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
                       </svg>
                     </div>
                   </div>
@@ -1916,7 +1916,7 @@ ${senderName}`
                     <h3 className="text-lg lg:text-xl font-semibold text-purple-300">Strategic Overview</h3>
                     <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
                       <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H3a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002 2v4a2 2 0 002 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H3a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002 2v4a2 2 0 002 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
                       </svg>
                     </div>
                   </div>
@@ -1949,7 +1949,7 @@ ${senderName}`
                   <h3 className="text-lg lg:text-xl font-semibold text-emerald-300">Final Optimal Philosophy</h3>
                   <div className="w-8 h-8 bg-emerald-500/20 rounded-full flex items-center justify-center">
                     <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.252v.001A2.25 2.25 0 012.25 2.25H6.75a2.25 2.25 0 00-2.25 2.25v9.496c0 .414.336.75-.75.75-.75.75v-9.496a.75.75 0 001.5.5h7.5a.75.75 0 001.5.5v9.496a.75.75 0 001.5.5v-9.496a.75.75 0 001.5.5v-9.496z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.252v.001A2.25 2.25 0 012.25 2.25H6.75a2.25 2.25 0 00-2.25 2.25v9.496c0 .414.336.75-.75.75-.75.75v-9.496a.75.75 0 001.5.5h7.5a.75.75 0 001.5.5v9.496a.75.75 0 001.5.5v-9.496a.75.75 0 001.5.5v-9.496z" />
                     </svg>
                   </div>
                 </div>
@@ -2010,7 +2010,7 @@ ${senderName}`
                   <div className="flex items-start space-x-3 mb-3">
                     <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center flex-shrink-0">
                       <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 011.784 1.216 1.216 0 011.784 1.216 0 01-2.828 0-4 4 0 012.828 0-4-4z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 011.784 1.216 1.216 0 011.784 1.216 0 01-2.828 0-4 4 0 012.828 0-4-4z" />
                       </svg>
                     </div>
                     <div className="flex-1">
@@ -2053,7 +2053,7 @@ ${senderName}`
                   className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-6 py-3 lg:py-4 rounded-2xl text-base lg:text-lg font-bold transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25 flex items-center justify-center space-x-2"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L7 5v8l-4 4H5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L7 5v8l-4 4H5z" />
                   </svg>
                   <span>Update Status</span>
                 </button>
@@ -2062,7 +2062,7 @@ ${senderName}`
                   className="flex-1 bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white px-6 py-3 lg:py-4 rounded-2xl text-base lg:text-lg font-bold transition-all duration-300 transform hover:scale-105 shadow-lg shadow-gray-500/25 flex items-center justify-center space-x-2"
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                   </svg>
                   <span>Cancel</span>
                 </button>
