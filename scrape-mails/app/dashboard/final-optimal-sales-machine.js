@@ -1399,7 +1399,7 @@ ${senderName}`
               <p className="text-green-300 text-sm font-medium">Replies</p>
               <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
                 <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 1.664-1.344 3.015-3 3.015s3 .664 3 3.015 3 3.015c0-1.398.884-2.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7c0-.6.398-.884-1.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 1.664-1.344 3-3 3s-3-1.336-3-3 1.344-3 3-3 3 1.336 3 3z" />
                 </svg>
               </div>
             </div>
