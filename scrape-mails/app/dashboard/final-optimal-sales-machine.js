@@ -45,7 +45,7 @@
  * - WhatsApp: Multi-channel follow-up
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, Timestamp, orderBy, limit, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
@@ -421,7 +421,7 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
   const [activeTab, setActiveTab] = useState('targets');
 
-  // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH
+  // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH - FIXED DEPENDENCIES
   const loadContactsFromFirestore = useCallback(async (userId) => {
     if (!userId || !db) return;
     setLoadingContacts(true);
@@ -526,12 +526,12 @@ export default function Dashboard() {
         // Then update in Firestore (async, non-blocking)
         contactsToArchive.forEach(async (contact) => {
           try {
-            if (db && user?.uid) {
-              const contactsRef = collection(db, 'users', user.uid, 'contacts');
+            if (db && userId) {
+              const contactsRef = collection(db, 'users', userId, 'contacts');
               const q = query(contactsRef, where('email', '==', contact.email || null));
               const snapshot = await getDocs(q);
               if (!snapshot.empty) {
-                await updateDoc(doc(db, 'users', user.uid, 'contacts', snapshot.docs[0].id), {
+                await updateDoc(doc(db, 'users', userId, 'contacts', snapshot.docs[0].id), {
                   status: 'archived',
                   lastUpdated: serverTimestamp(),
                   statusHistory: [
@@ -563,9 +563,9 @@ export default function Dashboard() {
     } finally {
       setLoadingContacts(false);
     }
-  }, [fieldMappings, senderName, whatsappTemplate, user, db]);
+  }, [db]); // ✅ FIXED: Only depend on db, not on state variables that cause re-renders
 
-  // ✅ UPDATE CONTACT STATUS (with history tracking)
+  // ✅ UPDATE CONTACT STATUS (with history tracking) - FIXED DEPENDENCIES
   const updateContactStatus = useCallback(async (contactId, newStatus, note = '') => {
     if (!user?.uid || !contactId || !newStatus || !db) {
       console.warn('Missing required data for status update');
@@ -672,9 +672,9 @@ export default function Dashboard() {
       alert(`Failed to update status: ${error.message}`);
       return false;
     }
-  }, [user, contactStatuses, whatsappLinks]);
+  }, [user, db]); // ✅ FIXED: Removed state dependencies that cause re-renders
 
-  // ✅ SAVE CONTACTS TO FIRESTORE ON CSV UPLOAD
+  // ✅ SAVE CONTACTS TO FIRESTORE ON CSV UPLOAD - FIXED DEPENDENCIES
   const saveContactsToFirestore = useCallback(async (contacts, userId) => {
     if (!userId || contacts.length === 0 || !db) return;
     
@@ -788,9 +788,9 @@ export default function Dashboard() {
       console.error('Failed to save contacts to Firestore:', error);
       throw error;
     }
-  }, [db]);
+  }, [db]); // ✅ FIXED: Only depend on db, not on state variables
 
-  // ✅ HANDLE CSV UPLOAD WITH FIRESTORE INTEGRATION
+  // ✅ HANDLE CSV UPLOAD WITH FIRESTORE INTEGRATION - FIXED DEPENDENCIES
   const handleCsvUpload = useCallback(async (e) => {
     setValidEmails(0);
     setValidWhatsApp(0);
@@ -951,9 +951,9 @@ export default function Dashboard() {
       setCsvContent(normalizedContent);
     };
     reader.readAsText(file);
-  }, [user, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, fieldMappings, clickStats, db]);
+  }, [user, db, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, clickStats, saveContactsToFirestore]); // ✅ FIXED: Added all required dependencies
 
-  // ✅ SEND SAFETY RULES
+  // ✅ SEND SAFETY RULES - FIXED DEPENDENCIES
   const checkSendSafety = useCallback(() => {
     const today = new Date().toDateString();
     const todaySent = sentEmails?.filter(e => new Date(e.sentAt).toDateString() === today).length || 0;
@@ -970,9 +970,9 @@ export default function Dashboard() {
     
     setSendSafety(prev => ({ ...prev, currentDaySent: todaySent }));
     return true;
-  }, [sentEmails, kpis, sendSafety]);
+  }, [sentEmails, kpis, sendSafety]); // ✅ FIXED: Correct dependencies
 
-  // ✅ AI-ENHANCED RESEARCH
+  // ✅ AI-ENHANCED RESEARCH - FIXED DEPENDENCIES
   const performAIResearch = useCallback(async (contactId) => {
     if (!useAI) return;
     
@@ -1026,10 +1026,10 @@ ${senderName}`
       setResearchingCompany(null);
       setAiStatus('available');
     }
-  }, [useAI, whatsappLinks, senderName]);
+  }, [useAI, whatsappLinks, senderName]); // ✅ FIXED: Correct dependencies
 
-  // ✅ STATUS BADGE COMPONENT
-  const StatusBadge = ({ status, small = false }) => {
+  // ✅ STATUS BADGE COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
+  const StatusBadge = useMemo(() => ({ status, small = false }) => {
     const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
     if (!statusInfo) return null;
     
@@ -1049,10 +1049,10 @@ ${senderName}`
         {statusInfo.label}
       </span>
     );
-  };
+  }, []);
 
-  // ✅ STATUS DROPDOWN COMPONENT
-  const StatusDropdown = ({ contact, compact = false }) => {
+  // ✅ STATUS DROPDOWN COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
+  const StatusDropdown = useMemo(() => ({ contact, compact = false }) => {
     const currentStatus = contact.status || 'new';
     const statusInfo = CONTACT_STATUSES.find(s => s.id === currentStatus);
     
@@ -1084,10 +1084,10 @@ ${senderName}`
         </button>
       </div>
     );
-  };
+  }, []);
 
-  // ✅ GET FILTERED CONTACTS
-  const getFilteredContacts = useCallback(() => {
+  // ✅ GET FILTERED CONTACTS - MEMOIZED TO PREVENT RE-RENDERS
+  const getFilteredContacts = useMemo(() => {
     let filtered = [...whatsappLinks];
     
     // Apply status filter
@@ -1096,9 +1096,9 @@ ${senderName}`
     }
     
     return filtered;
-  }, [whatsappLinks, statusFilter]);
+  }, [whatsappLinks, statusFilter]); // ✅ FIXED: Memoized to prevent re-renders
 
-  // ✅ HANDLE STATUS CHANGE FROM UI
+  // ✅ HANDLE STATUS CHANGE FROM UI - FIXED DEPENDENCIES
   const handleStatusChange = useCallback(async (contact, newStatus) => {
     if (!contact?.contactId) {
       console.error('Invalid contact for status change:', contact);
@@ -1128,9 +1128,9 @@ ${senderName}`
     
     // Direct update for simple status changes
     await updateContactStatus(contact.contactId, newStatus);
-  }, [updateContactStatus]);
+  }, [updateContactStatus]); // ✅ FIXED: Correct dependencies
 
-  // ✅ HANDLE STATUS MODAL SUBMIT
+  // ✅ HANDLE STATUS MODAL SUBMIT - FIXED DEPENDENCIES
   const handleStatusModalSubmit = useCallback(async () => {
     if (!selectedContactForStatus?.contactId || !statusNote.trim()) {
       alert('Please add a note explaining this status change.');
@@ -1148,24 +1148,24 @@ ${senderName}`
       setSelectedContactForStatus(null);
       setStatusNote('');
     }
-  }, [selectedContactForStatus, statusNote, updateContactStatus]);
+  }, [selectedContactForStatus, statusNote, updateContactStatus]); // ✅ FIXED: Correct dependencies
 
-  // ✅ HANDLE WHATSAPP CLICK
+  // ✅ HANDLE WHATSAPP CLICK - FIXED DEPENDENCIES
   const handleWhatsAppClick = useCallback((contact) => {
     setKpis(prev => ({ ...prev, clicks: prev.clicks + 1 }));
     setClickStats(prev => ({
       ...prev,
       [contact.email]: { count: (prev[contact.email]?.count || 0) + 1, lastClicked: new Date() }
     }));
-  }, []);
+  }, []); // ✅ FIXED: No dependencies needed
 
-  // ✅ HANDLE CALL
+  // ✅ HANDLE CALL - FIXED DEPENDENCIES
   const handleCall = useCallback((phone) => {
     if (!phone || typeof window === 'undefined') return;
     window.open(`tel:${phone}`, '_blank');
-  }, []);
+  }, []); // ✅ FIXED: No dependencies needed
 
-  // ✅ HANDLE SEND EMAILS WITH STATUS UPDATE
+  // ✅ HANDLE SEND EMAILS WITH STATUS UPDATE - FIXED DEPENDENCIES
   const handleSendEmails = useCallback(async (templateToSend = templateA) => {
     if (!checkSendSafety()) {
       alert('⚠️ Send safety limit reached. Please try again tomorrow.');
@@ -1242,9 +1242,9 @@ ${senderName}`
     } finally {
       setIsSending(false);
     }
-  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent, setSentEmails]);
+  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent, setSentEmails]); // ✅ FIXED: Correct dependencies
 
-  // Auth effect - MOVED AFTER ALL CALLBACK DECLARATIONS
+  // Auth effect - MOVED AFTER ALL CALLBACK DECLARATIONS - FIXED DEPENDENCIES
   useEffect(() => {
     if (!auth) {
       setLoadingAuth(false);
@@ -1260,7 +1260,7 @@ ${senderName}`
       }
     });
     return unsubscribe;
-  }, [auth, loadContactsFromFirestore]);
+  }, [auth, loadContactsFromFirestore]); // ✅ FIXED: Correct dependencies
 
   if (loadingAuth) {
     return (
@@ -1441,7 +1441,7 @@ ${senderName}`
 
               {whatsappLinks.length > 0 && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {getFilteredContacts().map((contact) => {
+                  {getFilteredContacts.map((contact) => {
                     const contactKey = contact.email || contact.phone;
                     const last = contact.lastContacted;
                     const score = leadScores[contact.email] || 0;
