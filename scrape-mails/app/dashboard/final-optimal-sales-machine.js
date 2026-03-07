@@ -349,7 +349,7 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
 // ✅ EXPORT TEMPLATES FOR API USE
 export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
-export default function FinalOptimalSalesMachine() {
+export default function Dashboard() {
   // STATE INITIALIZATION
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -418,7 +418,7 @@ export default function FinalOptimalSalesMachine() {
   const [sendSafety, setSendSafety] = useState({ maxPerDay: 50, currentDaySent: 0, paused: false });
   
   // ✅ KPI State
-  const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
+  const [kpis, setKpis] = useState({ sent: 0, replies: 0, Meetings: 0, bounces: 0, opens: 0, clicks: 0 });
   const [activeTab, setActiveTab] = useState('targets');
 
   // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH - FIXED DEPENDENCIES
@@ -1029,7 +1029,7 @@ ${senderName}`
   }, [useAI, whatsappLinks, senderName]); // ✅ FIXED: Correct dependencies
 
   // ✅ STATUS BADGE COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
-  const StatusBadge = useMemo(() => ({ status, small = false }) => {
+  const StatusBadge = memo(({ status, small = false }) => {
     const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
     if (!statusInfo) return null;
     
@@ -1042,6 +1042,7 @@ ${senderName}`
         statusInfo.color === 'green' ? 'bg-green-600 text-green-100' :
         statusInfo.color === 'purple' ? 'bg-purple-600 text-purple-100' :
         statusInfo.color === 'orange' ? 'bg-orange-600 text-orange-100' :
+        statusInfo.color === 'yellow' ? 'bg-yellow-600 text-yellow-100' :
         statusInfo.color === 'emerald' ? 'bg-emerald-600 text-emerald-100' :
         statusInfo.color === 'red' ? 'bg-red-600 text-red-100' :
         statusInfo.color === 'rose' ? 'bg-rose-600 text-rose-100' : 'bg-gray-600 text-gray-300'
@@ -1049,10 +1050,10 @@ ${senderName}`
         {statusInfo.label}
       </span>
     );
-  }, []);
+  });
 
   // ✅ STATUS DROPDOWN COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
-  const StatusDropdown = useMemo(() => ({ contact, compact = false }) => {
+  const StatusDropdown = memo(({ contact, compact = false }) => {
     const currentStatus = contact.status || 'new';
     const statusInfo = CONTACT_STATUSES.find(s => s.id === currentStatus);
     
@@ -1065,17 +1066,17 @@ ${senderName}`
             setStatusNote('');
           }}
           className={`inline-flex items-center justify-between w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-            compact ? 'text-xs' : 'text-sm'
-          } ${statusInfo.color === 'gray' ? 'bg-gray-600 text-gray-300' :
-            statusInfo.color === 'blue' ? 'bg-blue-600 text-blue-100' :
-            statusInfo.color === 'indigo' ? 'bg-indigo-600 text-indigo-100' :
-            statusInfo.color === 'green' ? 'bg-green-600 text-green-100' :
-            statusInfo.color === 'purple' ? 'bg-purple-600 text-purple-100' :
-            statusInfo.color === 'orange' ? 'bg-orange-600 text-orange-100' :
-            statusInfo.color === 'emerald' ? 'bg-emerald-600 text-emerald-100' :
-            statusInfo.color === 'red' ? 'bg-red-600 text-red-100' :
-            statusInfo.color === 'rose' ? 'bg-rose-600 text-rose-100' : 'bg-gray-600 text-gray-300'
-          }`}
+          compact ? 'text-xs' : 'text-sm'
+        } ${statusInfo.color === 'gray' ? 'bg-gray-600 text-gray-300' :
+          statusInfo.color === 'blue' ? 'bg-blue-600 text-blue-100' :
+          statusInfo.color === 'indigo' ? 'bg-indigo-600 text-indigo-100' :
+          statusInfo.color === 'green' ? 'bg-green-600 text-green-100' :
+          statusInfo.color === 'purple' ? 'bg-purple-600 text-purple-100' :
+          statusInfo.color === 'orange' ? 'bg-orange-600 text-orange-100' :
+          statusInfo.color === 'emerald' ? 'bg-emerald-600 text-emerald-100' :
+          statusInfo.color === 'red' ? 'bg-red-600 text-red-100' :
+          statusInfo.color === 'rose' ? 'bg-rose-600 text-rose-100' : 'bg-gray-600 text-gray-300'
+        }`}
         >
           <span>{statusInfo.label}</span>
           <svg className="w-4 h-4 ml-2" fill="currentColor" viewBox="0 0 20 20">
@@ -1084,7 +1085,7 @@ ${senderName}`
         </button>
       </div>
     );
-  }, []);
+  });
 
   // ✅ GET FILTERED CONTACTS - MEMOIZED TO PREVENT RE-RENDERS
   const getFilteredContacts = useMemo(() => {
