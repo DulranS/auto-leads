@@ -349,7 +349,7 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
 // ✅ EXPORT TEMPLATES FOR API USE
 export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
-export default function Dashboard() {
+export default function FinalOptimalSalesMachine() {
   // STATE INITIALIZATION
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -418,7 +418,7 @@ export default function Dashboard() {
   const [sendSafety, setSendSafety] = useState({ maxPerDay: 50, currentDaySent: 0, paused: false });
   
   // ✅ KPI State
-  const [kpis, setKpis] = useState({ sent: 0, replies: 0, Meetings: 0, bounces: 0, opens: 0, clicks: 0 });
+  const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
   const [activeTab, setActiveTab] = useState('targets');
 
   // ✅ CRITICAL: LOAD CONTACTS FROM FIRESTORE ON AUTH - FIXED DEPENDENCIES
