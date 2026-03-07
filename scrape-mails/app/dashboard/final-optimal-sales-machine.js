@@ -951,7 +951,7 @@ export default function FinalOptimalSalesMachine() {
       setCsvContent(normalizedContent);
     };
     reader.readAsText(file);
-  }, [user, db, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, clickStats, saveContactsToFirestore]); // ✅ FIXED: Added all required dependencies
+  }, [user, db, leadQualityFilter, templateA, templateB, whatsappTemplate, smsTemplate, emailImages, clickStats]); // ✅ FIXED: Removed circular dependency
 
   // ✅ SEND SAFETY RULES - FIXED DEPENDENCIES
   const checkSendSafety = useCallback(() => {
@@ -1129,7 +1129,7 @@ ${senderName}`
     
     // Direct update for simple status changes
     await updateContactStatus(contact.contactId, newStatus);
-  }, [updateContactStatus]); // ✅ FIXED: Correct dependencies
+  }, []); // ✅ FIXED: Removed circular dependency
 
   // ✅ HANDLE STATUS MODAL SUBMIT - FIXED DEPENDENCIES
   const handleStatusModalSubmit = useCallback(async () => {
@@ -1149,7 +1149,7 @@ ${senderName}`
       setSelectedContactForStatus(null);
       setStatusNote('');
     }
-  }, [selectedContactForStatus, statusNote, updateContactStatus]); // ✅ FIXED: Correct dependencies
+  }, [selectedContactForStatus, statusNote]); // ✅ FIXED: Removed circular dependency
 
   // ✅ HANDLE WHATSAPP CLICK - FIXED DEPENDENCIES
   const handleWhatsAppClick = useCallback((contact) => {
@@ -1243,7 +1243,7 @@ ${senderName}`
     } finally {
       setIsSending(false);
     }
-  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety, updateContactStatus, setKpis, setLastSent, setSentEmails]); // ✅ FIXED: Correct dependencies
+  }, [whatsappLinks, fieldMappings, senderName, templateA, checkSendSafety]); // ✅ FIXED: Removed circular dependencies
 
   // Auth effect - MOVED AFTER ALL CALLBACK DECLARATIONS - FIXED DEPENDENCIES
   useEffect(() => {
