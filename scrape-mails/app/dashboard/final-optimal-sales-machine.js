@@ -339,12 +339,27 @@ export default function FinalOptimalSalesMachine() {
         }
         
         const headers = parseCsvRow(lines[0]);
+        
+        // Validate required columns
+        const requiredColumns = ['company_name', 'email', 'website', 'industry', 'size', 'funding'];
+        const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+        
+        if (missingColumns.length > 0) {
+          setStatus(`❌ Missing required columns: ${missingColumns.join(', ')}`);
+          setIsUploading(false);
+          return;
+        }
+        
         const processedTargets = [];
+        const validationErrors = [];
         
         // Process each row
         for (let i = 1; i < lines.length && processedTargets.length < 50; i++) {
           const values = parseCsvRow(lines[i]);
-          if (values.length !== headers.length) continue;
+          if (values.length !== headers.length) {
+            validationErrors.push(`Row ${i + 1}: Column count mismatch`);
+            continue;
+          }
           
           const row = {};
           headers.forEach((header, idx) => {
@@ -352,16 +367,23 @@ export default function FinalOptimalSalesMachine() {
           });
           
           // Validate and process target
-          const target = await processTargetRow(row, headers);
-          if (target) {
-            processedTargets.push(target);
+          const validationResult = await validateAndProcessTarget(row, headers);
+          if (validationResult.valid) {
+            processedTargets.push(validationResult.target);
+          } else {
+            validationErrors.push(`Row ${i + 1}: ${validationResult.error}`);
           }
+        }
+        
+        // Show validation summary
+        if (validationErrors.length > 0) {
+          setStatus(`⚠️ Processed ${processedTargets.length} targets with ${validationErrors.length} errors. First few: ${validationErrors.slice(0, 3).join(', ')}`);
         }
         
         // Save targets to Firestore
         if (processedTargets.length > 0) {
           await saveTargets(processedTargets);
-          setStatus(`✅ ${processedTargets.length} target companies loaded successfully!`);
+          setStatus(`✅ ${processedTargets.length} target companies loaded successfully! ${validationErrors.length > 0 ? `(${validationErrors.length} rows skipped)` : ''}`);
         } else {
           setStatus('❌ No valid targets found in CSV');
         }
@@ -376,28 +398,58 @@ export default function FinalOptimalSalesMachine() {
     reader.readAsText(file);
   };
 
-  // Process individual target row
-  const processTargetRow = async (row, headers) => {
+  // Validate and process individual target row
+  const validateAndProcessTarget = async (row, headers) => {
     // Extract required fields
     const companyName = row.company_name || row.business_name || row.name;
     const email = row.email || '';
     const website = row.website || '';
+    const industry = row.industry || '';
+    const size = row.size || row.employees || '';
+    const funding = row.funding || '';
     
-    if (!companyName) return null;
+    // Business validations
+    if (!companyName || companyName.length < 2) {
+      return { valid: false, error: 'Invalid company name' };
+    }
     
-    // Verify email format and basic deliverability
+    if (!industry) {
+      return { valid: false, error: 'Industry required' };
+    }
+    
+    if (!size) {
+      return { valid: false, error: 'Company size required' };
+    }
+    
+    // ICP validation
+    if (!industry.toLowerCase().includes('saas') && !industry.toLowerCase().includes('software')) {
+      return { valid: false, error: 'Not a SaaS company' };
+    }
+    
+    // Size validation (20-200 employees)
+    const sizeNum = parseInt(size.replace(/\D/g, ''));
+    if (sizeNum < 20 || sizeNum > 200) {
+      return { valid: false, error: 'Company size not in 20-200 range' };
+    }
+    
+    // Email validation
     if (email && !isValidEmail(email)) {
-      console.warn(`Invalid email format: ${email}`);
+      return { valid: false, error: 'Invalid email format' };
+    }
+    
+    // Website validation
+    if (website && !website.startsWith('http')) {
+      return { valid: false, error: 'Invalid website URL' };
     }
     
     // Create target object
     const target = {
-      companyName,
-      email: email && isValidEmail(email) ? email : null,
-      website,
-      industry: row.industry || 'SaaS',
-      size: row.size || row.employees || '',
-      funding: row.funding || '',
+      companyName: companyName.trim(),
+      email: email && isValidEmail(email) ? email.trim() : null,
+      website: website ? website.trim() : '',
+      industry: industry.trim(),
+      size: size.trim(),
+      funding: funding.trim(),
       description: row.description || '',
       
       // Decision makers
@@ -425,21 +477,54 @@ export default function FinalOptimalSalesMachine() {
       lastContacted: null,
       nextContactDate: null,
       
-      // Email verification
+      // Email verification with business rules
       emailVerification: email ? {
         format: isValidEmail(email),
         mx: true, // Would check MX records in real implementation
         risky: false,
-        score: 0.8
+        score: 0.8,
+        domain: email.split('@')[1],
+        verifiedAt: new Date()
       } : null,
+      
+      // ICP fit score
+      icpFitScore: calculateICPFitScore(industry, size, funding),
       
       // Metadata
       source: 'csv_upload',
+      uploadedAt: new Date(),
       createdAt: new Date(),
       lastUpdated: new Date()
     };
     
-    return target;
+    return { valid: true, target };
+  };
+
+  // Calculate ICP fit score
+  const calculateICPFitScore = (industry, size, funding) => {
+    let score = 50; // Base score
+    
+    // Industry fit
+    if (industry.toLowerCase().includes('saas') || industry.toLowerCase().includes('software')) {
+      score += 30;
+    }
+    
+    // Size fit (20-200 employees)
+    const sizeNum = parseInt(size.replace(/\D/g, ''));
+    if (sizeNum >= 20 && sizeNum <= 50) {
+      score += 20; // Sweet spot
+    } else if (sizeNum > 50 && sizeNum <= 200) {
+      score += 10; // Good fit
+    }
+    
+    // Funding fit
+    if (funding.toLowerCase().includes('series a') || funding.toLowerCase().includes('seed')) {
+      score += 10;
+    } else if (funding.toLowerCase().includes('series b') || funding.toLowerCase().includes('series c')) {
+      score += 15;
+    }
+    
+    return Math.min(100, Math.max(0, score));
   };
 
   // Save targets to Firestore
@@ -500,7 +585,15 @@ export default function FinalOptimalSalesMachine() {
             name: 'John Doe',
             role: 'CEO',
             linkedin: `https://linkedin.com/in/johndoe-${target.companyName.toLowerCase()}`,
-            email: 'john@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com')
+            email: 'john@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com'),
+            verified: true
+          },
+          {
+            name: 'Jane Smith',
+            role: 'CTO',
+            linkedin: `https://linkedin.com/in/janesmith-${target.companyName.toLowerCase()}`,
+            email: 'jane@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com'),
+            verified: true
           }
         ],
         status: 'researching',
@@ -573,18 +666,33 @@ export default function FinalOptimalSalesMachine() {
     }
     
     const target = targets.find(t => t.id === targetId);
-    if (!target || !target.email) return;
+    if (!target || !target.email) {
+      setStatus('❌ Target email not found or invalid');
+      return;
+    }
+    
+    // Verify email is not risky
+    if (target.emailVerification?.risky) {
+      setStatus('⚠️ Email flagged as risky. Skipping send.');
+      return;
+    }
     
     try {
       // Get template
       const template = currentCampaign?.templates[templateType];
-      if (!template) return;
+      if (!template) {
+        setStatus('❌ Template not found');
+        return;
+      }
       
       // Render email
       const renderedEmail = renderEmailTemplate(template, target);
       
       // Simulate sending email
       setStatus(`📧 Sending ${templateType} to ${target.companyName}...`);
+      
+      // Simulate email send delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
       // Update target status
       const newStatus = templateType === 'email1' ? 'email1_sent' : 
@@ -595,7 +703,17 @@ export default function FinalOptimalSalesMachine() {
         status: newStatus,
         lastContacted: new Date(),
         sequenceDay: target.sequenceDay + 1,
-        lastUpdated: new Date()
+        lastUpdated: new Date(),
+        emailHistory: [
+          ...(target.emailHistory || []),
+          {
+            type: templateType,
+            sentAt: new Date(),
+            subject: renderedEmail.subject,
+            body: renderedEmail.body,
+            status: 'sent'
+          }
+        ]
       };
       
       await updateTarget(updatedTarget);
@@ -619,6 +737,13 @@ export default function FinalOptimalSalesMachine() {
       
       // Schedule next contact
       scheduleNextContact(updatedTarget);
+      
+      // Auto-exit check
+      if (newStatus === 'breakup_sent') {
+        setTimeout(() => {
+          moveToNurture(targetId);
+        }, 7 * 24 * 60 * 60 * 1000); // 7 days after breakup
+      }
       
     } catch (error) {
       console.error('Failed to send email:', error);
@@ -670,6 +795,63 @@ export default function FinalOptimalSalesMachine() {
         nextContactDate: nextDate
       });
     }
+  };
+
+  // Send social media message
+  const sendSocialMessage = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    try {
+      // Get social template
+      const template = currentCampaign?.templates.social;
+      if (!template) return;
+      
+      // Render social message
+      const renderedMessage = renderSocialTemplate(template, target);
+      
+      setStatus(`📱 Sending social message to ${target.companyName}...`);
+      
+      // Simulate social media send
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Update target status
+      const updatedTarget = {
+        ...target,
+        status: 'social_attempted',
+        lastContacted: new Date(),
+        lastUpdated: new Date(),
+        socialHistory: [
+          ...(target.socialHistory || []),
+          {
+            type: 'social',
+            sentAt: new Date(),
+            message: renderedMessage,
+            platform: 'LinkedIn',
+            status: 'sent'
+          }
+        ]
+      };
+      
+      await updateTarget(updatedTarget);
+      setStatus(`✅ Social message sent to ${target.companyName}`);
+      
+    } catch (error) {
+      console.error('Failed to send social message:', error);
+      setStatus(`❌ Failed to send social message: ${error.message}`);
+    }
+  };
+
+  // Render social media template
+  const renderSocialTemplate = (template, target) => {
+    let rendered = template;
+    
+    // Replace variables
+    rendered = rendered.replace(/\{\{first_name\}\}/g, target.decisionMakers[0]?.name || 'there');
+    rendered = rendered.replace(/\{\{company_name\}\}/g, target.companyName);
+    rendered = rendered.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation || '');
+    
+    return rendered;
   };
 
   // Handle reply
@@ -1066,9 +1248,9 @@ export default function FinalOptimalSalesMachine() {
                       <div>
                         <h4 className="text-sm font-medium text-gray-400 mb-2">Templates</h4>
                         <div className="space-y-1">
-                          <div className="text-sm">Email 1: Intro (<120 words)</div>
-                          <div className="text-sm">Email 2: Social Proof (<120 words)</div>
-                          <div className="text-sm">Breakup: Closing (<120 words)</div>
+                          <div className="text-sm">Email 1: Intro (&lt;120 words)</div>
+                          <div className="text-sm">Email 2: Social Proof (&lt;120 words)</div>
+                          <div className="text-sm">Breakup: Closing (&lt;120 words)</div>
                         </div>
                       </div>
                       
@@ -1204,10 +1386,37 @@ export default function FinalOptimalSalesMachine() {
                               
                               {target.status === 'email1_sent' && (
                                 <button
+                                  onClick={() => sendSocialMessage(target.id)}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Send Social
+                                </button>
+                              )}
+                              
+                              {target.status === 'social_attempted' && (
+                                <button
                                   onClick={() => sendEmail(target.id, 'email2')}
                                   className="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded transition-colors"
                                 >
                                   Send Email 2
+                                </button>
+                              )}
+                              
+                              {target.status === 'email2_sent' && (
+                                <button
+                                  onClick={() => sendSocialMessage(target.id)}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Send Social
+                                </button>
+                              )}
+                              
+                              {target.status === 'social_attempted' && (
+                                <button
+                                  onClick={() => sendEmail(target.id, 'breakup')}
+                                  className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Send Breakup
                                 </button>
                               )}
                               
@@ -1228,6 +1437,20 @@ export default function FinalOptimalSalesMachine() {
                                   Move to Nurture
                                 </button>
                               )}
+                              
+                              <button
+                                onClick={() => handleReply(target.id)}
+                                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+                              >
+                                Reply
+                              </button>
+                              
+                              <button
+                                onClick={() => handleBounce(target.id)}
+                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
+                              >
+                                Bounce
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -1307,7 +1530,7 @@ export default function FinalOptimalSalesMachine() {
                               {kpis.replyRate.toFixed(1)}%
                             </span>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: >10%</p>
+                          <p className="text-xs text-gray-400 mt-1">Target: &gt;10%</p>
                         </div>
                         
                         <div className="bg-gray-700 p-4 rounded">
@@ -1317,7 +1540,7 @@ export default function FinalOptimalSalesMachine() {
                               {kpis.meetingRate.toFixed(1)}%
                             </span>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: >5%</p>
+                          <p className="text-xs text-gray-400 mt-1">Target: &gt;5%</p>
                         </div>
                         
                         <div className="bg-gray-700 p-4 rounded">
@@ -1327,7 +1550,7 @@ export default function FinalOptimalSalesMachine() {
                               {kpis.bounceRate.toFixed(1)}%
                             </span>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: <5%</p>
+                          <p className="text-xs text-gray-400 mt-1">Target: &lt;5%</p>
                         </div>
                       </div>
                     </div>
