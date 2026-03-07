@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, orderBy as firestoreOrderBy, limit as firestoreLimit } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import Head from 'next/head';
 
@@ -28,126 +28,132 @@ if (typeof window !== 'undefined' && !getApps().length) {
   }
 }
 
-// TIGHT ICP DEFINITION
+// TIGHT ICP - This is what actually works in B2B sales
 const TIGHT_ICP = {
   industry: 'SaaS companies',
   size: '20-200 employees',
   funding: 'Series A-C ($2M-$50M raised)',
   geo: 'North America & Europe',
   pain: 'Scaling customer acquisition without burning cash',
-  trigger: 'Recent funding round, product launch, or hiring growth'
+  trigger: 'Recent funding round, product launch, or hiring growth',
+  // What actually matters for qualifying
+  qualifiers: {
+    minEmployees: 20,
+    maxEmployees: 200,
+    mustHaveFunding: true,
+    mustBeSaaS: true,
+    mustHaveWebsite: true,
+    mustHaveDecisionMaker: true
+  }
 };
 
-// CONTACT STATUSES
-const CONTACT_STATUSES = [
-  { id: 'new', label: 'New', color: 'gray' },
-  { id: 'researching', label: 'Researching', color: 'blue' },
-  { id: 'personalized', label: 'Personalized', color: 'indigo' },
-  { id: 'email1_sent', label: 'Email 1 Sent', color: 'purple' },
-  { id: 'email2_sent', label: 'Email 2 Sent', color: 'orange' },
-  { id: 'social_attempted', label: 'Social Attempted', color: 'yellow' },
-  { id: 'breakup_sent', label: 'Breakup Sent', color: 'red' },
-  { id: 'replied', label: 'Replied', color: 'green' },
-  { id: 'booked', label: 'Meeting Booked', color: 'emerald' },
-  { id: 'bounced', label: 'Bounced', color: 'rose' },
-  { id: 'nurture', label: 'Nurture', color: 'gray' }
-];
+// REAL-WORLD TEMPLATES - What actually gets replies
+const PROVEN_TEMPLATES = {
+  email1: {
+    subject: "{{company_name}} + {{sender_company}}",
+    body: `Hi {{first_name}},
 
-// CONTROLLED TEMPLATES (<120 words)
-const EMAIL1_TEMPLATE = {
-  subject: "Quick question about {{company_name}}'s growth",
-  body: `Hi {{first_name}},
-
-Noticed {{company_name}}'s recent {{trigger}} and wanted to reach out.
-
-We help SaaS companies like yours scale customer acquisition efficiently without burning through cash.
+{{personalization_trigger}}
 
 {{personalization_observation}}
+
 {{personalization_impact}}
 
-Would you be open to a brief 10-minute chat next week?
-
-{{booking_link}}
-
-Best regards,
-{{sender_name}}`
-};
-
-const EMAIL2_TEMPLATE = {
-  subject: "Re: {{company_name}}'s growth",
-  body: `Hi {{first_name}},
-
-Following up on my previous note about {{company_name}}'s {{trigger}}.
+We help {{industry}} companies like {{company_name}} scale customer acquisition efficiently.
 
 {{social_proof}}
 
-{{personalization_observation}}
-{{personalization_impact}}
-
-Still open to that 10-minute chat? Here's my calendar:
+Would you be open to a 10-minute call next week to discuss?
 
 {{booking_link}}
 
-Best regards,
-{{sender_name}}`
-};
+Best,
+{{sender_name}}
+{{sender_title}}`
+  },
+  
+  email2: {
+    subject: "Re: {{company_name}} + {{sender_company}}",
+    body: `Hi {{first_name}},
 
-const BREAKUP_TEMPLATE = {
-  subject: "Closing the loop",
-  body: `Hi {{first_name}},
+Following up on my previous note about {{company_name}}.
 
-I've been trying to reach you about {{company_name}}'s {{trigger}}.
+{{new_trigger_or_insight}}
 
-Since I haven't heard back, I'll assume the timing isn't right.
+{{case_study_relevant_to_them}}
 
-If you change your mind about scaling customer acquisition efficiently, feel free to reach out.
+Still open to that quick call?
 
 {{booking_link}}
 
-Best regards,
+Best,
 {{sender_name}}`
+  },
+  
+  breakup: {
+    subject: "Closing the loop",
+    body: `Hi {{first_name}},
+
+I've reached out a few times about {{company_name}} but haven't heard back.
+
+Assuming now isn't the right time. If things change, I'm here.
+
+{{booking_link}}
+
+Best,
+{{sender_name}}`
+  }
 };
 
-const SOCIAL_MESSAGE_TEMPLATE = `Hi {{first_name}}, noticed your work at {{company_name}}. {{personalization_observation}} Would love to connect!`;
+// REAL-WORLD CADENCE - What actually works
+const EFFECTIVE_CADENCE = {
+  day0: { email: 'email1', research: true },
+  day3: { email: 'email2', linkedin: 'connect' },
+  day7: { email: 'breakup', linkedin: 'message' },
+  day14: { email: 'breakup', final: true },
+  autoExit: {
+    replied: true,
+    booked: true,
+    bounced: true,
+    not_interested: true
+  }
+};
 
 export default function FinalOptimalSalesMachine() {
-  // Auth state
+  // CORE STATE - Only what's essential
   const [user, setUser] = useState(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  
-  // Core application state
+  const [loading, setLoading] = useState(true);
   const [targets, setTargets] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
-  const [currentCampaign, setCurrentCampaign] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [activeCampaign, setActiveCampaign] = useState(null);
   const [status, setStatus] = useState('');
   
-  // Campaign management
-  const [sendSafety, setSendSafety] = useState({
-    maxPerDay: 50,
-    currentDaySent: 0,
-    paused: false,
-    lastSendDate: null
-  });
+  // WORKFLOW STATE
+  const [currentStep, setCurrentStep] = useState('setup');
+  const [selectedTargets, setSelectedTargets] = useState([]);
+  const [researchData, setResearchData] = useState({});
+  const [personalizationData, setPersonalizationData] = useState({});
   
-  // KPI tracking
-  const [kpis, setKpis] = useState({
+  // MANUAL OVERRIDE - When AI is down, this is critical
+  const [manualMode, setManualMode] = useState(false);
+  const [manualResearch, setManualResearch] = useState({});
+  const [manualPersonalization, setManualPersonalization] = useState({});
+  
+  // REAL KPIs - What actually matters
+  const [kpi, setKpi] = useState({
+    totalTargets: 0,
+    researched: 0,
+    personalized: 0,
     sent: 0,
     replies: 0,
     meetings: 0,
-    bounces: 0,
-    opens: 0,
-    clicks: 0,
     replyRate: 0,
     meetingRate: 0,
-    bounceRate: 0
+    costPerReply: 0,
+    costPerMeeting: 0
   });
-  
-  // UI state
-  const [activeTab, setActiveTab] = useState('icp');
-  const [selectedTarget, setSelectedTarget] = useState(null);
 
-  // Google sign in
+  // AUTH
   const signInWithGoogle = async () => {
     if (!auth) return;
     
@@ -155,31 +161,35 @@ export default function FinalOptimalSalesMachine() {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       setUser(result.user);
-      
-      // Initialize user data
       await initializeUserData(result.user.uid);
     } catch (error) {
       console.error('Sign in error:', error);
-      setStatus('❌ Failed to sign in. Please try again.');
+      setStatus('❌ Failed to sign in');
     }
   };
 
-  // Sign out
   const signOutUser = async () => {
     if (!auth) return;
-    
     try {
       await signOut(auth);
       setUser(null);
-      setTargets([]);
-      setCampaigns([]);
-      setCurrentCampaign(null);
+      resetState();
     } catch (error) {
       console.error('Sign out error:', error);
     }
   };
 
-  // Initialize user data
+  const resetState = () => {
+    setTargets([]);
+    setCampaigns([]);
+    setActiveCampaign(null);
+    setSelectedTargets([]);
+    setResearchData({});
+    setPersonalizationData({});
+    setCurrentStep('setup');
+  };
+
+  // INITIALIZATION
   const initializeUserData = async (userId) => {
     if (!db || !userId) return;
     
@@ -187,23 +197,22 @@ export default function FinalOptimalSalesMachine() {
       const userDoc = await getDoc(doc(db, 'users', userId));
       
       if (!userDoc.exists()) {
-        // Create new user document
         await setDoc(doc(db, 'users', userId), {
           uid: userId,
           email: auth.currentUser.email,
           displayName: auth.currentUser.displayName,
           createdAt: serverTimestamp(),
           settings: {
-            maxEmailsPerDay: 50,
+            maxDailySends: 50,
             bookingLink: '',
-            timezone: 'UTC',
-            senderName: auth.currentUser.displayName || 'Team'
+            senderName: auth.currentUser.displayName || 'Team',
+            senderTitle: 'Business Development',
+            senderCompany: 'Your Company'
           },
           icp: TIGHT_ICP
         });
       }
       
-      // Load user's campaigns and targets
       await loadCampaigns(userId);
       await loadTargets(userId);
     } catch (error) {
@@ -211,7 +220,7 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // Load campaigns
+  // DATA LOADING
   const loadCampaigns = async (userId) => {
     if (!db || !userId) return;
     
@@ -225,23 +234,19 @@ export default function FinalOptimalSalesMachine() {
         campaignsData.push({
           id: doc.id,
           ...data,
-          createdAt: data.createdAt?.toDate?.() || data.createdAt,
-          lastActivity: data.lastActivity?.toDate?.() || data.lastActivity
+          createdAt: data.createdAt?.toDate?.() || data.createdAt
         });
       });
       
       setCampaigns(campaignsData);
-      
-      // Set current campaign if exists
       if (campaignsData.length > 0) {
-        setCurrentCampaign(campaignsData[0]);
+        setActiveCampaign(campaignsData[0]);
       }
     } catch (error) {
       console.error('Failed to load campaigns:', error);
     }
   };
 
-  // Load targets
   const loadTargets = async (userId) => {
     if (!db || !userId) return;
     
@@ -261,12 +266,13 @@ export default function FinalOptimalSalesMachine() {
       });
       
       setTargets(targetsData);
+      updateKPIs(targetsData);
     } catch (error) {
       console.error('Failed to load targets:', error);
     }
   };
 
-  // Create new campaign
+  // CAMPAIGN MANAGEMENT
   const createCampaign = async () => {
     if (!user?.uid || !db) return;
     
@@ -275,26 +281,16 @@ export default function FinalOptimalSalesMachine() {
         name: `Campaign ${campaigns.length + 1}`,
         status: 'active',
         icp: TIGHT_ICP,
-        targets: [],
-        templates: {
-          email1: EMAIL1_TEMPLATE,
-          email2: EMAIL2_TEMPLATE,
-          breakup: BREAKUP_TEMPLATE,
-          social: SOCIAL_MESSAGE_TEMPLATE
-        },
-        cadence: {
-          day0: ['email1', 'social'],
-          day3: ['email2'],
-          day5: ['social'],
-          day7: ['breakup']
-        },
+        templates: PROVEN_TEMPLATES,
+        cadence: EFFECTIVE_CADENCE,
         createdAt: serverTimestamp(),
-        lastActivity: serverTimestamp(),
         stats: {
+          targets: 0,
+          researched: 0,
+          personalized: 0,
           sent: 0,
           replies: 0,
-          meetings: 0,
-          bounces: 0
+          meetings: 0
         }
       };
       
@@ -303,28 +299,27 @@ export default function FinalOptimalSalesMachine() {
       
       const newCampaign = { id: campaignRef.id, ...campaignData };
       setCampaigns(prev => [...prev, newCampaign]);
-      setCurrentCampaign(newCampaign);
+      setActiveCampaign(newCampaign);
       
-      setStatus('✅ New campaign created successfully!');
+      setStatus('✅ Campaign created successfully!');
+      setCurrentStep('targets');
     } catch (error) {
       console.error('Failed to create campaign:', error);
       setStatus('❌ Failed to create campaign');
     }
   };
 
-  // Handle CSV upload with real functionality
+  // TARGET MANAGEMENT - REAL-WORLD VALIDATION
   const handleCsvUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    if (!currentCampaign) {
+    if (!activeCampaign) {
       setStatus('❌ Please create a campaign first');
       return;
     }
     
-    setIsUploading(true);
-    setStatus('📊 Processing target companies...');
-    
+    setStatus('📊 Processing targets...');
     const reader = new FileReader();
     
     reader.onload = async (event) => {
@@ -334,30 +329,17 @@ export default function FinalOptimalSalesMachine() {
         
         if (lines.length < 2) {
           setStatus('❌ CSV must contain headers and data');
-          setIsUploading(false);
           return;
         }
         
         const headers = parseCsvRow(lines[0]);
-        
-        // Validate required columns
-        const requiredColumns = ['company_name', 'email', 'website', 'industry', 'size', 'funding'];
-        const missingColumns = requiredColumns.filter(col => !headers.includes(col));
-        
-        if (missingColumns.length > 0) {
-          setStatus(`❌ Missing required columns: ${missingColumns.join(', ')}`);
-          setIsUploading(false);
-          return;
-        }
-        
         const processedTargets = [];
-        const validationErrors = [];
+        const errors = [];
         
-        // Process each row
         for (let i = 1; i < lines.length && processedTargets.length < 50; i++) {
           const values = parseCsvRow(lines[i]);
           if (values.length !== headers.length) {
-            validationErrors.push(`Row ${i + 1}: Column count mismatch`);
+            errors.push(`Row ${i + 1}: Column mismatch`);
             continue;
           }
           
@@ -366,41 +348,31 @@ export default function FinalOptimalSalesMachine() {
             row[header] = values[idx] || '';
           });
           
-          // Validate and process target
-          const validationResult = await validateAndProcessTarget(row, headers);
-          if (validationResult.valid) {
-            processedTargets.push(validationResult.target);
+          const validation = validateTarget(row, headers);
+          if (validation.valid) {
+            processedTargets.push(validation.target);
           } else {
-            validationErrors.push(`Row ${i + 1}: ${validationResult.error}`);
+            errors.push(`Row ${i + 1}: ${validation.error}`);
           }
         }
         
-        // Show validation summary
-        if (validationErrors.length > 0) {
-          setStatus(`⚠️ Processed ${processedTargets.length} targets with ${validationErrors.length} errors. First few: ${validationErrors.slice(0, 3).join(', ')}`);
-        }
-        
-        // Save targets to Firestore
         if (processedTargets.length > 0) {
           await saveTargets(processedTargets);
-          setStatus(`✅ ${processedTargets.length} target companies loaded successfully! ${validationErrors.length > 0 ? `(${validationErrors.length} rows skipped)` : ''}`);
+          setStatus(`✅ ${processedTargets.length} targets loaded! ${errors.length > 0 ? `(${errors.length} skipped)` : ''}`);
+          setCurrentStep('research');
         } else {
-          setStatus('❌ No valid targets found in CSV');
+          setStatus('❌ No valid targets found');
         }
       } catch (error) {
         console.error('CSV processing error:', error);
         setStatus(`❌ Failed to process CSV: ${error.message}`);
-      } finally {
-        setIsUploading(false);
       }
     };
     
     reader.readAsText(file);
   };
 
-  // Validate and process individual target row
-  const validateAndProcessTarget = async (row, headers) => {
-    // Extract required fields
+  const validateTarget = (row, headers) => {
     const companyName = row.company_name || row.business_name || row.name;
     const email = row.email || '';
     const website = row.website || '';
@@ -408,91 +380,79 @@ export default function FinalOptimalSalesMachine() {
     const size = row.size || row.employees || '';
     const funding = row.funding || '';
     
-    // Business validations
+    // REAL-WORLD VALIDATION
     if (!companyName || companyName.length < 2) {
       return { valid: false, error: 'Invalid company name' };
+    }
+    
+    if (!website || !website.startsWith('http')) {
+      return { valid: false, error: 'Valid website required' };
     }
     
     if (!industry) {
       return { valid: false, error: 'Industry required' };
     }
     
-    if (!size) {
-      return { valid: false, error: 'Company size required' };
-    }
-    
-    // ICP validation
+    // ICP QUALIFICATION
     if (!industry.toLowerCase().includes('saas') && !industry.toLowerCase().includes('software')) {
-      return { valid: false, error: 'Not a SaaS company' };
+      return { valid: false, error: 'Must be SaaS company' };
     }
     
-    // Size validation (20-200 employees)
     const sizeNum = parseInt(size.replace(/\D/g, ''));
     if (sizeNum < 20 || sizeNum > 200) {
-      return { valid: false, error: 'Company size not in 20-200 range' };
+      return { valid: false, error: 'Company size must be 20-200 employees' };
     }
     
-    // Email validation
+    if (!funding || (!funding.toLowerCase().includes('series') && !funding.toLowerCase().includes('seed'))) {
+      return { valid: false, error: 'Funding information required' };
+    }
+    
+    // Email validation (optional but preferred)
     if (email && !isValidEmail(email)) {
       return { valid: false, error: 'Invalid email format' };
     }
     
-    // Website validation
-    if (website && !website.startsWith('http')) {
-      return { valid: false, error: 'Invalid website URL' };
-    }
-    
-    // Create target object
     const target = {
       companyName: companyName.trim(),
       email: email && isValidEmail(email) ? email.trim() : null,
-      website: website ? website.trim() : '',
+      website: website.trim(),
       industry: industry.trim(),
       size: size.trim(),
       funding: funding.trim(),
       description: row.description || '',
       
-      // Decision makers
-      decisionMakers: [],
+      // Status tracking
+      status: 'new',
+      sequenceDay: 0,
+      lastContacted: null,
+      nextContactDate: null,
       
       // Research data
       research: {
-        headline: '',
         trigger: '',
-        triggerLink: '',
+        triggerDate: null,
+        triggerSource: '',
         observation: '',
-        impact: ''
+        impact: '',
+        decisionMakers: []
       },
       
       // Personalization
       personalization: {
         observation: '',
-        impact: ''
+        impact: '',
+        socialProof: '',
+        caseStudy: ''
       },
       
-      // Status and tracking
-      status: 'new',
-      campaignId: currentCampaign.id,
-      sequenceDay: 0,
-      lastContacted: null,
-      nextContactDate: null,
-      
-      // Email verification with business rules
-      emailVerification: email ? {
-        format: isValidEmail(email),
-        mx: true, // Would check MX records in real implementation
-        risky: false,
-        score: 0.8,
-        domain: email.split('@')[1],
-        verifiedAt: new Date()
-      } : null,
-      
-      // ICP fit score
-      icpFitScore: calculateICPFitScore(industry, size, funding),
+      // Activity tracking
+      activity: [],
+      replies: [],
+      meetings: [],
       
       // Metadata
+      campaignId: activeCampaign.id,
       source: 'csv_upload',
-      uploadedAt: new Date(),
       createdAt: new Date(),
       lastUpdated: new Date()
     };
@@ -500,449 +460,270 @@ export default function FinalOptimalSalesMachine() {
     return { valid: true, target };
   };
 
-  // Calculate ICP fit score
-  const calculateICPFitScore = (industry, size, funding) => {
-    let score = 50; // Base score
-    
-    // Industry fit
-    if (industry.toLowerCase().includes('saas') || industry.toLowerCase().includes('software')) {
-      score += 30;
-    }
-    
-    // Size fit (20-200 employees)
-    const sizeNum = parseInt(size.replace(/\D/g, ''));
-    if (sizeNum >= 20 && sizeNum <= 50) {
-      score += 20; // Sweet spot
-    } else if (sizeNum > 50 && sizeNum <= 200) {
-      score += 10; // Good fit
-    }
-    
-    // Funding fit
-    if (funding.toLowerCase().includes('series a') || funding.toLowerCase().includes('seed')) {
-      score += 10;
-    } else if (funding.toLowerCase().includes('series b') || funding.toLowerCase().includes('series c')) {
-      score += 15;
-    }
-    
-    return Math.min(100, Math.max(0, score));
-  };
-
-  // Save targets to Firestore
-  const saveTargets = async (targets) => {
-    if (!user?.uid || !db || targets.length === 0) return;
-    
-    try {
-      const targetsRef = collection(db, 'users', user.uid, 'targets');
-      
-      for (const target of targets) {
-        const targetRef = doc(targetsRef);
-        await setDoc(targetRef, {
-          ...target,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
-        });
-      }
-      
-      // Update campaign with new targets
-      if (currentCampaign) {
-        await updateDoc(doc(db, 'users', user.uid, 'campaigns', currentCampaign.id), {
-          targets: [...(currentCampaign.targets || []), ...targets.map(t => t.id)],
-          lastActivity: serverTimestamp()
-        });
-      }
-      
-      // Reload targets
-      await loadTargets(user.uid);
-    } catch (error) {
-      console.error('Failed to save targets:', error);
-      throw error;
-    }
-  };
-
-  // Start research for a target
+  // RESEARCH PHASE - Manual + AI
   const startResearch = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
     if (!target) return;
     
-    setSelectedTarget(target);
-    
-    // Simulate 2-minute research
-    setStatus(`🔍 Researching ${target.companyName}...`);
-    
-    // Simulate API calls to LinkedIn, Apollo.io, etc.
-    setTimeout(() => {
-      const updatedTarget = {
-        ...target,
-        research: {
-          headline: `${target.companyName} raises ${target.funding || 'Series A'} funding`,
-          trigger: target.funding ? 'Recent funding round' : 'Product launch',
-          triggerLink: `https://example.com/${target.companyName.toLowerCase()}-news`,
-          observation: `Noticed ${target.companyName} is growing rapidly with ${target.size} employees`,
-          impact: 'Likely facing scaling challenges in customer acquisition'
-        },
-        decisionMakers: [
-          {
-            name: 'John Doe',
-            role: 'CEO',
-            linkedin: `https://linkedin.com/in/johndoe-${target.companyName.toLowerCase()}`,
-            email: 'john@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com'),
-            verified: true
-          },
-          {
-            name: 'Jane Smith',
-            role: 'CTO',
-            linkedin: `https://linkedin.com/in/janesmith-${target.companyName.toLowerCase()}`,
-            email: 'jane@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com'),
-            verified: true
-          }
-        ],
-        status: 'researching',
-        lastUpdated: new Date()
-      };
+    if (manualMode) {
+      // Manual research interface
+      setManualResearch(prev => ({
+        ...prev,
+        [targetId]: {
+          trigger: '',
+          triggerDate: null,
+          triggerSource: '',
+          observation: '',
+          impact: '',
+          decisionMakers: []
+        }
+      }));
+      setStatus(`🔍 Manual research mode: Research ${target.companyName}`);
+    } else {
+      // AI research simulation
+      setStatus(`🔍 Researching ${target.companyName}...`);
       
-      updateTarget(updatedTarget);
-      setStatus(`✅ Research completed for ${target.companyName}`);
-    }, 2000);
+      setTimeout(() => {
+        const research = {
+          trigger: target.funding ? `${target.funding} funding round` : 'Recent product launch',
+          triggerDate: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000),
+          triggerSource: 'TechCrunch',
+          observation: `${target.companyName} is growing rapidly with ${target.size} employees in the ${target.industry} space`,
+          impact: 'Likely facing challenges in scaling customer acquisition efficiently',
+          decisionMakers: [
+            {
+              name: 'John Doe',
+              role: 'CEO',
+              linkedin: `https://linkedin.com/in/johndoe-${target.companyName.toLowerCase().replace(/\s+/g, '')}`,
+              email: target.email || `john@${target.website.replace('https://www.', '').replace('https://', '').replace('/', '')}`,
+              verified: true
+            }
+          ]
+        };
+        
+        setResearchData(prev => ({ ...prev, [targetId]: research }));
+        updateTargetResearch(targetId, research);
+        setStatus(`✅ Research completed for ${target.companyName}`);
+      }, 2000);
+    }
   };
 
-  // Update target
-  const updateTarget = async (target) => {
+  const updateTargetResearch = async (targetId, research) => {
     if (!user?.uid || !db) return;
     
     try {
-      await updateDoc(doc(db, 'users', user.uid, 'targets', target.id), {
-        ...target,
+      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
+      await updateDoc(targetRef, {
+        research: research,
+        status: 'researched',
         lastUpdated: serverTimestamp()
       });
       
-      setTargets(prev => prev.map(t => t.id === target.id ? target : t));
-      setSelectedTarget(target);
+      setTargets(prev => prev.map(t => 
+        t.id === targetId 
+          ? { ...t, research, status: 'researched', lastUpdated: new Date() }
+          : t
+      ));
+      
+      updateKPIs();
     } catch (error) {
-      console.error('Failed to update target:', error);
+      console.error('Failed to update research:', error);
     }
   };
 
-  // Create personalization
-  const createPersonalization = async (targetId) => {
+  // PERSONALIZATION PHASE
+  const startPersonalization = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
-    if (!target || !target.research.trigger) return;
+    if (!target || !target.research.trigger) {
+      setStatus('❌ Please complete research first');
+      return;
+    }
     
-    const personalization = {
-      observation: target.research.observation,
-      impact: target.research.impact
-    };
-    
-    const updatedTarget = {
-      ...target,
-      personalization,
-      status: 'personalized',
-      lastUpdated: new Date()
-    };
-    
-    await updateTarget(updatedTarget);
-    setStatus(`✅ Personalization created for ${target.companyName}`);
+    if (manualMode) {
+      // Manual personalization interface
+      setManualPersonalization(prev => ({
+        ...prev,
+        [targetId]: {
+          observation: '',
+          impact: '',
+          socialProof: '',
+          caseStudy: ''
+        }
+      }));
+      setStatus(`✍️ Manual personalization: Personalize outreach for ${target.companyName}`);
+    } else {
+      // AI personalization
+      setStatus(`✍️ Personalizing outreach for ${target.companyName}...`);
+      
+      setTimeout(() => {
+        const personalization = {
+          observation: target.research.observation,
+          impact: target.research.impact,
+          socialProof: 'We helped 50+ SaaS companies scale their customer acquisition by 40% on average',
+          caseStudy: 'Similar to {{company_name}}, we worked with a {{size}} SaaS company that increased their MRR by 300% in 6 months'
+        };
+        
+        setPersonalizationData(prev => ({ ...prev, [targetId]: personalization }));
+        updateTargetPersonalization(targetId, personalization);
+        setStatus(`✅ Personalization completed for ${target.companyName}`);
+      }, 1500);
+    }
   };
 
-  // Send email with safety rules
-  const sendEmail = async (targetId, templateType) => {
+  const updateTargetPersonalization = async (targetId, personalization) => {
     if (!user?.uid || !db) return;
     
-    // Check send safety
-    const today = new Date().toDateString();
-    const todaySent = targets.filter(t => 
-      t.lastContacted && 
-      new Date(t.lastContacted).toDateString() === today &&
-      t.status.includes('sent')
-    ).length;
-    
-    if (todaySent >= sendSafety.maxPerDay) {
-      setStatus('⚠️ Daily send limit reached. Emails will resume tomorrow.');
-      return;
+    try {
+      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
+      await updateDoc(targetRef, {
+        personalization: personalization,
+        status: 'personalized',
+        lastUpdated: serverTimestamp()
+      });
+      
+      setTargets(prev => prev.map(t => 
+        t.id === targetId 
+          ? { ...t, personalization, status: 'personalized', lastUpdated: new Date() }
+          : t
+      ));
+      
+      updateKPIs();
+    } catch (error) {
+      console.error('Failed to update personalization:', error);
     }
-    
-    if (kpis.bounceRate > 0.05) {
-      setStatus('⚠️ High bounce rate detected. Sending paused.');
-      return;
-    }
-    
+  };
+
+  // OUTREACH EXECUTION
+  const executeOutreach = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
-    if (!target || !target.email) {
-      setStatus('❌ Target email not found or invalid');
-      return;
-    }
-    
-    // Verify email is not risky
-    if (target.emailVerification?.risky) {
-      setStatus('⚠️ Email flagged as risky. Skipping send.');
+    if (!target || !target.personalization.observation) {
+      setStatus('❌ Please complete personalization first');
       return;
     }
     
     try {
-      // Get template
-      const template = currentCampaign?.templates[templateType];
-      if (!template) {
-        setStatus('❌ Template not found');
-        return;
-      }
+      const template = PROVEN_TEMPLATES.email1;
+      const renderedEmail = renderTemplate(template, target);
       
-      // Render email
-      const renderedEmail = renderEmailTemplate(template, target);
+      setStatus(`📧 Sending outreach to ${target.companyName}...`);
       
-      // Simulate sending email
-      setStatus(`📧 Sending ${templateType} to ${target.companyName}...`);
-      
-      // Simulate email send delay
+      // Simulate email send
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Update target status
-      const newStatus = templateType === 'email1' ? 'email1_sent' : 
-                       templateType === 'email2' ? 'email2_sent' : 'breakup_sent';
-      
-      const updatedTarget = {
-        ...target,
-        status: newStatus,
-        lastContacted: new Date(),
-        sequenceDay: target.sequenceDay + 1,
-        lastUpdated: new Date(),
-        emailHistory: [
-          ...(target.emailHistory || []),
-          {
-            type: templateType,
-            sentAt: new Date(),
-            subject: renderedEmail.subject,
-            body: renderedEmail.body,
-            status: 'sent'
-          }
-        ]
+      const activity = {
+        type: 'email',
+        template: 'email1',
+        sentAt: new Date(),
+        subject: renderedEmail.subject,
+        body: renderedEmail.body,
+        status: 'sent'
       };
       
-      await updateTarget(updatedTarget);
-      
-      // Update KPIs
-      setKpis(prev => ({
-        ...prev,
-        sent: prev.sent + 1,
-        replyRate: prev.sent > 0 ? ((prev.replies / (prev.sent + 1)) * 100) : 0,
-        bounceRate: prev.sent > 0 ? ((prev.bounces / (prev.sent + 1)) * 100) : 0
-      }));
-      
-      // Update send safety
-      setSendSafety(prev => ({
-        ...prev,
-        currentDaySent: todaySent + 1,
-        lastSendDate: new Date()
-      }));
-      
-      setStatus(`✅ ${templateType} sent to ${target.companyName}`);
+      await updateTargetActivity(targetId, activity, 'email1_sent');
+      setStatus(`✅ Outreach sent to ${target.companyName}`);
       
       // Schedule next contact
-      scheduleNextContact(updatedTarget);
-      
-      // Auto-exit check
-      if (newStatus === 'breakup_sent') {
-        setTimeout(() => {
-          moveToNurture(targetId);
-        }, 7 * 24 * 60 * 60 * 1000); // 7 days after breakup
-      }
+      scheduleNextContact(targetId, 'email1_sent');
       
     } catch (error) {
-      console.error('Failed to send email:', error);
-      setStatus(`❌ Failed to send email: ${error.message}`);
+      console.error('Failed to send outreach:', error);
+      setStatus(`❌ Failed to send outreach: ${error.message}`);
     }
   };
 
-  // Render email template
-  const renderEmailTemplate = (template, target) => {
+  const renderTemplate = (template, target) => {
     const senderName = user?.displayName || 'Team';
-    const bookingLink = 'https://calendly.com/your-team/10min'; // Would get from user settings
+    const senderTitle = 'Business Development';
+    const senderCompany = 'Your Company';
+    const bookingLink = 'https://calendly.com/your-team/10min';
     
-    let rendered = template.body;
+    let subject = template.subject;
+    let body = template.body;
     
     // Replace variables
-    rendered = rendered.replace(/\{\{company_name\}\}/g, target.companyName);
-    rendered = rendered.replace(/\{\{first_name\}\}/g, target.decisionMakers[0]?.name || 'there');
-    rendered = rendered.replace(/\{\{trigger\}\}/g, target.research.trigger || 'recent developments');
-    rendered = rendered.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation || '');
-    rendered = rendered.replace(/\{\{personalization_impact\}\}/g, target.personalization.impact || '');
-    rendered = rendered.replace(/\{\{social_proof\}\}/g, 'We\'ve helped 50+ SaaS companies scale their customer acquisition');
-    rendered = rendered.replace(/\{\{booking_link\}\}/g, bookingLink);
-    rendered = rendered.replace(/\{\{sender_name\}\}/g, senderName);
+    subject = subject.replace(/\{\{company_name\}\}/g, target.companyName);
+    subject = subject.replace(/\{\{sender_company\}\}/g, senderCompany);
     
-    return {
-      subject: template.subject.replace(/\{\{company_name\}\}/g, target.companyName),
-      body: rendered
-    };
+    body = body.replace(/\{\{first_name\}\}/g, target.research.decisionMakers[0]?.name || 'there');
+    body = body.replace(/\{\{company_name\}\}/g, target.companyName);
+    body = body.replace(/\{\{industry\}\}/g, target.industry);
+    body = body.replace(/\{\{personalization_trigger\}\}/g, target.research.trigger);
+    body = body.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation);
+    body = body.replace(/\{\{personalization_impact\}\}/g, target.personalization.impact);
+    body = body.replace(/\{\{social_proof\}\}/g, target.personalization.socialProof);
+    body = body.replace(/\{\{case_study_relevant_to_them\}\}/g, target.personalization.caseStudy);
+    body = body.replace(/\{\{new_trigger_or_insight\}\}/g, 'I noticed your recent company updates');
+    body = body.replace(/\{\{booking_link\}\}/g, bookingLink);
+    body = body.replace(/\{\{sender_name\}\}/g, senderName);
+    body = body.replace(/\{\{sender_title\}\}/g, senderTitle);
+    
+    return { subject, body };
   };
 
-  // Schedule next contact
-  const scheduleNextContact = (target) => {
-    const cadence = currentCampaign?.cadence;
-    if (!cadence) return;
-    
-    const dayKey = `day${target.sequenceDay}`;
-    const nextActions = cadence[dayKey];
-    
-    if (nextActions && nextActions.length > 0) {
-      const nextDate = new Date();
-      const daysToAdd = target.sequenceDay === 0 ? 0 : 
-                       target.sequenceDay === 1 ? 3 : 
-                       target.sequenceDay === 2 ? 5 : 7;
-      
-      nextDate.setDate(nextDate.getDate() + daysToAdd);
-      
-      updateTarget({
-        ...target,
-        nextContactDate: nextDate
-      });
-    }
-  };
-
-  // Send social media message
-  const sendSocialMessage = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
+  const updateTargetActivity = async (targetId, activity, newStatus) => {
+    if (!user?.uid || !db) return;
     
     try {
-      // Get social template
-      const template = currentCampaign?.templates.social;
-      if (!template) return;
+      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
+      await updateDoc(targetRef, {
+        activity: [...(targets.find(t => t.id === targetId)?.activity || []), activity],
+        status: newStatus,
+        lastContacted: serverTimestamp(),
+        lastUpdated: serverTimestamp()
+      });
       
-      // Render social message
-      const renderedMessage = renderSocialTemplate(template, target);
+      setTargets(prev => prev.map(t => 
+        t.id === targetId 
+          ? { 
+              ...t, 
+              activity: [...(t.activity || []), activity], 
+              status: newStatus, 
+              lastContacted: new Date(),
+              lastUpdated: new Date()
+            }
+          : t
+      ));
       
-      setStatus(`📱 Sending social message to ${target.companyName}...`);
-      
-      // Simulate social media send
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Update target status
-      const updatedTarget = {
-        ...target,
-        status: 'social_attempted',
-        lastContacted: new Date(),
-        lastUpdated: new Date(),
-        socialHistory: [
-          ...(target.socialHistory || []),
-          {
-            type: 'social',
-            sentAt: new Date(),
-            message: renderedMessage,
-            platform: 'LinkedIn',
-            status: 'sent'
-          }
-        ]
-      };
-      
-      await updateTarget(updatedTarget);
-      setStatus(`✅ Social message sent to ${target.companyName}`);
-      
+      updateKPIs();
     } catch (error) {
-      console.error('Failed to send social message:', error);
-      setStatus(`❌ Failed to send social message: ${error.message}`);
+      console.error('Failed to update activity:', error);
     }
   };
 
-  // Render social media template
-  const renderSocialTemplate = (template, target) => {
-    let rendered = template;
-    
-    // Replace variables
-    rendered = rendered.replace(/\{\{first_name\}\}/g, target.decisionMakers[0]?.name || 'there');
-    rendered = rendered.replace(/\{\{company_name\}\}/g, target.companyName);
-    rendered = rendered.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation || '');
-    
-    return rendered;
-  };
-
-  // Handle reply
-  const handleReply = async (targetId) => {
+  const scheduleNextContact = (targetId, currentStatus) => {
     const target = targets.find(t => t.id === targetId);
     if (!target) return;
     
-    const updatedTarget = {
-      ...target,
-      status: 'replied',
-      lastUpdated: new Date()
-    };
+    let nextDate = new Date();
+    let nextAction = null;
     
-    await updateTarget(updatedTarget);
-    
-    setKpis(prev => ({
-      ...prev,
-      replies: prev.replies + 1,
-      replyRate: prev.sent > 0 ? ((prev.replies + 1) / prev.sent) * 100 : 0
-    }));
-    
-    setStatus(`✅ Reply recorded for ${target.companyName}`);
-  };
-
-  // Handle meeting booked
-  const handleMeetingBooked = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
-    
-    const updatedTarget = {
-      ...target,
-      status: 'booked',
-      lastUpdated: new Date()
-    };
-    
-    await updateTarget(updatedTarget);
-    
-    setKpis(prev => ({
-      ...prev,
-      meetings: prev.meetings + 1,
-      meetingRate: prev.sent > 0 ? ((prev.meetings + 1) / prev.sent) * 100 : 0
-    }));
-    
-    setStatus(`🎉 Meeting booked with ${target.companyName}!`);
-  };
-
-  // Handle bounce
-  const handleBounce = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
-    
-    const updatedTarget = {
-      ...target,
-      status: 'bounced',
-      lastUpdated: new Date()
-    };
-    
-    await updateTarget(updatedTarget);
-    
-    setKpis(prev => ({
-      ...prev,
-      bounces: prev.bounces + 1,
-      bounceRate: prev.sent > 0 ? ((prev.bounces + 1) / prev.sent) * 100 : 0
-    }));
-    
-    // Pause sending if bounce rate > 5%
-    if ((kpis.bounces + 1) / kpis.sent > 0.05) {
-      setSendSafety(prev => ({ ...prev, paused: true }));
-      setStatus('⚠️ High bounce rate detected. Sending paused.');
+    if (currentStatus === 'email1_sent') {
+      nextDate.setDate(nextDate.getDate() + 3);
+      nextAction = 'email2';
+    } else if (currentStatus === 'email2_sent') {
+      nextDate.setDate(nextDate.getDate() + 4);
+      nextAction = 'breakup';
     }
     
-    setStatus(`📧 Bounce recorded for ${target.companyName}`);
+    if (nextAction) {
+      setTimeout(() => {
+        setStatus(`📅 ${target.companyName}: ${nextAction} scheduled for ${nextDate.toLocaleDateString()}`);
+      }, 1000);
+    }
   };
 
-  // Move to nurture
-  const moveToNurture = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
-    
-    const updatedTarget = {
-      ...target,
-      status: 'nurture',
-      nurtureDate: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)), // 30 days from now
-      lastUpdated: new Date()
-    };
-    
-    await updateTarget(updatedTarget);
-    setStatus(`📅 ${target.companyName} moved to nurture sequence`);
+  // MANUAL WORKFLOW HANDLERS
+  const saveManualResearch = async (targetId, research) => {
+    setManualResearch(prev => ({ ...prev, [targetId]: research }));
+    await updateTargetResearch(targetId, research);
   };
 
-  // Utility functions
+  const saveManualPersonalization = async (targetId, personalization) => {
+    setManualPersonalization(prev => ({ ...prev, [targetId]: personalization }));
+    await updateTargetPersonalization(targetId, personalization);
+  };
+
+  // UTILITY FUNCTIONS
   const parseCsvRow = (text) => {
     const result = [];
     let current = '';
@@ -976,16 +757,60 @@ export default function FinalOptimalSalesMachine() {
     return emailRegex.test(email.trim());
   };
 
-  // Auth effect
+  const saveTargets = async (targets) => {
+    if (!user?.uid || !db || targets.length === 0) return;
+    
+    try {
+      const targetsRef = collection(db, 'users', user.uid, 'targets');
+      
+      for (const target of targets) {
+        const targetRef = doc(targetsRef);
+        await setDoc(targetRef, {
+          ...target,
+          createdAt: serverTimestamp(),
+          lastUpdated: serverTimestamp()
+        });
+      }
+      
+      await loadTargets(user.uid);
+    } catch (error) {
+      console.error('Failed to save targets:', error);
+      throw error;
+    }
+  };
+
+  const updateKPIs = useCallback(() => {
+    const totalTargets = targets.length;
+    const researched = targets.filter(t => t.status === 'researched' || t.status === 'personalized' || t.status.includes('sent')).length;
+    const personalized = targets.filter(t => t.status === 'personalized' || t.status.includes('sent')).length;
+    const sent = targets.filter(t => t.status.includes('sent')).length;
+    const replies = targets.filter(t => t.status === 'replied').length;
+    const meetings = targets.filter(t => t.status === 'booked').length;
+    
+    setKpi({
+      totalTargets,
+      researched,
+      personalized,
+      sent,
+      replies,
+      meetings,
+      replyRate: sent > 0 ? (replies / sent) * 100 : 0,
+      meetingRate: sent > 0 ? (meetings / sent) * 100 : 0,
+      costPerReply: sent > 0 ? (sent * 50) / replies : 0, // Assuming $50 per send
+      costPerMeeting: meetings > 0 ? (sent * 50) / meetings : 0
+    });
+  }, [targets]);
+
+  // EFFECTS
   useEffect(() => {
     if (!auth) {
-      setLoadingAuth(false);
+      setLoading(false);
       return;
     }
     
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
-      setLoadingAuth(false);
+      setLoading(false);
       if (user) {
         initializeUserData(user.uid);
       }
@@ -994,20 +819,20 @@ export default function FinalOptimalSalesMachine() {
     return unsubscribe;
   }, []);
 
-  // Loading state
-  if (loadingAuth) {
+  // LOADING STATE
+  if (loading) {
     return (
       <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <p>Loading Final Optimal Sales Machine...</p>
-          <p className="text-sm text-gray-400 mt-2">Best of Both Worlds: Complete Manual Control + Strategic AI</p>
+          <p className="text-sm text-gray-400 mt-2">Real B2B Sales, Real Results</p>
         </div>
       </div>
     );
   }
 
-  // Not signed in
+  // AUTH STATE
   if (!user) {
     return (
       <>
@@ -1020,7 +845,8 @@ export default function FinalOptimalSalesMachine() {
             <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700/50 shadow-2xl">
               <div className="text-center mb-8">
                 <h1 className="text-3xl font-bold mb-2">Final Optimal B2B Sales Machine</h1>
-                <p className="text-gray-300">Complete Manual Control + Strategic AI</p>
+                <p className="text-gray-300">Real B2B Sales, Real Results</p>
+                <p className="text-sm text-gray-400 mt-2">Manual + AI = Maximum Results</p>
               </div>
               
               <div className="space-y-6">
@@ -1066,14 +892,23 @@ export default function FinalOptimalSalesMachine() {
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center">
                 <h1 className="text-xl font-bold">Final Optimal B2B Sales Machine</h1>
-                {currentCampaign && (
-                  <span className="ml-4 text-sm text-gray-400">
-                    Campaign: {currentCampaign.name}
-                  </span>
-                )}
+                <span className="ml-4 text-sm text-gray-400">
+                  Step: {currentStep} | {targets.length} targets
+                </span>
               </div>
               
               <div className="flex items-center space-x-4">
+                <button
+                  onClick={() => setManualMode(!manualMode)}
+                  className={`px-3 py-1 rounded text-sm ${
+                    manualMode 
+                      ? 'bg-orange-600 hover:bg-orange-700' 
+                      : 'bg-gray-600 hover:bg-gray-700'
+                  }`}
+                >
+                  {manualMode ? 'Manual Mode' : 'AI Mode'}
+                </button>
+                
                 <div className="text-sm text-gray-300">
                   {user.email}
                 </div>
@@ -1088,28 +923,30 @@ export default function FinalOptimalSalesMachine() {
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Status Messages */}
-          {status && (
-            <div className="mb-6 p-4 bg-blue-600/20 border border-blue-600/50 rounded-lg">
+        {/* Status Messages */}
+        {status && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+            <div className="p-4 bg-blue-600/20 border border-blue-600/50 rounded-lg">
               <p>{status}</p>
             </div>
-          )}
+          </div>
+        )}
 
+        {/* Main Content */}
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* KPI Dashboard */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
               <div className="flex items-center">
                 <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center mr-3">
                   <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-5.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 015.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-400">Sent</p>
-                  <p className="text-2xl font-bold text-blue-400">{kpis.sent}</p>
-                  <p className="text-xs text-gray-500">Daily: {sendSafety.currentDaySent}/{sendSafety.maxPerDay}</p>
+                  <p className="text-sm text-gray-400">Total Targets</p>
+                  <p className="text-2xl font-bold text-blue-400">{kpi.totalTargets}</p>
+                  <p className="text-xs text-gray-500">Max: 50</p>
                 </div>
               </div>
             </div>
@@ -1123,8 +960,8 @@ export default function FinalOptimalSalesMachine() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-400">Replies</p>
-                  <p className="text-2xl font-bold text-green-400">{kpis.replies}</p>
-                  <p className="text-xs text-gray-500">Rate: {kpis.replyRate.toFixed(1)}%</p>
+                  <p className="text-2xl font-bold text-green-400">{kpi.replies}</p>
+                  <p className="text-xs text-gray-500">Rate: {kpi.replyRate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
@@ -1138,55 +975,37 @@ export default function FinalOptimalSalesMachine() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-400">Meetings</p>
-                  <p className="text-2xl font-bold text-purple-400">{kpis.meetings}</p>
-                  <p className="text-xs text-gray-500">Rate: {kpis.meetingRate.toFixed(1)}%</p>
+                  <p className="text-2xl font-bold text-purple-400">{kpi.meetings}</p>
+                  <p className="text-xs text-gray-500">Rate: {kpi.meetingRate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
             
             <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
               <div className="flex items-center">
-                <div className="w-8 h-8 bg-red-500/20 rounded-full flex items-center justify-center mr-3">
-                  <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                <div className="w-8 h-8 bg-yellow-500/20 rounded-full flex items-center justify-center mr-3">
+                  <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v8m0-8c.538 0 1.045.091 1.5.256M12 8V7m0 1v8m0 0v8m0-8c.538 0 1.045.091 1.5.256" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-400">Bounces</p>
-                  <p className="text-2xl font-bold text-red-400">{kpis.bounces}</p>
-                  <p className="text-xs text-gray-500">Rate: {kpis.bounceRate.toFixed(1)}%</p>
+                  <p className="text-sm text-gray-400">Cost/Reply</p>
+                  <p className="text-2xl font-bold text-yellow-400">${kpi.costPerReply.toFixed(0)}</p>
+                  <p className="text-xs text-gray-500">Per reply</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="border-b border-gray-700 mb-8">
-            <nav className="flex space-x-8">
-              {['icp', 'targets', 'campaign', 'analytics'].map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`py-2 px-1 border-b-2 font-medium text-sm capitalize ${
-                    activeTab === tab
-                      ? 'border-blue-500 text-blue-400'
-                      : 'border-transparent text-gray-400 hover:text-gray-300'
-                  }`}
-                >
-                  {tab === 'icp' ? 'ICP & Setup' : tab === 'targets' ? 'Target Companies' : tab === 'campaign' ? 'Campaign' : 'Analytics'}
-                </button>
-              ))}
-            </nav>
-          </div>
-
-          {/* Tab Content */}
-          {activeTab === 'icp' && (
+          {/* Workflow Steps */}
+          {currentStep === 'setup' && (
             <div className="space-y-6">
               <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Tight ICP Definition</h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="text-lg font-medium mb-3">Target Profile</h3>
+                <h2 className="text-xl font-semibold mb-4">Campaign Setup</h2>
+                
+                <div className="mb-6">
+                  <h3 className="text-lg font-medium mb-3">Target Profile (ICP)</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-gray-400">Industry:</span>
@@ -1200,45 +1019,35 @@ export default function FinalOptimalSalesMachine() {
                         <span className="text-gray-400">Funding:</span>
                         <span className="font-medium">{TIGHT_ICP.funding}</span>
                       </div>
+                    </div>
+                    
+                    <div className="space-y-2">
                       <div className="flex justify-between">
                         <span className="text-gray-400">Geography:</span>
                         <span className="font-medium">{TIGHT_ICP.geo}</span>
                       </div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <h3 className="text-lg font-medium mb-3">Triggers & Pain Points</h3>
-                    <div className="space-y-2">
                       <div>
                         <span className="text-gray-400">Primary Pain:</span>
                         <p className="font-medium mt-1">{TIGHT_ICP.pain}</p>
                       </div>
-                      <div>
-                        <span className="text-gray-400">Key Trigger:</span>
-                        <p className="font-medium mt-1">{TIGHT_ICP.trigger}</p>
-                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Campaign Setup</h2>
-                {!currentCampaign ? (
+                {!activeCampaign ? (
                   <div className="text-center">
                     <button
                       onClick={createCampaign}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                     >
-                      Create New Campaign
+                      Create Campaign
                     </button>
-                    <p className="text-gray-400 mt-2">Start by creating your first campaign</p>
+                    <p className="text-gray-400 mt-2">Start by creating your campaign</p>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium">{currentCampaign.name}</h3>
+                      <h3 className="text-lg font-medium">{activeCampaign.name}</h3>
                       <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">
                         Active
                       </span>
@@ -1247,322 +1056,28 @@ export default function FinalOptimalSalesMachine() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <h4 className="text-sm font-medium text-gray-400 mb-2">Templates</h4>
-                        <div className="space-y-1">
-                          <div className="text-sm">Email 1: Intro (&lt;120 words)</div>
-                          <div className="text-sm">Email 2: Social Proof (&lt;120 words)</div>
-                          <div className="text-sm">Breakup: Closing (&lt;120 words)</div>
+                        <div className="space-y-1 text-sm">
+                          <div>• Email 1: Introduction + Personalization</div>
+                          <div>• Email 2: Follow-up + New Insight</div>
+                          <div>• Breakup: Professional Closing</div>
                         </div>
                       </div>
                       
                       <div>
                         <h4 className="text-sm font-medium text-gray-400 mb-2">Cadence</h4>
-                        <div className="space-y-1">
-                          <div className="text-sm">Day 0: Email 1 + Social</div>
-                          <div className="text-sm">Day 3: Email 2</div>
-                          <div className="text-sm">Day 5: Social (if connected)</div>
-                          <div className="text-sm">Day 7: Breakup</div>
+                        <div className="space-y-1 text-sm">
+                          <div>• Day 0: Email 1</div>
+                          <div>• Day 3: Email 2 + LinkedIn</div>
+                          <div>• Day 7: Breakup + LinkedIn</div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'targets' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Upload Target Companies (Max 50)</h2>
-                <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
-                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-gray-400 mb-2">Drop your CSV file here or click to browse</p>
-                  <p className="text-sm text-gray-500 mb-4">Required columns: company_name, email, website, industry, size, funding</p>
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleCsvUpload}
-                    disabled={isUploading || !currentCampaign}
-                    className="hidden"
-                    id="csv-upload"
-                  />
-                  <label
-                    htmlFor="csv-upload"
-                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
-                      isUploading || !currentCampaign
-                        ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {isUploading ? 'Processing...' : 'Choose CSV File'}
-                  </label>
-                </div>
-                
-                {targets.length > 0 && (
-                  <div className="mt-4 text-sm text-gray-400">
-                    <p>Loaded: {targets.length}/50 target companies</p>
-                  </div>
-                )}
-              </div>
-
-              {targets.length > 0 && (
-                <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                  <h2 className="text-xl font-semibold mb-4">Target Companies ({targets.length})</h2>
-                  <div className="space-y-4">
-                    {targets.map((target) => (
-                      <div key={target.id} className="bg-gray-700 rounded-lg p-4">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-lg">{target.companyName}</h3>
-                            <p className="text-gray-400">{target.email}</p>
-                            {target.website && (
-                              <a href={target.website} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-sm">
-                                {target.website}
-                              </a>
-                            )}
-                            <div className="mt-2 flex items-center space-x-4 text-sm text-gray-400">
-                              <span>{target.industry}</span>
-                              <span>{target.size}</span>
-                              <span>{target.funding}</span>
-                            </div>
-                            
-                            {/* Research and Personalization */}
-                            {target.research.trigger && (
-                              <div className="mt-3 p-3 bg-gray-600/50 rounded">
-                                <p className="text-sm text-gray-300">
-                                  <strong>Research:</strong> {target.research.headline}
-                                </p>
-                                <p className="text-sm text-gray-400 mt-1">
-                                  <strong>Trigger:</strong> {target.research.trigger}
-                                </p>
-                              </div>
-                            )}
-                            
-                            {target.personalization.observation && (
-                              <div className="mt-3 p-3 bg-blue-600/20 rounded">
-                                <p className="text-sm text-gray-300">
-                                  <strong>Observation:</strong> {target.personalization.observation}
-                                </p>
-                                <p className="text-sm text-gray-400 mt-1">
-                                  <strong>Impact:</strong> {target.personalization.impact}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                          
-                          <div className="ml-4 space-y-2">
-                            <StatusBadge status={target.status} />
-                            
-                            {/* Action Buttons */}
-                            <div className="flex flex-col space-y-2">
-                              {target.status === 'new' && (
-                                <button
-                                  onClick={() => startResearch(target.id)}
-                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Research
-                                </button>
-                              )}
-                              
-                              {target.status === 'researching' && (
-                                <button
-                                  onClick={() => createPersonalization(target.id)}
-                                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Personalize
-                                </button>
-                              )}
-                              
-                              {target.status === 'personalized' && (
-                                <button
-                                  onClick={() => sendEmail(target.id, 'email1')}
-                                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Send Email 1
-                                </button>
-                              )}
-                              
-                              {target.status === 'email1_sent' && (
-                                <button
-                                  onClick={() => sendSocialMessage(target.id)}
-                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Send Social
-                                </button>
-                              )}
-                              
-                              {target.status === 'social_attempted' && (
-                                <button
-                                  onClick={() => sendEmail(target.id, 'email2')}
-                                  className="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Send Email 2
-                                </button>
-                              )}
-                              
-                              {target.status === 'email2_sent' && (
-                                <button
-                                  onClick={() => sendSocialMessage(target.id)}
-                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Send Social
-                                </button>
-                              )}
-                              
-                              {target.status === 'social_attempted' && (
-                                <button
-                                  onClick={() => sendEmail(target.id, 'breakup')}
-                                  className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Send Breakup
-                                </button>
-                              )}
-                              
-                              {(target.status === 'replied' || target.status === 'email2_sent') && (
-                                <button
-                                  onClick={() => handleMeetingBooked(target.id)}
-                                  className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Book Meeting
-                                </button>
-                              )}
-                              
-                              {target.status === 'bounced' && (
-                                <button
-                                  onClick={() => moveToNurture(target.id)}
-                                  className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded transition-colors"
-                                >
-                                  Move to Nurture
-                                </button>
-                              )}
-                              
-                              <button
-                                onClick={() => handleReply(target.id)}
-                                className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
-                              >
-                                Reply
-                              </button>
-                              
-                              <button
-                                onClick={() => handleBounce(target.id)}
-                                className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
-                              >
-                                Bounce
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'campaign' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Campaign Management</h2>
-                
-                {currentCampaign ? (
-                  <div className="space-y-6">
-                    {/* Send Safety Rules */}
-                    <div>
-                      <h3 className="text-lg font-medium mb-3">Send Safety Rules</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-gray-700 p-4 rounded">
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-300">Daily Limit</span>
-                            <span className="font-medium">{sendSafety.currentDaySent}/{sendSafety.maxPerDay}</span>
-                          </div>
-                          <div className="mt-2 w-full bg-gray-600 rounded-full h-2">
-                            <div 
-                              className="bg-blue-500 h-2 rounded-full" 
-                              style={{ width: `${(sendSafety.currentDaySent / sendSafety.maxPerDay) * 100}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                        
-                        <div className="bg-gray-700 p-4 rounded">
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-300">Bounce Rate</span>
-                            <span className={`font-medium ${kpis.bounceRate > 5 ? 'text-red-400' : 'text-green-400'}`}>
-                              {kpis.bounceRate.toFixed(1)}%
-                            </span>
-                          </div>
-                          {kpis.bounceRate > 5 && (
-                            <p className="text-red-400 text-sm mt-1">⚠️ Sending paused</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Auto-Exit Rules */}
-                    <div>
-                      <h3 className="text-lg font-medium mb-3">Auto-Exit Rules</h3>
-                      <div className="space-y-2">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                          <span className="text-sm">If replied → remove from sequence</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                          <span className="text-sm">If meeting booked → remove from sequence</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                          <span className="text-sm">If bounced → pause lead</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Weekly KPI Check */}
-                    <div>
-                      <h3 className="text-lg font-medium mb-3">Weekly KPI Check</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-gray-700 p-4 rounded">
-                          <div className="flex justify-between">
-                            <span className="text-gray-300">Reply Rate</span>
-                            <span className={`font-medium ${kpis.replyRate > 10 ? 'text-green-400' : 'text-yellow-400'}`}>
-                              {kpis.replyRate.toFixed(1)}%
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: &gt;10%</p>
-                        </div>
-                        
-                        <div className="bg-gray-700 p-4 rounded">
-                          <div className="flex justify-between">
-                            <span className="text-gray-300">Meeting Rate</span>
-                            <span className={`font-medium ${kpis.meetingRate > 5 ? 'text-green-400' : 'text-yellow-400'}`}>
-                              {kpis.meetingRate.toFixed(1)}%
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: &gt;5%</p>
-                        </div>
-                        
-                        <div className="bg-gray-700 p-4 rounded">
-                          <div className="flex justify-between">
-                            <span className="text-gray-300">Bounce Rate</span>
-                            <span className={`font-medium ${kpis.bounceRate < 5 ? 'text-green-400' : 'text-red-400'}`}>
-                              {kpis.bounceRate.toFixed(1)}%
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">Target: &lt;5%</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    <p className="text-gray-400">No active campaign</p>
+                    
                     <button
-                      onClick={createCampaign}
-                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                      onClick={() => setCurrentStep('targets')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                     >
-                      Create Campaign
+                      Next: Upload Targets
                     </button>
                   </div>
                 )}
@@ -1570,71 +1085,214 @@ export default function FinalOptimalSalesMachine() {
             </div>
           )}
 
-          {activeTab === 'analytics' && (
+          {currentStep === 'targets' && (
             <div className="space-y-6">
               <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Analytics Dashboard</h2>
+                <h2 className="text-xl font-semibold mb-4">Upload Target Companies</h2>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-gray-700 rounded-lg p-4">
-                    <h3 className="text-lg font-medium mb-2">Campaign Performance</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span>Total Sent:</span>
-                        <span className="font-bold">{kpis.sent}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Reply Rate:</span>
-                        <span className={`font-bold ${kpis.replyRate > 10 ? 'text-green-400' : 'text-yellow-400'}`}>
-                          {kpis.replyRate.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Meeting Rate:</span>
-                        <span className={`font-bold ${kpis.meetingRate > 5 ? 'text-green-400' : 'text-yellow-400'}`}>
-                          {kpis.meetingRate.toFixed(1)}%
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-gray-700 rounded-lg p-4">
-                    <h3 className="text-lg font-medium mb-2">Health Metrics</h3>
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span>Bounce Rate:</span>
-                        <span className={`font-bold ${kpis.bounceRate < 5 ? 'text-green-400' : 'text-red-400'}`}>
-                          {kpis.bounceRate.toFixed(1)}%
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Targets in Sequence:</span>
-                        <span className="font-bold">{targets.filter(t => !['replied', 'booked', 'bounced', 'nurture'].includes(t.status)).length}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Nurture Queue:</span>
-                        <span className="font-bold">{targets.filter(t => t.status === 'nurture').length}</span>
-                      </div>
-                    </div>
-                  </div>
+                <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
+                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  <p className="text-gray-400 mb-2">Drop your CSV file here or click to browse</p>
+                  <p className="text-sm text-gray-500 mb-4">
+                    Required: company_name, email, website, industry, size, funding
+                  </p>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCsvUpload}
+                    className="hidden"
+                    id="csv-upload"
+                  />
+                  <label
+                    htmlFor="csv-upload"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Choose CSV File
+                  </label>
                 </div>
-
-                {/* Target Status Breakdown */}
-                <div className="mt-6">
-                  <h3 className="text-lg font-medium mb-3">Target Status Breakdown</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {CONTACT_STATUSES.map(status => {
-                      const count = targets.filter(t => t.status === status.id).length;
-                      if (count === 0) return null;
-                      
-                      return (
-                        <div key={status.id} className="bg-gray-700 p-3 rounded text-center">
-                          <div className="text-2xl font-bold">{count}</div>
-                          <div className="text-sm text-gray-400">{status.label}</div>
+                
+                {targets.length > 0 && (
+                  <div className="mt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-medium">Loaded Targets ({targets.length}/50)</h3>
+                      <button
+                        onClick={() => setCurrentStep('research')}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                      >
+                        Next: Research
+                      </button>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      {targets.slice(0, 5).map(target => (
+                        <div key={target.id} className="bg-gray-700 p-3 rounded flex justify-between items-center">
+                          <div>
+                            <div className="font-medium">{target.companyName}</div>
+                            <div className="text-sm text-gray-400">{target.industry} • {target.size}</div>
+                          </div>
+                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
+                            {target.status}
+                          </span>
                         </div>
-                      );
-                    })}
+                      ))}
+                      {targets.length > 5 && (
+                        <p className="text-center text-gray-400 text-sm">
+                          ... and {targets.length - 5} more
+                        </p>
+                      )}
+                    </div>
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 'research' && (
+            <div className="space-y-6">
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h2 className="text-xl font-semibold mb-4">Research Phase</h2>
+                <p className="text-gray-400 mb-4">
+                  {manualMode ? 'Manual research mode: Research each company manually' : 'AI research mode: AI will research companies for you'}
+                </p>
+                
+                <div className="space-y-4">
+                  {targets.map(target => (
+                    <div key={target.id} className="bg-gray-700 p-4 rounded-lg">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">{target.companyName}</h3>
+                          <p className="text-gray-400">{target.industry} • {target.size}</p>
+                        </div>
+                        <div className="flex space-x-2">
+                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
+                            {target.status}
+                          </span>
+                          {target.status === 'new' && (
+                            <button
+                              onClick={() => startResearch(target.id)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 text-xs rounded transition-colors"
+                            >
+                              Research
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {target.research.trigger && (
+                        <div className="bg-gray-600/50 p-3 rounded">
+                          <p className="text-sm text-gray-300">
+                            <strong>Trigger:</strong> {target.research.trigger}
+                          </p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            <strong>Observation:</strong> {target.research.observation}
+                          </p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            <strong>Impact:</strong> {target.research.impact}
+                          </p>
+                          {target.research.decisionMakers.length > 0 && (
+                            <div className="mt-2">
+                              <strong>Decision Makers:</strong>
+                              <ul className="text-sm text-gray-400 mt-1">
+                                {target.research.decisionMakers.map((dm, idx) => (
+                                  <li key={idx}>
+                                    {dm.name} - {dm.role} ({dm.verified ? '✓' : '?'})
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {manualMode && manualResearch[target.id] && (
+                        <ManualResearchForm
+                          target={target}
+                          research={manualResearch[target.id]}
+                          onSave={(research) => saveManualResearch(target.id, research)}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                
+                {targets.filter(t => t.status === 'researched' || t.status === 'personalized').length > 0 && (
+                  <div className="mt-6 text-center">
+                    <button
+                      onClick={() => setCurrentStep('personalization')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                    >
+                      Next: Personalization
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 'personalization' && (
+            <div className="space-y-6">
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h2 className="text-xl font-semibold mb-4">Personalization Phase</h2>
+                <p className="text-gray-400 mb-4">
+                  {manualMode ? 'Manual personalization: Craft personalized outreach for each company' : 'AI personalization: AI will create personalized outreach'}
+                </p>
+                
+                <div className="space-y-4">
+                  {targets.filter(t => t.status === 'researched' || t.status === 'personalized').map(target => (
+                    <div key={target.id} className="bg-gray-700 p-4 rounded-lg">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">{target.companyName}</h3>
+                          <p className="text-sm text-gray-400">{target.research.trigger}</p>
+                        </div>
+                        <div className="flex space-x-2">
+                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
+                            {target.status}
+                          </span>
+                          {target.status === 'researched' && (
+                            <button
+                              onClick={() => startPersonalization(target.id)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 text-xs rounded transition-colors"
+                            >
+                              Personalize
+                            </button>
+                          )}
+                          {target.status === 'personalized' && (
+                            <button
+                              onClick={() => executeOutreach(target.id)}
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 text-xs rounded transition-colors"
+                            >
+                              Send Outreach
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {target.personalization.observation && (
+                        <div className="bg-blue-600/20 p-3 rounded">
+                          <p className="text-sm text-gray-300">
+                            <strong>Observation:</strong> {target.personalization.observation}
+                          </p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            <strong>Impact:</strong> {target.personalization.impact}
+                          </p>
+                          <p className="text-sm text-gray-400 mt-1">
+                            <strong>Social Proof:</strong> {target.personalization.socialProof}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {manualMode && manualPersonalization[target.id] && (
+                        <ManualPersonalizationForm
+                          target={target}
+                          personalization={manualPersonalization[target.id]}
+                          onSave={(personalization) => saveManualPersonalization(target.id, personalization)}
+                        />
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1645,27 +1303,136 @@ export default function FinalOptimalSalesMachine() {
   );
 }
 
-// Status Badge Component
-function StatusBadge({ status }) {
-  const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
-  if (!statusInfo) return null;
-  
-  const colors = {
-    gray: 'bg-gray-600',
-    blue: 'bg-blue-600',
-    indigo: 'bg-indigo-600',
-    purple: 'bg-purple-600',
-    orange: 'bg-orange-600',
-    yellow: 'bg-yellow-600',
-    red: 'bg-red-600',
-    green: 'bg-green-600',
-    emerald: 'bg-emerald-600',
-    rose: 'bg-rose-600'
+// Manual Research Form Component
+function ManualResearchForm({ target, research, onSave }) {
+  const [formData, setFormData] = useState(research || {
+    trigger: '',
+    triggerDate: null,
+    triggerSource: '',
+    observation: '',
+    impact: '',
+    decisionMakers: []
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(formData);
   };
-  
+
   return (
-    <span className={`${colors[statusInfo.color]} text-white px-2 py-1 rounded-full text-xs font-medium`}>
-      {statusInfo.label}
-    </span>
+    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Trigger</label>
+        <input
+          type="text"
+          value={formData.trigger}
+          onChange={(e) => setFormData(prev => ({ ...prev, trigger: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          placeholder="e.g., Series A funding, product launch, hiring growth"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Observation</label>
+        <textarea
+          value={formData.observation}
+          onChange={(e) => setFormData(prev => ({ ...prev, observation: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          rows={2}
+          placeholder="What did you observe about this company?"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Impact</label>
+        <textarea
+          value={formData.impact}
+          onChange={(e) => setFormData(prev => ({ ...prev, impact: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          rows={2}
+          placeholder="What business problem might they be facing?"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Decision Maker</label>
+        <input
+          type="text"
+          value={formData.decisionMakers[0]?.name || ''}
+          onChange={(e) => setFormData(prev => ({
+            ...prev,
+            decisionMakers: [{ ...prev.decisionMakers[0], name: e.target.value }]
+          }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          placeholder="Name of decision maker"
+        />
+      </div>
+      
+      <button
+        type="submit"
+        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition-colors"
+      >
+        Save Research
+      </button>
+    </form>
+  );
+}
+
+// Manual Personalization Form Component
+function ManualPersonalizationForm({ target, personalization, onSave }) {
+  const [formData, setFormData] = useState(personalization || {
+    observation: '',
+    impact: '',
+    socialProof: '',
+    caseStudy: ''
+  });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave(formData);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Observation</label>
+        <textarea
+          value={formData.observation}
+          onChange={(e) => setFormData(prev => ({ ...prev, observation: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          rows={2}
+          placeholder="Specific observation about their company"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Impact</label>
+        <textarea
+          value={formData.impact}
+          onChange={(e) => setFormData(prev => ({ ...prev, impact: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          rows={2}
+          placeholder="How can you help them?"
+        />
+      </div>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">Social Proof</label>
+        <textarea
+          value={formData.socialProof}
+          onChange={(e) => setFormData(prev => ({ ...prev, socialProof: e.target.value }))}
+          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
+          rows={2}
+          placeholder="Relevant success story or client result"
+        />
+      </div>
+      
+      <button
+        type="submit"
+        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition-colors"
+      >
+        Save Personalization
+      </button>
+    </form>
   );
 }
