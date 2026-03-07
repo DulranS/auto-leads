@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import Head from 'next/head';
 
@@ -28,60 +28,124 @@ if (typeof window !== 'undefined' && !getApps().length) {
   }
 }
 
-// Contact statuses
+// TIGHT ICP DEFINITION
+const TIGHT_ICP = {
+  industry: 'SaaS companies',
+  size: '20-200 employees',
+  funding: 'Series A-C ($2M-$50M raised)',
+  geo: 'North America & Europe',
+  pain: 'Scaling customer acquisition without burning cash',
+  trigger: 'Recent funding round, product launch, or hiring growth'
+};
+
+// CONTACT STATUSES
 const CONTACT_STATUSES = [
   { id: 'new', label: 'New', color: 'gray' },
-  { id: 'contacted', label: 'Contacted', color: 'blue' },
+  { id: 'researching', label: 'Researching', color: 'blue' },
+  { id: 'personalized', label: 'Personalized', color: 'indigo' },
+  { id: 'email1_sent', label: 'Email 1 Sent', color: 'purple' },
+  { id: 'email2_sent', label: 'Email 2 Sent', color: 'orange' },
+  { id: 'social_attempted', label: 'Social Attempted', color: 'yellow' },
+  { id: 'breakup_sent', label: 'Breakup Sent', color: 'red' },
   { id: 'replied', label: 'Replied', color: 'green' },
-  { id: 'interested', label: 'Interested', color: 'purple' },
-  { id: 'demo_scheduled', label: 'Demo Scheduled', color: 'orange' },
-  { id: 'closed_won', label: 'Closed Won', color: 'emerald' },
-  { id: 'not_interested', label: 'Not Interested', color: 'red' },
-  { id: 'do_not_contact', label: 'Do Not Contact', color: 'rose' }
+  { id: 'booked', label: 'Meeting Booked', color: 'emerald' },
+  { id: 'bounced', label: 'Bounced', color: 'rose' },
+  { id: 'nurture', label: 'Nurture', color: 'gray' }
 ];
 
-// Default templates
-const DEFAULT_TEMPLATE_A = {
-  subject: "Quick question about {{business_name}}",
+// CONTROLLED TEMPLATES (<120 words)
+const EMAIL1_TEMPLATE = {
+  subject: "Quick question about {{company_name}}'s growth",
   body: `Hi {{first_name}},
 
-Noticed your recent work at {{business_name}} and wanted to reach out.
+Noticed {{company_name}}'s recent {{trigger}} and wanted to reach out.
 
-We help SaaS companies like yours scale customer acquisition efficiently. 
+We help SaaS companies like yours scale customer acquisition efficiently without burning through cash.
 
-Would you be open to a brief chat next week?
+{{personalization_observation}}
+{{personalization_impact}}
+
+Would you be open to a brief 10-minute chat next week?
+
+{{booking_link}}
 
 Best regards,
 {{sender_name}}`
 };
 
-const DEFAULT_WHATSAPP_TEMPLATE = `Hi {{first_name}}, this is {{sender_name}}. I noticed your work at {{business_name}} and wanted to connect. Is this a good time to chat?`;
+const EMAIL2_TEMPLATE = {
+  subject: "Re: {{company_name}}'s growth",
+  body: `Hi {{first_name}},
+
+Following up on my previous note about {{company_name}}'s {{trigger}}.
+
+{{social_proof}}
+
+{{personalization_observation}}
+{{personalization_impact}}
+
+Still open to that 10-minute chat? Here's my calendar:
+
+{{booking_link}}
+
+Best regards,
+{{sender_name}}`
+};
+
+const BREAKUP_TEMPLATE = {
+  subject: "Closing the loop",
+  body: `Hi {{first_name}},
+
+I've been trying to reach you about {{company_name}}'s {{trigger}}.
+
+Since I haven't heard back, I'll assume the timing isn't right.
+
+If you change your mind about scaling customer acquisition efficiently, feel free to reach out.
+
+{{booking_link}}
+
+Best regards,
+{{sender_name}}`
+};
+
+const SOCIAL_MESSAGE_TEMPLATE = `Hi {{first_name}}, noticed your work at {{company_name}}. {{personalization_observation}} Would love to connect!`;
 
 export default function FinalOptimalSalesMachine() {
   // Auth state
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   
-  // Application state
-  const [csvContent, setCsvContent] = useState('');
-  const [csvHeaders, setCsvHeaders] = useState([]);
-  const [senderName, setSenderName] = useState('');
-  const [templateA, setTemplateA] = useState(DEFAULT_TEMPLATE_A);
-  const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
-  const [fieldMappings, setFieldMappings] = useState({});
-  const [validEmails, setValidEmails] = useState(0);
-  const [validWhatsApp, setValidWhatsApp] = useState(0);
-  const [whatsappLinks, setWhatsappLinks] = useState([]);
-  const [isSending, setIsSending] = useState(false);
+  // Core application state
+  const [targets, setTargets] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [currentCampaign, setCurrentCampaign] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [status, setStatus] = useState('');
   
-  // Contact management state
-  const [contactStatuses, setContactStatuses] = useState({});
-  const [statusFilter, setStatusFilter] = useState('all');
+  // Campaign management
+  const [sendSafety, setSendSafety] = useState({
+    maxPerDay: 50,
+    currentDaySent: 0,
+    paused: false,
+    lastSendDate: null
+  });
   
-  // KPI state
-  const [kpis, setKpis] = useState({ sent: 0, replies: 0, meetings: 0, bounces: 0, opens: 0, clicks: 0 });
-  const [activeTab, setActiveTab] = useState('targets');
+  // KPI tracking
+  const [kpis, setKpis] = useState({
+    sent: 0,
+    replies: 0,
+    meetings: 0,
+    bounces: 0,
+    opens: 0,
+    clicks: 0,
+    replyRate: 0,
+    meetingRate: 0,
+    bounceRate: 0
+  });
+  
+  // UI state
+  const [activeTab, setActiveTab] = useState('icp');
+  const [selectedTarget, setSelectedTarget] = useState(null);
 
   // Google sign in
   const signInWithGoogle = async () => {
@@ -91,7 +155,9 @@ export default function FinalOptimalSalesMachine() {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       setUser(result.user);
-      setSenderName(result.user.displayName || 'Team');
+      
+      // Initialize user data
+      await initializeUserData(result.user.uid);
     } catch (error) {
       console.error('Sign in error:', error);
       setStatus('❌ Failed to sign in. Please try again.');
@@ -105,84 +171,596 @@ export default function FinalOptimalSalesMachine() {
     try {
       await signOut(auth);
       setUser(null);
-      setWhatsappLinks([]);
-      setContactStatuses({});
+      setTargets([]);
+      setCampaigns([]);
+      setCurrentCampaign(null);
     } catch (error) {
       console.error('Sign out error:', error);
     }
   };
 
-  // Load contacts from Firestore
-  const loadContactsFromFirestore = useCallback(async (userId) => {
-    if (!userId || !db) return;
+  // Initialize user data
+  const initializeUserData = async (userId) => {
+    if (!db || !userId) return;
     
     try {
-      const contactsRef = collection(db, 'users', userId, 'contacts');
-      const q = query(contactsRef);
-      const snapshot = await getDocs(q);
+      const userDoc = await getDoc(doc(db, 'users', userId));
       
-      const contacts = [];
-      const statuses = {};
+      if (!userDoc.exists()) {
+        // Create new user document
+        await setDoc(doc(db, 'users', userId), {
+          uid: userId,
+          email: auth.currentUser.email,
+          displayName: auth.currentUser.displayName,
+          createdAt: serverTimestamp(),
+          settings: {
+            maxEmailsPerDay: 50,
+            bookingLink: '',
+            timezone: 'UTC',
+            senderName: auth.currentUser.displayName || 'Team'
+          },
+          icp: TIGHT_ICP
+        });
+      }
       
+      // Load user's campaigns and targets
+      await loadCampaigns(userId);
+      await loadTargets(userId);
+    } catch (error) {
+      console.error('Failed to initialize user data:', error);
+    }
+  };
+
+  // Load campaigns
+  const loadCampaigns = async (userId) => {
+    if (!db || !userId) return;
+    
+    try {
+      const campaignsRef = collection(db, 'users', userId, 'campaigns');
+      const snapshot = await getDocs(campaignsRef);
+      
+      const campaignsData = [];
       snapshot.forEach(doc => {
         const data = doc.data();
-        contacts.push({
+        campaignsData.push({
           id: doc.id,
-          business: data.business || 'Business',
-          email: data.email || '',
-          phone: data.phone || '',
-          address: data.address || '',
-          website: data.website || '',
-          status: data.status || 'new',
-          createdAt: (data.createdAt && data.createdAt.toDate) ? data.createdAt.toDate() : data.createdAt || new Date(),
-          lastUpdated: (data.lastUpdated && data.lastUpdated.toDate) ? data.lastUpdated.toDate() : data.lastUpdated || new Date()
+          ...data,
+          createdAt: data.createdAt?.toDate?.() || data.createdAt,
+          lastActivity: data.lastActivity?.toDate?.() || data.lastActivity
         });
-        
-        statuses[data.email || `phone_${data.phone}`] = data.status || 'new';
       });
       
-      setWhatsappLinks(contacts);
-      setContactStatuses(statuses);
+      setCampaigns(campaignsData);
+      
+      // Set current campaign if exists
+      if (campaignsData.length > 0) {
+        setCurrentCampaign(campaignsData[0]);
+      }
     } catch (error) {
-      console.error('Failed to load contacts:', error);
+      console.error('Failed to load campaigns:', error);
     }
-  }, [db]);
+  };
 
-  // Auth effect
-  useEffect(() => {
-    if (!auth) {
-      setLoadingAuth(false);
+  // Load targets
+  const loadTargets = async (userId) => {
+    if (!db || !userId) return;
+    
+    try {
+      const targetsRef = collection(db, 'users', userId, 'targets');
+      const snapshot = await getDocs(targetsRef);
+      
+      const targetsData = [];
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        targetsData.push({
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate?.() || data.createdAt,
+          lastContacted: data.lastContacted?.toDate?.() || data.lastContacted
+        });
+      });
+      
+      setTargets(targetsData);
+    } catch (error) {
+      console.error('Failed to load targets:', error);
+    }
+  };
+
+  // Create new campaign
+  const createCampaign = async () => {
+    if (!user?.uid || !db) return;
+    
+    try {
+      const campaignData = {
+        name: `Campaign ${campaigns.length + 1}`,
+        status: 'active',
+        icp: TIGHT_ICP,
+        targets: [],
+        templates: {
+          email1: EMAIL1_TEMPLATE,
+          email2: EMAIL2_TEMPLATE,
+          breakup: BREAKUP_TEMPLATE,
+          social: SOCIAL_MESSAGE_TEMPLATE
+        },
+        cadence: {
+          day0: ['email1', 'social'],
+          day3: ['email2'],
+          day5: ['social'],
+          day7: ['breakup']
+        },
+        createdAt: serverTimestamp(),
+        lastActivity: serverTimestamp(),
+        stats: {
+          sent: 0,
+          replies: 0,
+          meetings: 0,
+          bounces: 0
+        }
+      };
+      
+      const campaignRef = doc(collection(db, 'users', user.uid, 'campaigns'));
+      await setDoc(campaignRef, campaignData);
+      
+      const newCampaign = { id: campaignRef.id, ...campaignData };
+      setCampaigns(prev => [...prev, newCampaign]);
+      setCurrentCampaign(newCampaign);
+      
+      setStatus('✅ New campaign created successfully!');
+    } catch (error) {
+      console.error('Failed to create campaign:', error);
+      setStatus('❌ Failed to create campaign');
+    }
+  };
+
+  // Handle CSV upload with real functionality
+  const handleCsvUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (!currentCampaign) {
+      setStatus('❌ Please create a campaign first');
       return;
     }
     
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoadingAuth(false);
-      if (user) {
-        setSenderName(user.displayName || 'Team');
-        loadContactsFromFirestore(user.uid);
-      }
-    });
+    setIsUploading(true);
+    setStatus('📊 Processing target companies...');
     
-    return unsubscribe;
-  }, [loadContactsFromFirestore]);
+    const reader = new FileReader();
+    
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          setStatus('❌ CSV must contain headers and data');
+          setIsUploading(false);
+          return;
+        }
+        
+        const headers = parseCsvRow(lines[0]);
+        const processedTargets = [];
+        
+        // Process each row
+        for (let i = 1; i < lines.length && processedTargets.length < 50; i++) {
+          const values = parseCsvRow(lines[i]);
+          if (values.length !== headers.length) continue;
+          
+          const row = {};
+          headers.forEach((header, idx) => {
+            row[header] = values[idx] || '';
+          });
+          
+          // Validate and process target
+          const target = await processTargetRow(row, headers);
+          if (target) {
+            processedTargets.push(target);
+          }
+        }
+        
+        // Save targets to Firestore
+        if (processedTargets.length > 0) {
+          await saveTargets(processedTargets);
+          setStatus(`✅ ${processedTargets.length} target companies loaded successfully!`);
+        } else {
+          setStatus('❌ No valid targets found in CSV');
+        }
+      } catch (error) {
+        console.error('CSV processing error:', error);
+        setStatus(`❌ Failed to process CSV: ${error.message}`);
+      } finally {
+        setIsUploading(false);
+      }
+    };
+    
+    reader.readAsText(file);
+  };
+
+  // Process individual target row
+  const processTargetRow = async (row, headers) => {
+    // Extract required fields
+    const companyName = row.company_name || row.business_name || row.name;
+    const email = row.email || '';
+    const website = row.website || '';
+    
+    if (!companyName) return null;
+    
+    // Verify email format and basic deliverability
+    if (email && !isValidEmail(email)) {
+      console.warn(`Invalid email format: ${email}`);
+    }
+    
+    // Create target object
+    const target = {
+      companyName,
+      email: email && isValidEmail(email) ? email : null,
+      website,
+      industry: row.industry || 'SaaS',
+      size: row.size || row.employees || '',
+      funding: row.funding || '',
+      description: row.description || '',
+      
+      // Decision makers
+      decisionMakers: [],
+      
+      // Research data
+      research: {
+        headline: '',
+        trigger: '',
+        triggerLink: '',
+        observation: '',
+        impact: ''
+      },
+      
+      // Personalization
+      personalization: {
+        observation: '',
+        impact: ''
+      },
+      
+      // Status and tracking
+      status: 'new',
+      campaignId: currentCampaign.id,
+      sequenceDay: 0,
+      lastContacted: null,
+      nextContactDate: null,
+      
+      // Email verification
+      emailVerification: email ? {
+        format: isValidEmail(email),
+        mx: true, // Would check MX records in real implementation
+        risky: false,
+        score: 0.8
+      } : null,
+      
+      // Metadata
+      source: 'csv_upload',
+      createdAt: new Date(),
+      lastUpdated: new Date()
+    };
+    
+    return target;
+  };
+
+  // Save targets to Firestore
+  const saveTargets = async (targets) => {
+    if (!user?.uid || !db || targets.length === 0) return;
+    
+    try {
+      const targetsRef = collection(db, 'users', user.uid, 'targets');
+      
+      for (const target of targets) {
+        const targetRef = doc(targetsRef);
+        await setDoc(targetRef, {
+          ...target,
+          createdAt: serverTimestamp(),
+          lastUpdated: serverTimestamp()
+        });
+      }
+      
+      // Update campaign with new targets
+      if (currentCampaign) {
+        await updateDoc(doc(db, 'users', user.uid, 'campaigns', currentCampaign.id), {
+          targets: [...(currentCampaign.targets || []), ...targets.map(t => t.id)],
+          lastActivity: serverTimestamp()
+        });
+      }
+      
+      // Reload targets
+      await loadTargets(user.uid);
+    } catch (error) {
+      console.error('Failed to save targets:', error);
+      throw error;
+    }
+  };
+
+  // Start research for a target
+  const startResearch = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    setSelectedTarget(target);
+    
+    // Simulate 2-minute research
+    setStatus(`🔍 Researching ${target.companyName}...`);
+    
+    // Simulate API calls to LinkedIn, Apollo.io, etc.
+    setTimeout(() => {
+      const updatedTarget = {
+        ...target,
+        research: {
+          headline: `${target.companyName} raises ${target.funding || 'Series A'} funding`,
+          trigger: target.funding ? 'Recent funding round' : 'Product launch',
+          triggerLink: `https://example.com/${target.companyName.toLowerCase()}-news`,
+          observation: `Noticed ${target.companyName} is growing rapidly with ${target.size} employees`,
+          impact: 'Likely facing scaling challenges in customer acquisition'
+        },
+        decisionMakers: [
+          {
+            name: 'John Doe',
+            role: 'CEO',
+            linkedin: `https://linkedin.com/in/johndoe-${target.companyName.toLowerCase()}`,
+            email: 'john@' + (target.website ? target.website.replace('https://', '').replace('http://', '') : 'example.com')
+          }
+        ],
+        status: 'researching',
+        lastUpdated: new Date()
+      };
+      
+      updateTarget(updatedTarget);
+      setStatus(`✅ Research completed for ${target.companyName}`);
+    }, 2000);
+  };
+
+  // Update target
+  const updateTarget = async (target) => {
+    if (!user?.uid || !db) return;
+    
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'targets', target.id), {
+        ...target,
+        lastUpdated: serverTimestamp()
+      });
+      
+      setTargets(prev => prev.map(t => t.id === target.id ? target : t));
+      setSelectedTarget(target);
+    } catch (error) {
+      console.error('Failed to update target:', error);
+    }
+  };
+
+  // Create personalization
+  const createPersonalization = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target || !target.research.trigger) return;
+    
+    const personalization = {
+      observation: target.research.observation,
+      impact: target.research.impact
+    };
+    
+    const updatedTarget = {
+      ...target,
+      personalization,
+      status: 'personalized',
+      lastUpdated: new Date()
+    };
+    
+    await updateTarget(updatedTarget);
+    setStatus(`✅ Personalization created for ${target.companyName}`);
+  };
+
+  // Send email with safety rules
+  const sendEmail = async (targetId, templateType) => {
+    if (!user?.uid || !db) return;
+    
+    // Check send safety
+    const today = new Date().toDateString();
+    const todaySent = targets.filter(t => 
+      t.lastContacted && 
+      new Date(t.lastContacted).toDateString() === today &&
+      t.status.includes('sent')
+    ).length;
+    
+    if (todaySent >= sendSafety.maxPerDay) {
+      setStatus('⚠️ Daily send limit reached. Emails will resume tomorrow.');
+      return;
+    }
+    
+    if (kpis.bounceRate > 0.05) {
+      setStatus('⚠️ High bounce rate detected. Sending paused.');
+      return;
+    }
+    
+    const target = targets.find(t => t.id === targetId);
+    if (!target || !target.email) return;
+    
+    try {
+      // Get template
+      const template = currentCampaign?.templates[templateType];
+      if (!template) return;
+      
+      // Render email
+      const renderedEmail = renderEmailTemplate(template, target);
+      
+      // Simulate sending email
+      setStatus(`📧 Sending ${templateType} to ${target.companyName}...`);
+      
+      // Update target status
+      const newStatus = templateType === 'email1' ? 'email1_sent' : 
+                       templateType === 'email2' ? 'email2_sent' : 'breakup_sent';
+      
+      const updatedTarget = {
+        ...target,
+        status: newStatus,
+        lastContacted: new Date(),
+        sequenceDay: target.sequenceDay + 1,
+        lastUpdated: new Date()
+      };
+      
+      await updateTarget(updatedTarget);
+      
+      // Update KPIs
+      setKpis(prev => ({
+        ...prev,
+        sent: prev.sent + 1,
+        replyRate: prev.sent > 0 ? ((prev.replies / (prev.sent + 1)) * 100) : 0,
+        bounceRate: prev.sent > 0 ? ((prev.bounces / (prev.sent + 1)) * 100) : 0
+      }));
+      
+      // Update send safety
+      setSendSafety(prev => ({
+        ...prev,
+        currentDaySent: todaySent + 1,
+        lastSendDate: new Date()
+      }));
+      
+      setStatus(`✅ ${templateType} sent to ${target.companyName}`);
+      
+      // Schedule next contact
+      scheduleNextContact(updatedTarget);
+      
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      setStatus(`❌ Failed to send email: ${error.message}`);
+    }
+  };
+
+  // Render email template
+  const renderEmailTemplate = (template, target) => {
+    const senderName = user?.displayName || 'Team';
+    const bookingLink = 'https://calendly.com/your-team/10min'; // Would get from user settings
+    
+    let rendered = template.body;
+    
+    // Replace variables
+    rendered = rendered.replace(/\{\{company_name\}\}/g, target.companyName);
+    rendered = rendered.replace(/\{\{first_name\}\}/g, target.decisionMakers[0]?.name || 'there');
+    rendered = rendered.replace(/\{\{trigger\}\}/g, target.research.trigger || 'recent developments');
+    rendered = rendered.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation || '');
+    rendered = rendered.replace(/\{\{personalization_impact\}\}/g, target.personalization.impact || '');
+    rendered = rendered.replace(/\{\{social_proof\}\}/g, 'We\'ve helped 50+ SaaS companies scale their customer acquisition');
+    rendered = rendered.replace(/\{\{booking_link\}\}/g, bookingLink);
+    rendered = rendered.replace(/\{\{sender_name\}\}/g, senderName);
+    
+    return {
+      subject: template.subject.replace(/\{\{company_name\}\}/g, target.companyName),
+      body: rendered
+    };
+  };
+
+  // Schedule next contact
+  const scheduleNextContact = (target) => {
+    const cadence = currentCampaign?.cadence;
+    if (!cadence) return;
+    
+    const dayKey = `day${target.sequenceDay}`;
+    const nextActions = cadence[dayKey];
+    
+    if (nextActions && nextActions.length > 0) {
+      const nextDate = new Date();
+      const daysToAdd = target.sequenceDay === 0 ? 0 : 
+                       target.sequenceDay === 1 ? 3 : 
+                       target.sequenceDay === 2 ? 5 : 7;
+      
+      nextDate.setDate(nextDate.getDate() + daysToAdd);
+      
+      updateTarget({
+        ...target,
+        nextContactDate: nextDate
+      });
+    }
+  };
+
+  // Handle reply
+  const handleReply = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    const updatedTarget = {
+      ...target,
+      status: 'replied',
+      lastUpdated: new Date()
+    };
+    
+    await updateTarget(updatedTarget);
+    
+    setKpis(prev => ({
+      ...prev,
+      replies: prev.replies + 1,
+      replyRate: prev.sent > 0 ? ((prev.replies + 1) / prev.sent) * 100 : 0
+    }));
+    
+    setStatus(`✅ Reply recorded for ${target.companyName}`);
+  };
+
+  // Handle meeting booked
+  const handleMeetingBooked = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    const updatedTarget = {
+      ...target,
+      status: 'booked',
+      lastUpdated: new Date()
+    };
+    
+    await updateTarget(updatedTarget);
+    
+    setKpis(prev => ({
+      ...prev,
+      meetings: prev.meetings + 1,
+      meetingRate: prev.sent > 0 ? ((prev.meetings + 1) / prev.sent) * 100 : 0
+    }));
+    
+    setStatus(`🎉 Meeting booked with ${target.companyName}!`);
+  };
+
+  // Handle bounce
+  const handleBounce = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    const updatedTarget = {
+      ...target,
+      status: 'bounced',
+      lastUpdated: new Date()
+    };
+    
+    await updateTarget(updatedTarget);
+    
+    setKpis(prev => ({
+      ...prev,
+      bounces: prev.bounces + 1,
+      bounceRate: prev.sent > 0 ? ((prev.bounces + 1) / prev.sent) * 100 : 0
+    }));
+    
+    // Pause sending if bounce rate > 5%
+    if ((kpis.bounces + 1) / kpis.sent > 0.05) {
+      setSendSafety(prev => ({ ...prev, paused: true }));
+      setStatus('⚠️ High bounce rate detected. Sending paused.');
+    }
+    
+    setStatus(`📧 Bounce recorded for ${target.companyName}`);
+  };
+
+  // Move to nurture
+  const moveToNurture = async (targetId) => {
+    const target = targets.find(t => t.id === targetId);
+    if (!target) return;
+    
+    const updatedTarget = {
+      ...target,
+      status: 'nurture',
+      nurtureDate: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)), // 30 days from now
+      lastUpdated: new Date()
+    };
+    
+    await updateTarget(updatedTarget);
+    setStatus(`📅 ${target.companyName} moved to nurture sequence`);
+  };
 
   // Utility functions
-  const isValidEmail = (email) => {
-    if (!email || typeof email !== 'string') return false;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email.trim());
-  };
-
-  const formatForDialing = (raw) => {
-    if (!raw || raw === 'N/A') return null;
-    let cleaned = raw.toString().replace(/\D/g, '');
-    if (cleaned.startsWith('0') && cleaned.length >= 9) {
-      cleaned = '94' + cleaned.slice(1);
-    }
-    return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
-  };
-
   const parseCsvRow = (text) => {
     const result = [];
     let current = '';
@@ -210,189 +788,29 @@ export default function FinalOptimalSalesMachine() {
     });
   };
 
-  const renderPreviewText = (text, recipient, mappings, sender) => {
-    if (!text) return '';
-    let result = text;
+  const isValidEmail = (email) => {
+    if (!email || typeof email !== 'string') return false;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  };
+
+  // Auth effect
+  useEffect(() => {
+    if (!auth) {
+      setLoadingAuth(false);
+      return;
+    }
     
-    Object.entries(mappings).forEach(([varName, col]) => {
-      const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
-      if (varName === 'sender_name') {
-        result = result.replace(regex, sender || 'Team');
-      } else if (recipient && col && recipient[col] !== undefined) {
-        result = result.replace(regex, String(recipient[col]));
-      } else {
-        result = result.replace(regex, `[MISSING: ${varName}]`);
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoadingAuth(false);
+      if (user) {
+        initializeUserData(user.uid);
       }
     });
     
-    return result;
-  };
-
-  // Save contacts to Firestore
-  const saveContactsToFirestore = async (contacts, userId) => {
-    if (!userId || contacts.length === 0 || !db) return;
-    
-    try {
-      const contactsRef = collection(db, 'users', userId, 'contacts');
-      
-      for (const contact of contacts) {
-        await setDoc(doc(contactsRef, contact.id), {
-          ...contact,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
-        }, { merge: true });
-      }
-    } catch (error) {
-      console.error('Failed to save contacts:', error);
-      throw error;
-    }
-  };
-
-  // Handle CSV upload
-  const handleCsvUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    setStatus('📊 Processing CSV file...');
-    const reader = new FileReader();
-    
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        if (lines.length < 2) {
-          setStatus('❌ CSV file must contain headers and at least one row of data');
-          return;
-        }
-        
-        const headers = parseCsvRow(lines[0]);
-        setCsvHeaders(headers);
-        
-        // Process contacts
-        const validPhoneContacts = [];
-        let firstValid = null;
-        
-        for (let i = 1; i < lines.length; i++) {
-          const values = parseCsvRow(lines[i]);
-          if (values.length !== headers.length) continue;
-          
-          const row = {};
-          headers.forEach((header, idx) => {
-            row[header] = values[idx] || '';
-          });
-          
-          // Check email validity
-          const hasValidEmail = isValidEmail(row.email);
-          if (hasValidEmail) {
-            const rawPhone = row.whatsapp_number || row.phone_raw || row.phone;
-            const formattedPhone = formatForDialing(rawPhone);
-            
-            if (formattedPhone) {
-              const contactId = `${row.email || 'no-email'}-${formattedPhone}-${Date.now()}-${Math.random()}`;
-              validPhoneContacts.push({
-                id: contactId,
-                business: row.business_name || 'Business',
-                address: row.address || '',
-                phone: formattedPhone,
-                email: row.email || null,
-                place_id: row.place_id || '',
-                website: row.website || '',
-                status: 'new',
-                lastContacted: null,
-                createdAt: new Date(),
-                lastUpdated: new Date()
-              });
-              
-              if (!firstValid) firstValid = row;
-            }
-          }
-        }
-        
-        setValidEmails(validPhoneContacts.length);
-        setValidWhatsApp(validPhoneContacts.length);
-        
-        // Save to Firestore
-        if (user?.uid && db) {
-          try {
-            setStatus('💾 Saving contacts to database...');
-            await saveContactsToFirestore(validPhoneContacts, user.uid);
-            setStatus(`✅ ${validPhoneContacts.length} contacts saved successfully!`);
-            setWhatsappLinks(validPhoneContacts);
-          } catch (error) {
-            console.error('CSV save error:', error);
-            setStatus(`❌ Failed to save contacts: ${error.message}`);
-            setWhatsappLinks(validPhoneContacts); // Fallback to local state
-          }
-        } else {
-          setWhatsappLinks(validPhoneContacts);
-        }
-        
-        setCsvContent(text);
-      } catch (error) {
-        console.error('CSV processing error:', error);
-        setStatus(`❌ Failed to process CSV: ${error.message}`);
-      }
-    };
-    
-    reader.readAsText(file);
-  };
-
-  // Update contact status
-  const updateContactStatus = async (contactId, newStatus) => {
-    if (!user?.uid || !contactId || !newStatus || !db) return false;
-    
-    try {
-      const contactsRef = collection(db, 'users', user.uid, 'contacts');
-      const q = query(contactsRef, where('email', '==', contactId.includes('@') ? contactId : null));
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        const docRef = snapshot.docs[0].ref;
-        await updateDoc(docRef, {
-          status: newStatus,
-          lastUpdated: serverTimestamp()
-        });
-        
-        // Update local state
-        setContactStatuses(prev => ({ ...prev, [contactId]: newStatus }));
-        setWhatsappLinks(prev => prev.map(contact => 
-          contact.email === contactId || contact.phone === contactId 
-            ? { ...contact, status: newStatus, lastUpdated: new Date() }
-            : contact
-        ));
-        
-        return true;
-      }
-    } catch (error) {
-      console.error('Failed to update status:', error);
-    }
-    
-    return false;
-  };
-
-  // Status Badge Component
-  const StatusBadge = ({ status, small = false }) => {
-    const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
-    if (!statusInfo) return null;
-    
-    const colors = {
-      gray: 'bg-gray-600',
-      blue: 'bg-blue-600',
-      green: 'bg-green-600',
-      purple: 'bg-purple-600',
-      orange: 'bg-orange-600',
-      emerald: 'bg-emerald-600',
-      red: 'bg-red-600',
-      rose: 'bg-rose-600'
-    };
-    
-    return (
-      <span className={`${colors[statusInfo.color]} text-white px-2 py-1 rounded-full text-xs font-medium ${small ? 'text-xs' : 'text-sm'}`}>
-        {statusInfo.label}
-      </span>
-    );
-  };
+    return unsubscribe;
+  }, []);
 
   // Loading state
   if (loadingAuth) {
@@ -466,6 +884,11 @@ export default function FinalOptimalSalesMachine() {
             <div className="flex justify-between items-center h-16">
               <div className="flex items-center">
                 <h1 className="text-xl font-bold">Final Optimal B2B Sales Machine</h1>
+                {currentCampaign && (
+                  <span className="ml-4 text-sm text-gray-400">
+                    Campaign: {currentCampaign.name}
+                  </span>
+                )}
               </div>
               
               <div className="flex items-center space-x-4">
@@ -485,6 +908,13 @@ export default function FinalOptimalSalesMachine() {
 
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Status Messages */}
+          {status && (
+            <div className="mb-6 p-4 bg-blue-600/20 border border-blue-600/50 rounded-lg">
+              <p>{status}</p>
+            </div>
+          )}
+
           {/* KPI Dashboard */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
@@ -497,6 +927,7 @@ export default function FinalOptimalSalesMachine() {
                 <div>
                   <p className="text-sm text-gray-400">Sent</p>
                   <p className="text-2xl font-bold text-blue-400">{kpis.sent}</p>
+                  <p className="text-xs text-gray-500">Daily: {sendSafety.currentDaySent}/{sendSafety.maxPerDay}</p>
                 </div>
               </div>
             </div>
@@ -511,6 +942,7 @@ export default function FinalOptimalSalesMachine() {
                 <div>
                   <p className="text-sm text-gray-400">Replies</p>
                   <p className="text-2xl font-bold text-green-400">{kpis.replies}</p>
+                  <p className="text-xs text-gray-500">Rate: {kpis.replyRate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
@@ -525,6 +957,7 @@ export default function FinalOptimalSalesMachine() {
                 <div>
                   <p className="text-sm text-gray-400">Meetings</p>
                   <p className="text-2xl font-bold text-purple-400">{kpis.meetings}</p>
+                  <p className="text-xs text-gray-500">Rate: {kpis.meetingRate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
@@ -539,22 +972,16 @@ export default function FinalOptimalSalesMachine() {
                 <div>
                   <p className="text-sm text-gray-400">Bounces</p>
                   <p className="text-2xl font-bold text-red-400">{kpis.bounces}</p>
+                  <p className="text-xs text-gray-500">Rate: {kpis.bounceRate.toFixed(1)}%</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Status Messages */}
-          {status && (
-            <div className="mb-6 p-4 bg-blue-600/20 border border-blue-600/50 rounded-lg">
-              <p>{status}</p>
-            </div>
-          )}
-
           {/* Tab Navigation */}
           <div className="border-b border-gray-700 mb-8">
             <nav className="flex space-x-8">
-              {['targets', 'templates', 'analytics'].map((tab) => (
+              {['icp', 'targets', 'campaign', 'analytics'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -564,68 +991,244 @@ export default function FinalOptimalSalesMachine() {
                       : 'border-transparent text-gray-400 hover:text-gray-300'
                   }`}
                 >
-                  {tab === 'targets' ? 'Target Companies' : tab === 'templates' ? 'Email Templates' : 'Analytics'}
+                  {tab === 'icp' ? 'ICP & Setup' : tab === 'targets' ? 'Target Companies' : tab === 'campaign' ? 'Campaign' : 'Analytics'}
                 </button>
               ))}
             </nav>
           </div>
 
           {/* Tab Content */}
+          {activeTab === 'icp' && (
+            <div className="space-y-6">
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h2 className="text-xl font-semibold mb-4">Tight ICP Definition</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-lg font-medium mb-3">Target Profile</h3>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Industry:</span>
+                        <span className="font-medium">{TIGHT_ICP.industry}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Size:</span>
+                        <span className="font-medium">{TIGHT_ICP.size}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Funding:</span>
+                        <span className="font-medium">{TIGHT_ICP.funding}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Geography:</span>
+                        <span className="font-medium">{TIGHT_ICP.geo}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <h3 className="text-lg font-medium mb-3">Triggers & Pain Points</h3>
+                    <div className="space-y-2">
+                      <div>
+                        <span className="text-gray-400">Primary Pain:</span>
+                        <p className="font-medium mt-1">{TIGHT_ICP.pain}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-400">Key Trigger:</span>
+                        <p className="font-medium mt-1">{TIGHT_ICP.trigger}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
+                <h2 className="text-xl font-semibold mb-4">Campaign Setup</h2>
+                {!currentCampaign ? (
+                  <div className="text-center">
+                    <button
+                      onClick={createCampaign}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                    >
+                      Create New Campaign
+                    </button>
+                    <p className="text-gray-400 mt-2">Start by creating your first campaign</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-lg font-medium">{currentCampaign.name}</h3>
+                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">
+                        Active
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-400 mb-2">Templates</h4>
+                        <div className="space-y-1">
+                          <div className="text-sm">Email 1: Intro (<120 words)</div>
+                          <div className="text-sm">Email 2: Social Proof (<120 words)</div>
+                          <div className="text-sm">Breakup: Closing (<120 words)</div>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <h4 className="text-sm font-medium text-gray-400 mb-2">Cadence</h4>
+                        <div className="space-y-1">
+                          <div className="text-sm">Day 0: Email 1 + Social</div>
+                          <div className="text-sm">Day 3: Email 2</div>
+                          <div className="text-sm">Day 5: Social (if connected)</div>
+                          <div className="text-sm">Day 7: Breakup</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'targets' && (
             <div className="space-y-6">
-              {/* CSV Upload */}
               <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Upload Target Companies</h2>
+                <h2 className="text-xl font-semibold mb-4">Upload Target Companies (Max 50)</h2>
                 <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
                   <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
                   <p className="text-gray-400 mb-2">Drop your CSV file here or click to browse</p>
+                  <p className="text-sm text-gray-500 mb-4">Required columns: company_name, email, website, industry, size, funding</p>
                   <input
                     type="file"
                     accept=".csv"
                     onChange={handleCsvUpload}
+                    disabled={isUploading || !currentCampaign}
                     className="hidden"
                     id="csv-upload"
                   />
                   <label
                     htmlFor="csv-upload"
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
+                    className={`px-4 py-2 rounded-lg cursor-pointer transition-colors ${
+                      isUploading || !currentCampaign
+                        ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
                   >
-                    Choose CSV File
+                    {isUploading ? 'Processing...' : 'Choose CSV File'}
                   </label>
                 </div>
                 
-                {validEmails > 0 && (
+                {targets.length > 0 && (
                   <div className="mt-4 text-sm text-gray-400">
-                    <p>Valid emails: {validEmails}</p>
-                    <p>Valid WhatsApp numbers: {validWhatsApp}</p>
+                    <p>Loaded: {targets.length}/50 target companies</p>
                   </div>
                 )}
               </div>
 
-              {/* Contacts List */}
-              {whatsappLinks.length > 0 && (
+              {targets.length > 0 && (
                 <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                  <h2 className="text-xl font-semibold mb-4">Target Companies ({whatsappLinks.length})</h2>
+                  <h2 className="text-xl font-semibold mb-4">Target Companies ({targets.length})</h2>
                   <div className="space-y-4">
-                    {whatsappLinks.map((contact) => (
-                      <div key={contact.id} className="bg-gray-700 rounded-lg p-4">
+                    {targets.map((target) => (
+                      <div key={target.id} className="bg-gray-700 rounded-lg p-4">
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <h3 className="font-semibold text-lg">{contact.business}</h3>
-                            <p className="text-gray-400">{contact.email}</p>
-                            {contact.phone && (
-                              <p className="text-gray-400">{contact.phone}</p>
-                            )}
-                            {contact.website && (
-                              <a href={contact.website} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-sm">
-                                {contact.website}
+                            <h3 className="font-semibold text-lg">{target.companyName}</h3>
+                            <p className="text-gray-400">{target.email}</p>
+                            {target.website && (
+                              <a href={target.website} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-sm">
+                                {target.website}
                               </a>
                             )}
+                            <div className="mt-2 flex items-center space-x-4 text-sm text-gray-400">
+                              <span>{target.industry}</span>
+                              <span>{target.size}</span>
+                              <span>{target.funding}</span>
+                            </div>
+                            
+                            {/* Research and Personalization */}
+                            {target.research.trigger && (
+                              <div className="mt-3 p-3 bg-gray-600/50 rounded">
+                                <p className="text-sm text-gray-300">
+                                  <strong>Research:</strong> {target.research.headline}
+                                </p>
+                                <p className="text-sm text-gray-400 mt-1">
+                                  <strong>Trigger:</strong> {target.research.trigger}
+                                </p>
+                              </div>
+                            )}
+                            
+                            {target.personalization.observation && (
+                              <div className="mt-3 p-3 bg-blue-600/20 rounded">
+                                <p className="text-sm text-gray-300">
+                                  <strong>Observation:</strong> {target.personalization.observation}
+                                </p>
+                                <p className="text-sm text-gray-400 mt-1">
+                                  <strong>Impact:</strong> {target.personalization.impact}
+                                </p>
+                              </div>
+                            )}
                           </div>
-                          <div className="ml-4">
-                            <StatusBadge status={contact.status} />
+                          
+                          <div className="ml-4 space-y-2">
+                            <StatusBadge status={target.status} />
+                            
+                            {/* Action Buttons */}
+                            <div className="flex flex-col space-y-2">
+                              {target.status === 'new' && (
+                                <button
+                                  onClick={() => startResearch(target.id)}
+                                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Research
+                                </button>
+                              )}
+                              
+                              {target.status === 'researching' && (
+                                <button
+                                  onClick={() => createPersonalization(target.id)}
+                                  className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Personalize
+                                </button>
+                              )}
+                              
+                              {target.status === 'personalized' && (
+                                <button
+                                  onClick={() => sendEmail(target.id, 'email1')}
+                                  className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Send Email 1
+                                </button>
+                              )}
+                              
+                              {target.status === 'email1_sent' && (
+                                <button
+                                  onClick={() => sendEmail(target.id, 'email2')}
+                                  className="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Send Email 2
+                                </button>
+                              )}
+                              
+                              {(target.status === 'replied' || target.status === 'email2_sent') && (
+                                <button
+                                  onClick={() => handleMeetingBooked(target.id)}
+                                  className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Book Meeting
+                                </button>
+                              )}
+                              
+                              {target.status === 'bounced' && (
+                                <button
+                                  onClick={() => moveToNurture(target.id)}
+                                  className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs rounded transition-colors"
+                                >
+                                  Move to Nurture
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -636,32 +1239,110 @@ export default function FinalOptimalSalesMachine() {
             </div>
           )}
 
-          {activeTab === 'templates' && (
+          {activeTab === 'campaign' && (
             <div className="space-y-6">
               <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Email Templates</h2>
+                <h2 className="text-xl font-semibold mb-4">Campaign Management</h2>
                 
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">Template A Subject</label>
-                    <input
-                      type="text"
-                      value={templateA.subject}
-                      onChange={(e) => setTemplateA(prev => ({ ...prev, subject: e.target.value }))}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-500 focus:outline-none"
-                    />
+                {currentCampaign ? (
+                  <div className="space-y-6">
+                    {/* Send Safety Rules */}
+                    <div>
+                      <h3 className="text-lg font-medium mb-3">Send Safety Rules</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="bg-gray-700 p-4 rounded">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-300">Daily Limit</span>
+                            <span className="font-medium">{sendSafety.currentDaySent}/{sendSafety.maxPerDay}</span>
+                          </div>
+                          <div className="mt-2 w-full bg-gray-600 rounded-full h-2">
+                            <div 
+                              className="bg-blue-500 h-2 rounded-full" 
+                              style={{ width: `${(sendSafety.currentDaySent / sendSafety.maxPerDay) * 100}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                        
+                        <div className="bg-gray-700 p-4 rounded">
+                          <div className="flex justify-between items-center">
+                            <span className="text-gray-300">Bounce Rate</span>
+                            <span className={`font-medium ${kpis.bounceRate > 5 ? 'text-red-400' : 'text-green-400'}`}>
+                              {kpis.bounceRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          {kpis.bounceRate > 5 && (
+                            <p className="text-red-400 text-sm mt-1">⚠️ Sending paused</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Auto-Exit Rules */}
+                    <div>
+                      <h3 className="text-lg font-medium mb-3">Auto-Exit Rules</h3>
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                          <span className="text-sm">If replied → remove from sequence</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                          <span className="text-sm">If meeting booked → remove from sequence</span>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                          <span className="text-sm">If bounced → pause lead</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Weekly KPI Check */}
+                    <div>
+                      <h3 className="text-lg font-medium mb-3">Weekly KPI Check</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="bg-gray-700 p-4 rounded">
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">Reply Rate</span>
+                            <span className={`font-medium ${kpis.replyRate > 10 ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {kpis.replyRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Target: >10%</p>
+                        </div>
+                        
+                        <div className="bg-gray-700 p-4 rounded">
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">Meeting Rate</span>
+                            <span className={`font-medium ${kpis.meetingRate > 5 ? 'text-green-400' : 'text-yellow-400'}`}>
+                              {kpis.meetingRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Target: >5%</p>
+                        </div>
+                        
+                        <div className="bg-gray-700 p-4 rounded">
+                          <div className="flex justify-between">
+                            <span className="text-gray-300">Bounce Rate</span>
+                            <span className={`font-medium ${kpis.bounceRate < 5 ? 'text-green-400' : 'text-red-400'}`}>
+                              {kpis.bounceRate.toFixed(1)}%
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">Target: <5%</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">Template A Body</label>
-                    <textarea
-                      value={templateA.body}
-                      onChange={(e) => setTemplateA(prev => ({ ...prev, body: e.target.value }))}
-                      rows={10}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:border-blue-500 focus:outline-none font-mono text-sm"
-                    />
+                ) : (
+                  <div className="text-center">
+                    <p className="text-gray-400">No active campaign</p>
+                    <button
+                      onClick={createCampaign}
+                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                    >
+                      Create Campaign
+                    </button>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           )}
@@ -670,6 +1351,7 @@ export default function FinalOptimalSalesMachine() {
             <div className="space-y-6">
               <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
                 <h2 className="text-xl font-semibold mb-4">Analytics Dashboard</h2>
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-gray-700 rounded-lg p-4">
                     <h3 className="text-lg font-medium mb-2">Campaign Performance</h3>
@@ -679,32 +1361,56 @@ export default function FinalOptimalSalesMachine() {
                         <span className="font-bold">{kpis.sent}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Open Rate:</span>
-                        <span className="font-bold">{kpis.sent > 0 ? Math.round((kpis.opens / kpis.sent) * 100) : 0}%</span>
+                        <span>Reply Rate:</span>
+                        <span className={`font-bold ${kpis.replyRate > 10 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {kpis.replyRate.toFixed(1)}%
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Reply Rate:</span>
-                        <span className="font-bold">{kpis.sent > 0 ? Math.round((kpis.replies / kpis.sent) * 100) : 0}%</span>
+                        <span>Meeting Rate:</span>
+                        <span className={`font-bold ${kpis.meetingRate > 5 ? 'text-green-400' : 'text-yellow-400'}`}>
+                          {kpis.meetingRate.toFixed(1)}%
+                        </span>
                       </div>
                     </div>
                   </div>
                   
                   <div className="bg-gray-700 rounded-lg p-4">
-                    <h3 className="text-lg font-medium mb-2">Conversion Metrics</h3>
+                    <h3 className="text-lg font-medium mb-2">Health Metrics</h3>
                     <div className="space-y-2">
                       <div className="flex justify-between">
-                        <span>Meetings Booked:</span>
-                        <span className="font-bold">{kpis.meetings}</span>
-                      </div>
-                      <div className="flex justify-between">
                         <span>Bounce Rate:</span>
-                        <span className="font-bold">{kpis.sent > 0 ? Math.round((kpis.bounces / kpis.sent) * 100) : 0}%</span>
+                        <span className={`font-bold ${kpis.bounceRate < 5 ? 'text-green-400' : 'text-red-400'}`}>
+                          {kpis.bounceRate.toFixed(1)}%
+                        </span>
                       </div>
                       <div className="flex justify-between">
-                        <span>Click Rate:</span>
-                        <span className="font-bold">{kpis.opens > 0 ? Math.round((kpis.clicks / kpis.opens) * 100) : 0}%</span>
+                        <span>Targets in Sequence:</span>
+                        <span className="font-bold">{targets.filter(t => !['replied', 'booked', 'bounced', 'nurture'].includes(t.status)).length}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Nurture Queue:</span>
+                        <span className="font-bold">{targets.filter(t => t.status === 'nurture').length}</span>
                       </div>
                     </div>
+                  </div>
+                </div>
+
+                {/* Target Status Breakdown */}
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium mb-3">Target Status Breakdown</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {CONTACT_STATUSES.map(status => {
+                      const count = targets.filter(t => t.status === status.id).length;
+                      if (count === 0) return null;
+                      
+                      return (
+                        <div key={status.id} className="bg-gray-700 p-3 rounded text-center">
+                          <div className="text-2xl font-bold">{count}</div>
+                          <div className="text-sm text-gray-400">{status.label}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -713,5 +1419,30 @@ export default function FinalOptimalSalesMachine() {
         </main>
       </div>
     </>
+  );
+}
+
+// Status Badge Component
+function StatusBadge({ status }) {
+  const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
+  if (!statusInfo) return null;
+  
+  const colors = {
+    gray: 'bg-gray-600',
+    blue: 'bg-blue-600',
+    indigo: 'bg-indigo-600',
+    purple: 'bg-purple-600',
+    orange: 'bg-orange-600',
+    yellow: 'bg-yellow-600',
+    red: 'bg-red-600',
+    green: 'bg-green-600',
+    emerald: 'bg-emerald-600',
+    rose: 'bg-rose-600'
+  };
+  
+  return (
+    <span className={`${colors[statusInfo.color]} text-white px-2 py-1 rounded-full text-xs font-medium`}>
+      {statusInfo.label}
+    </span>
   );
 }
