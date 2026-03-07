@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, serverTimestamp, orderBy as firestoreOrderBy, limit as firestoreLimit } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
-import Head from 'next/head';
+import React, { useState, useEffect, useCallback } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, where, updateDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import Papa from 'papaparse';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -17,1540 +17,1406 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-let app, db, auth;
-if (typeof window !== 'undefined' && !getApps().length) {
-  try {
-    app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
-  } catch (error) {
-    console.error('Firebase init failed:', error);
-  }
-}
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-// TIGHT ICP - This is what actually works in B2B sales
-const TIGHT_ICP = {
-  industry: 'SaaS companies',
-  size: '20-200 employees',
-  funding: 'Series A-C ($2M-$50M raised)',
-  geo: 'North America & Europe',
-  pain: 'Scaling customer acquisition without burning cash',
-  trigger: 'Recent funding round, product launch, or hiring growth',
-  // What actually matters for qualifying
-  qualifiers: {
-    minEmployees: 20,
-    maxEmployees: 200,
-    mustHaveFunding: true,
-    mustBeSaaS: true,
-    mustHaveWebsite: true,
-    mustHaveDecisionMaker: true
-  }
+// Status definitions with colors and transitions
+const CONTACT_STATUSES = {
+  new: { label: 'New', color: 'bg-gray-100 text-gray-800', order: 1 },
+  contacted: { label: 'Contacted', color: 'bg-blue-100 text-blue-800', order: 2 },
+  replied: { label: 'Replied', color: 'bg-green-100 text-green-800', order: 3 },
+  meeting_scheduled: { label: 'Meeting Scheduled', color: 'bg-yellow-100 text-yellow-800', order: 4 },
+  meeting_completed: { label: 'Meeting Completed', color: 'bg-purple-100 text-purple-800', order: 5 },
+  proposal_sent: { label: 'Proposal Sent', color: 'bg-indigo-100 text-indigo-800', order: 6 },
+  negotiation: { label: 'Negotiation', color: 'bg-orange-100 text-orange-800', order: 7 },
+  closed_won: { label: 'Closed Won', color: 'bg-green-500 text-white', order: 8 },
+  closed_lost: { label: 'Closed Lost', color: 'bg-red-100 text-red-800', order: 9 },
+  archived: { label: 'Archived', color: 'bg-gray-200 text-gray-600', order: 10 }
 };
 
-// REAL-WORLD TEMPLATES - What actually gets replies
-const PROVEN_TEMPLATES = {
-  email1: {
-    subject: "{{company_name}} + {{sender_company}}",
-    body: `Hi {{first_name}},
-
-{{personalization_trigger}}
-
-{{personalization_observation}}
-
-{{personalization_impact}}
-
-We help {{industry}} companies like {{company_name}} scale customer acquisition efficiently.
-
-{{social_proof}}
-
-Would you be open to a 10-minute call next week to discuss?
-
-{{booking_link}}
-
-Best,
-{{sender_name}}
-{{sender_title}}`
-  },
-  
-  email2: {
-    subject: "Re: {{company_name}} + {{sender_company}}",
-    body: `Hi {{first_name}},
-
-Following up on my previous note about {{company_name}}.
-
-{{new_trigger_or_insight}}
-
-{{case_study_relevant_to_them}}
-
-Still open to that quick call?
-
-{{booking_link}}
-
-Best,
-{{sender_name}}`
-  },
-  
-  breakup: {
-    subject: "Closing the loop",
-    body: `Hi {{first_name}},
-
-I've reached out a few times about {{company_name}} but haven't heard back.
-
-Assuming now isn't the right time. If things change, I'm here.
-
-{{booking_link}}
-
-Best,
-{{sender_name}}`
-  }
+// Valid status transitions
+const VALID_TRANSITIONS = {
+  new: ['contacted', 'archived'],
+  contacted: ['replied', 'archived'],
+  replied: ['meeting_scheduled', 'archived'],
+  meeting_scheduled: ['meeting_completed', 'archived'],
+  meeting_completed: ['proposal_sent', 'archived'],
+  proposal_sent: ['negotiation', 'closed_won', 'closed_lost', 'archived'],
+  negotiation: ['closed_won', 'closed_lost', 'archived'],
+  closed_won: ['archived'],
+  closed_lost: ['archived'],
+  archived: ['new'] // Allow reactivation
 };
 
-// REAL-WORLD CADENCE - What actually works
-const EFFECTIVE_CADENCE = {
-  day0: { email: 'email1', research: true },
-  day3: { email: 'email2', linkedin: 'connect' },
-  day7: { email: 'breakup', linkedin: 'message' },
-  day14: { email: 'breakup', final: true },
-  autoExit: {
-    replied: true,
-    booked: true,
-    bounced: true,
-    not_interested: true
+// Email templates
+const EMAIL_TEMPLATES = {
+  initial: {
+    subject: 'Introduction from {{your_name}} at {{your_company}}',
+    body: `Hi {{contact_name}},
+
+I hope this email finds you well. I came across your profile and was impressed by your work at {{company}}.
+
+At {{your_company}}, we help businesses like yours {{value_proposition}}. I'd love to schedule a brief 15-minute call to explore how we might be able to help you achieve {{specific_goal}}.
+
+You can book a time directly on my calendar: {{calendar_link}}
+
+Looking forward to connecting!
+
+Best regards,
+{{your_name}}
+{{your_title}}
+{{your_company}}
+{{your_phone}}
+{{portfolio_link}}`
+  },
+  followup: {
+    subject: 'Following up - {{your_company}} + {{company}}',
+    body: `Hi {{contact_name}},
+
+Just wanted to follow up on my previous email. I believe there's a great opportunity for us to work together.
+
+{{personalized_insight}}
+
+Would you be available for a quick chat next week?
+
+Best regards,
+{{your_name}}
+{{your_company}}`
+  },
+  meeting: {
+    subject: 'Meeting Confirmation - {{your_company}} + {{company}}',
+    body: `Hi {{contact_name}},
+
+Great speaking with you today! As discussed, I'm confirming our meeting for {{meeting_time}}.
+
+{{meeting_agenda}}
+
+Looking forward to our conversation!
+
+Best regards,
+{{your_name}}
+{{your_company}}`
   }
 };
 
 export default function FinalOptimalSalesMachine() {
-  // CORE STATE - Only what's essential
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [targets, setTargets] = useState([]);
-  const [campaigns, setCampaigns] = useState([]);
-  const [activeCampaign, setActiveCampaign] = useState(null);
-  const [status, setStatus] = useState('');
-  
-  // WORKFLOW STATE
-  const [currentStep, setCurrentStep] = useState('setup');
-  const [selectedTargets, setSelectedTargets] = useState([]);
-  const [researchData, setResearchData] = useState({});
-  const [personalizationData, setPersonalizationData] = useState({});
-  
-  // AUTOMATION STATE - What automation can do
-  const [automationMode, setAutomationMode] = useState('full'); // 'full', 'partial', 'manual'
-  const [automationHealth, setAutomationHealth] = useState({
-    aiResearch: 'healthy',
-    aiPersonalization: 'healthy',
-    emailSending: 'healthy',
-    linkedinAutomation: 'healthy'
-  });
-  
-  // MANUAL OVERRIDE - When automation fails, this is critical
-  const [manualMode, setManualMode] = useState(false);
-  const [manualResearch, setManualResearch] = useState({});
-  const [manualPersonalization, setManualPersonalization] = useState({});
-  const [manualEmailSending, setManualEmailSending] = useState({});
-  
-  // REAL KPIs - What actually matters
-  const [kpi, setKpi] = useState({
-    totalTargets: 0,
-    researched: 0,
-    personalized: 0,
-    sent: 0,
-    replies: 0,
-    meetings: 0,
-    replyRate: 0,
-    meetingRate: 0,
-    costPerReply: 0,
-    costPerMeeting: 0
-  });
+  const [contacts, setContacts] = useState([]);
+  const [filteredContacts, setFilteredContacts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [csvFile, setCsvFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [newStatus, setNewStatus] = useState('');
+  const [statusNote, setStatusNote] = useState('');
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailTemplate, setEmailTemplate] = useState('initial');
+  const [customEmail, setCustomEmail] = useState({ subject: '', body: '' });
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [smsModalOpen, setSmsModalOpen] = useState(false);
+  const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
+  const [callNotes, setCallNotes] = useState('');
+  const [smsMessage, setSmsMessage] = useState('');
+  const [whatsappMessage, setWhatsappMessage] = useState('');
+  const [analytics, setAnalytics] = useState({});
+  const [googleToken, setGoogleToken] = useState(null);
+  const [callStatus, setCallStatus] = useState({});
+  const [aiResearch, setAiResearch] = useState({});
+  const [followUpSuggestions, setFollowUpSuggestions] = useState({});
 
-  // AUTH
-  const signInWithGoogle = async () => {
-    if (!auth) return;
+  // Check authentication state
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setUser(user);
+      if (user) {
+        loadContacts();
+        loadAnalytics();
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Load contacts from Firestore
+  const loadContacts = async () => {
+    setLoading(true);
+    try {
+      const contactsRef = collection(db, 'contacts');
+      const q = query(contactsRef, orderBy('created_at', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const contactsData = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setContacts(contactsData);
+      setFilteredContacts(contactsData);
+    } catch (err) {
+      setError('Failed to load contacts');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load analytics
+  const loadAnalytics = async () => {
+    try {
+      const contactsRef = collection(db, 'contacts');
+      const querySnapshot = await getDocs(contactsRef);
+      const contactsData = querySnapshot.docs.map(doc => doc.data());
+      
+      const statusCounts = {};
+      Object.keys(CONTACT_STATUSES).forEach(status => {
+        statusCounts[status] = contactsData.filter(c => c.status === status).length;
+      });
+
+      const totalContacts = contactsData.length;
+      const activeContacts = contactsData.filter(c => !['archived', 'closed_lost', 'closed_won'].includes(c.status)).length;
+      const conversionRate = totalContacts > 0 ? (statusCounts.closed_won / totalContacts * 100).toFixed(1) : 0;
+
+      setAnalytics({
+        totalContacts,
+        activeContacts,
+        statusCounts,
+        conversionRate,
+        avgResponseTime: '2.3 days', // Placeholder - would calculate from actual data
+        topSource: 'LinkedIn' // Placeholder - would analyze from actual data
+      });
+    } catch (err) {
+      console.error('Failed to load analytics:', err);
+    }
+  };
+
+  // Filter and sort contacts
+  useEffect(() => {
+    let filtered = contacts;
+
+    // Filter by status
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(contact => contact.status === filterStatus);
+    }
+
+    // Filter by search term
+    if (searchTerm) {
+      filtered = filtered.filter(contact =>
+        contact.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.company?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Sort contacts
+    filtered.sort((a, b) => {
+      let aValue = a[sortBy] || '';
+      let bValue = b[sortBy] || '';
+      
+      if (sortBy === 'created_at') {
+        aValue = aValue?.toDate?.() || aValue;
+        bValue = bValue?.toDate?.() || bValue;
+      }
+      
+      if (sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+
+    setFilteredContacts(filtered);
+  }, [contacts, filterStatus, searchTerm, sortBy, sortOrder]);
+
+  // Handle CSV file upload
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file && file.type === 'text/csv') {
+      setCsvFile(file);
+      setError('');
+    } else {
+      setError('Please upload a valid CSV file');
+    }
+  };
+
+  // Process CSV and save to Firestore
+  const processCSV = () => {
+    if (!csvFile) return;
+
+    setLoading(true);
+    setUploadProgress(0);
+
+    Papa.parse(csvFile, {
+      header: true,
+      complete: async (results) => {
+        try {
+          const validContacts = [];
+          const invalidContacts = [];
+
+          for (let i = 0; i < results.data.length; i++) {
+            const row = results.data[i];
+            setUploadProgress(Math.round((i / results.data.length) * 100));
+
+            // Validate required fields
+            if (!row.email || !row.name) {
+              invalidContacts.push({ row: i + 2, data: row, reason: 'Missing email or name' });
+              continue;
+            }
+
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(row.email)) {
+              invalidContacts.push({ row: i + 2, data: row, reason: 'Invalid email format' });
+              continue;
+            }
+
+            // Validate phone if provided
+            if (row.phone && !/^[\d\s\-\+\(\)]+$/.test(row.phone)) {
+              invalidContacts.push({ row: i + 2, data: row, reason: 'Invalid phone format' });
+              continue;
+            }
+
+            // Score lead quality
+            const leadScore = calculateLeadScore(row);
+            
+            validContacts.push({
+              name: row.name.trim(),
+              email: row.email.trim().toLowerCase(),
+              phone: row.phone?.trim() || '',
+              company: row.company?.trim() || '',
+              position: row.position?.trim() || '',
+              linkedin: row.linkedin?.trim() || '',
+              source: row.source?.trim() || 'CSV Upload',
+              status: 'new',
+              leadScore,
+              created_at: serverTimestamp(),
+              updated_at: serverTimestamp(),
+              statusHistory: [{
+                status: 'new',
+                timestamp: serverTimestamp(),
+                note: 'Contact imported from CSV'
+              }]
+            });
+          }
+
+          // Save valid contacts to Firestore
+          for (const contact of validContacts) {
+            await addDoc(collection(db, 'contacts'), contact);
+          }
+
+          await loadContacts();
+          await loadAnalytics();
+          
+          setSuccess(`Successfully imported ${validContacts.length} contacts. ${invalidContacts.length} invalid entries were skipped.`);
+          setCsvFile(null);
+          setUploadProgress(0);
+        } catch (err) {
+          setError('Failed to process CSV: ' + err.message);
+        } finally {
+          setLoading(false);
+        }
+      },
+      error: (err) => {
+        setError('Failed to parse CSV: ' + err.message);
+        setLoading(false);
+      }
+    });
+  };
+
+  // Calculate lead quality score
+  const calculateLeadScore = (contact) => {
+    let score = 0;
     
+    // Email domain quality
+    if (contact.email) {
+      const domain = contact.email.split('@')[1];
+      if (domain && !domain.includes('gmail') && !domain.includes('yahoo') && !domain.includes('hotmail')) {
+        score += 20;
+      }
+    }
+    
+    // Has phone number
+    if (contact.phone) score += 15;
+    
+    // Has LinkedIn
+    if (contact.linkedin) score += 15;
+    
+    // Has company and position
+    if (contact.company) score += 20;
+    if (contact.position) score += 15;
+    
+    // Position keywords
+    if (contact.position) {
+      const seniorKeywords = ['manager', 'director', 'vp', 'vice president', 'ceo', 'cto', 'founder', 'owner'];
+      if (seniorKeywords.some(keyword => contact.position.toLowerCase().includes(keyword))) {
+        score += 15;
+      }
+    }
+    
+    return Math.min(score, 100);
+  };
+
+  // Handle Google Sign In
+  const handleGoogleSignIn = async () => {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      setUser(result.user);
-      await initializeUserData(result.user.uid);
-    } catch (error) {
-      console.error('Sign in error:', error);
-      setStatus('❌ Failed to sign in');
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      const token = credential.accessToken;
+      setGoogleToken(token);
+      setSuccess('Successfully signed in with Google');
+    } catch (err) {
+      setError('Failed to sign in with Google: ' + err.message);
     }
   };
 
-  const signOutUser = async () => {
-    if (!auth) return;
+  // Handle Sign Out
+  const handleSignOut = async () => {
     try {
       await signOut(auth);
-      setUser(null);
-      resetState();
-    } catch (error) {
-      console.error('Sign out error:', error);
+      setGoogleToken(null);
+      setSuccess('Successfully signed out');
+    } catch (err) {
+      setError('Failed to sign out: ' + err.message);
     }
   };
 
-  const resetState = () => {
-    setTargets([]);
-    setCampaigns([]);
-    setActiveCampaign(null);
-    setSelectedTargets([]);
-    setResearchData({});
-    setPersonalizationData({});
-    setCurrentStep('setup');
-  };
-
-  // INITIALIZATION
-  const initializeUserData = async (userId) => {
-    if (!db || !userId) return;
-    
+  // Update contact status
+  const updateContactStatus = async (contactId, newStatus, note = '') => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
+      const contactRef = doc(db, 'contacts', contactId);
+      const contactDoc = await getDoc(contactRef);
+      const contactData = contactDoc.data();
       
-      if (!userDoc.exists()) {
-        await setDoc(doc(db, 'users', userId), {
-          uid: userId,
-          email: auth.currentUser.email,
-          displayName: auth.currentUser.displayName,
-          createdAt: serverTimestamp(),
-          settings: {
-            maxDailySends: 50,
-            bookingLink: '',
-            senderName: auth.currentUser.displayName || 'Team',
-            senderTitle: 'Business Development',
-            senderCompany: 'Your Company'
-          },
-          icp: TIGHT_ICP
-        });
+      // Validate transition
+      if (!VALID_TRANSITIONS[contactData.status].includes(newStatus)) {
+        setError(`Invalid status transition from ${contactData.status} to ${newStatus}`);
+        return;
       }
-      
-      await loadCampaigns(userId);
-      await loadTargets(userId);
-    } catch (error) {
-      console.error('Failed to initialize user data:', error);
+
+      const statusHistory = [...(contactData.statusHistory || [])];
+      statusHistory.push({
+        status: newStatus,
+        timestamp: serverTimestamp(),
+        note: note || `Status changed from ${contactData.status} to ${newStatus}`
+      });
+
+      await updateDoc(contactRef, {
+        status: newStatus,
+        updated_at: serverTimestamp(),
+        statusHistory
+      });
+
+      await loadContacts();
+      await loadAnalytics();
+      setSuccess(`Status updated to ${CONTACT_STATUSES[newStatus].label}`);
+      setStatusModalOpen(false);
+      setNewStatus('');
+      setStatusNote('');
+    } catch (err) {
+      setError('Failed to update status: ' + err.message);
     }
   };
 
-  // DATA LOADING
-  const loadCampaigns = async (userId) => {
-    if (!db || !userId) return;
-    
+  // Send email
+  const sendEmail = async (contact, template, customEmail = null) => {
     try {
-      const campaignsRef = collection(db, 'users', userId, 'campaigns');
-      const snapshot = await getDocs(campaignsRef);
-      
-      const campaignsData = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        campaignsData.push({
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.() || data.createdAt
-        });
-      });
-      
-      setCampaigns(campaignsData);
-      if (campaignsData.length > 0) {
-        setActiveCampaign(campaignsData[0]);
+      if (!googleToken) {
+        setError('Please sign in with Google to send emails');
+        return;
       }
-    } catch (error) {
-      console.error('Failed to load campaigns:', error);
-    }
-  };
 
-  const loadTargets = async (userId) => {
-    if (!db || !userId) return;
-    
-    try {
-      const targetsRef = collection(db, 'users', userId, 'targets');
-      const snapshot = await getDocs(targetsRef);
-      
-      const targetsData = [];
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        targetsData.push({
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt?.toDate?.() || data.createdAt,
-          lastContacted: data.lastContacted?.toDate?.() || data.lastContacted
-        });
+      const emailData = customEmail || EMAIL_TEMPLATES[template];
+      const personalizedBody = personalizeEmail(emailData.body, contact);
+      const personalizedSubject = personalizeEmail(emailData.subject, contact);
+
+      // Send via Gmail API
+      const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          raw: btoa(
+            `To: ${contact.email}\n` +
+            `Subject: ${personalizedSubject}\n\n` +
+            personalizedBody
+          ).replace(/\+/g, '-')
+        })
       });
-      
-      setTargets(targetsData);
-      updateKPIs(targetsData);
-    } catch (error) {
-      console.error('Failed to load targets:', error);
+
+      if (response.ok) {
+        // Update contact status
+        await updateContactStatus(contact.id, 'contacted', `Email sent using ${template} template`);
+        setSuccess('Email sent successfully');
+        setEmailModalOpen(false);
+      } else {
+        throw new Error('Failed to send email');
+      }
+    } catch (err) {
+      setError('Failed to send email: ' + err.message);
     }
   };
 
-  // CAMPAIGN MANAGEMENT
-  const createCampaign = async () => {
-    if (!user?.uid || !db) return;
-    
+  // Personalize email template
+  const personalizeEmail = (template, contact) => {
+    return template
+      .replace(/\{\{contact_name\}\}/g, contact.name || 'there')
+      .replace(/\{\{company\}\}/g, contact.company || 'your company')
+      .replace(/\{\{your_name\}\}/g, user?.displayName || 'Your Name')
+      .replace(/\{\{your_company\}\}/g, 'Your Company')
+      .replace(/\{\{your_title\}\}/g, 'Your Title')
+      .replace(/\{\{your_phone\}\}/g, 'Your Phone')
+      .replace(/\{\{portfolio_link\}\}/g, 'https://yourportfolio.com')
+      .replace(/\{\{calendar_link\}\}/g, 'https://calendly.com/yourname')
+      .replace(/\{\{linkedin_link\}\}/g, 'https://linkedin.com/in/yourprofile')
+      .replace(/\{\{value_proposition\}\}/g, 'achieve your business goals')
+      .replace(/\{\{specific_goal\}\}/g, 'growth and success')
+      .replace(/\{\{meeting_time\}\}/g, 'our scheduled meeting')
+      .replace(/\{\{meeting_agenda\}\}/g, 'We will discuss your needs and how we can help')
+      .replace(/\{\{personalized_insight\}\}/g, 'Based on my research, I think we can help you with your current challenges');
+  };
+
+  // Make phone call
+  const makePhoneCall = async (contact) => {
     try {
-      const campaignData = {
-        name: `Campaign ${campaigns.length + 1}`,
-        status: 'active',
-        icp: TIGHT_ICP,
-        templates: PROVEN_TEMPLATES,
-        cadence: EFFECTIVE_CADENCE,
-        createdAt: serverTimestamp(),
-        stats: {
-          targets: 0,
-          researched: 0,
-          personalized: 0,
-          sent: 0,
-          replies: 0,
-          meetings: 0
-        }
-      };
-      
-      const campaignRef = doc(collection(db, 'users', user.uid, 'campaigns'));
-      await setDoc(campaignRef, campaignData);
-      
-      const newCampaign = { id: campaignRef.id, ...campaignData };
-      setCampaigns(prev => [...prev, newCampaign]);
-      setActiveCampaign(newCampaign);
-      
-      setStatus('✅ Campaign created successfully!');
-      setCurrentStep('targets');
-    } catch (error) {
-      console.error('Failed to create campaign:', error);
-      setStatus('❌ Failed to create campaign');
-    }
-  };
+      if (!contact.phone) {
+        setError('Contact does not have a phone number');
+        return;
+      }
 
-  // TARGET MANAGEMENT - REAL-WORLD VALIDATION
-  const handleCsvUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    if (!activeCampaign) {
-      setStatus('❌ Please create a campaign first');
-      return;
-    }
-    
-    setStatus('📊 Processing targets...');
-    const reader = new FileReader();
-    
-    reader.onload = async (event) => {
-      try {
-        const text = event.target.result;
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        if (lines.length < 2) {
-          setStatus('❌ CSV must contain headers and data');
-          return;
-        }
-        
-        const headers = parseCsvRow(lines[0]);
-        const processedTargets = [];
-        const errors = [];
-        
-        for (let i = 1; i < lines.length && processedTargets.length < 50; i++) {
-          const values = parseCsvRow(lines[i]);
-          if (values.length !== headers.length) {
-            errors.push(`Row ${i + 1}: Column mismatch`);
-            continue;
+      // Initiate call via Twilio
+      const response = await fetch('/api/twilio/call', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to: contact.phone,
+          contactId: contact.id
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setCallStatus(prev => ({
+          ...prev,
+          [contact.id]: {
+            callSid: data.callSid,
+            status: 'initiated',
+            timestamp: new Date()
           }
-          
-          const row = {};
-          headers.forEach((header, idx) => {
-            row[header] = values[idx] || '';
-          });
-          
-          const validation = validateTarget(row, headers);
-          if (validation.valid) {
-            processedTargets.push(validation.target);
+        }));
+        
+        // Start polling for call status
+        pollCallStatus(contact.id, data.callSid);
+        
+        setSuccess('Call initiated successfully');
+        setCallModalOpen(false);
+        setCallNotes('');
+      } else {
+        throw new Error('Failed to initiate call');
+      }
+    } catch (err) {
+      setError('Failed to make call: ' + err.message);
+    }
+  };
+
+  // Poll call status
+  const pollCallStatus = async (contactId, callSid) => {
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/twilio/call-status/${callSid}`);
+        if (response.ok) {
+          const data = await response.json();
+          setCallStatus(prev => ({
+            ...prev,
+            [contactId]: {
+              ...prev[contactId],
+              status: data.status,
+              duration: data.duration
+            }
+          }));
+
+          if (data.status === 'completed') {
+            // Update contact status based on call outcome
+            await updateContactStatus(contactId, 'contacted', `Call completed - ${callNotes || 'No notes'}`);
+          } else if (['failed', 'busy', 'no-answer'].includes(data.status)) {
+            // Keep current status but add note
+            const contactRef = doc(db, 'contacts', contactId);
+            const contactDoc = await getDoc(contactRef);
+            const statusHistory = [...(contactDoc.data().statusHistory || [])];
+            statusHistory.push({
+              status: contactDoc.data().status,
+              timestamp: serverTimestamp(),
+              note: `Call ${data.status} - ${callNotes || 'No notes'}`
+            });
+            await updateDoc(contactRef, { statusHistory });
           } else {
-            errors.push(`Row ${i + 1}: ${validation.error}`);
+            // Continue polling
+            setTimeout(poll, 5000);
           }
         }
-        
-        if (processedTargets.length > 0) {
-          await saveTargets(processedTargets);
-          setStatus(`✅ ${processedTargets.length} targets loaded! ${errors.length > 0 ? `(${errors.length} skipped)` : ''}`);
-          setCurrentStep('research');
-        } else {
-          setStatus('❌ No valid targets found');
-        }
-      } catch (error) {
-        console.error('CSV processing error:', error);
-        setStatus(`❌ Failed to process CSV: ${error.message}`);
+      } catch (err) {
+        console.error('Error polling call status:', err);
       }
     };
-    
-    reader.readAsText(file);
+
+    setTimeout(poll, 5000); // Start polling after 5 seconds
   };
 
-  const validateTarget = (row, headers) => {
-    const companyName = row.company_name || row.business_name || row.name;
-    const email = row.email || '';
-    const website = row.website || '';
-    const industry = row.industry || '';
-    const size = row.size || row.employees || '';
-    const funding = row.funding || '';
-    
-    // REAL-WORLD VALIDATION
-    if (!companyName || companyName.length < 2) {
-      return { valid: false, error: 'Invalid company name' };
-    }
-    
-    if (!website || !website.startsWith('http')) {
-      return { valid: false, error: 'Valid website required' };
-    }
-    
-    if (!industry) {
-      return { valid: false, error: 'Industry required' };
-    }
-    
-    // ICP QUALIFICATION
-    if (!industry.toLowerCase().includes('saas') && !industry.toLowerCase().includes('software')) {
-      return { valid: false, error: 'Must be SaaS company' };
-    }
-    
-    const sizeNum = parseInt(size.replace(/\D/g, ''));
-    if (sizeNum < 20 || sizeNum > 200) {
-      return { valid: false, error: 'Company size must be 20-200 employees' };
-    }
-    
-    if (!funding || (!funding.toLowerCase().includes('series') && !funding.toLowerCase().includes('seed'))) {
-      return { valid: false, error: 'Funding information required' };
-    }
-    
-    // Email validation (optional but preferred)
-    if (email && !isValidEmail(email)) {
-      return { valid: false, error: 'Invalid email format' };
-    }
-    
-    const target = {
-      companyName: companyName.trim(),
-      email: email && isValidEmail(email) ? email.trim() : null,
-      website: website.trim(),
-      industry: industry.trim(),
-      size: size.trim(),
-      funding: funding.trim(),
-      description: row.description || '',
-      
-      // Status tracking
-      status: 'new',
-      sequenceDay: 0,
-      lastContacted: null,
-      nextContactDate: null,
-      
-      // Research data
-      research: {
-        trigger: '',
-        triggerDate: null,
-        triggerSource: '',
-        observation: '',
-        impact: '',
-        decisionMakers: []
-      },
-      
-      // Personalization
-      personalization: {
-        observation: '',
-        impact: '',
-        socialProof: '',
-        caseStudy: ''
-      },
-      
-      // Activity tracking
-      activity: [],
-      replies: [],
-      meetings: [],
-      
-      // Metadata
-      campaignId: activeCampaign.id,
-      source: 'csv_upload',
-      createdAt: new Date(),
-      lastUpdated: new Date()
-    };
-    
-    return { valid: true, target };
-  };
+  // Send SMS
+  const sendSMS = async (contact) => {
+    try {
+      if (!contact.phone) {
+        setError('Contact does not have a phone number');
+        return;
+      }
 
-  // AUTOMATION HEALTH MONITORING
-  const checkAutomationHealth = useCallback(() => {
-    const health = {
-      aiResearch: 'healthy',
-      aiPersonalization: 'healthy',
-      emailSending: 'healthy',
-      linkedinAutomation: 'healthy'
-    };
-    
-    // Simulate health checks
-    if (automationMode === 'full') {
-      // Check if AI systems are responding
-      Promise.all([
-        fetch('https://api.example.com/health').catch(() => null),
-        fetch('https://api.example.com/email-health').catch(() => null)
-      ]).then(() => {
-        setAutomationHealth(health);
-      }).catch(() => {
-        // AI systems down, switch to manual
-        setAutomationMode('manual');
-        setManualMode(true);
-        health.aiResearch = 'down';
-        health.aiPersonalization = 'down';
-        health.emailSending = 'down';
-        setStatus('⚠️ AI systems down. Switched to manual mode.');
+      const response = await fetch('/api/twilio/sms', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to: contact.phone,
+          message: smsMessage || `Hi ${contact.name}, this is ${user?.displayName || 'Your Name'} from Your Company. I'd love to connect and discuss how we can help you.`,
+          contactId: contact.id
+        })
       });
-    }
-    
-    setAutomationHealth(health);
-  }, [automationMode]);
 
-  // RESEARCH PHASE - Automation + Manual Fallback
-  const startResearch = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
-    
-    if (manualMode || automationMode !== 'full') {
-      // Manual research interface
-      setManualResearch(prev => ({
-        ...prev,
-        [targetId]: {
-          trigger: '',
-          triggerDate: null,
-          triggerSource: '',
-          observation: '',
-          impact: '',
-          decisionMakers: []
-        }
-      }));
-      setStatus(`🔍 Manual research mode: Research ${target.companyName}`);
-    } else {
-      // AI research with health check
-      setStatus(`🔍 Researching ${target.companyName}...`);
+      if (response.ok) {
+        await updateContactStatus(contact.id, 'contacted', 'SMS sent');
+        setSuccess('SMS sent successfully');
+        setSmsModalOpen(false);
+        setSmsMessage('');
+      } else {
+        throw new Error('Failed to send SMS');
+      }
+    } catch (err) {
+      setError('Failed to send SMS: ' + err.message);
+    }
+  };
+
+  // Send WhatsApp message
+  const sendWhatsApp = async (contact) => {
+    try {
+      if (!contact.phone) {
+        setError('Contact does not have a phone number');
+        return;
+      }
+
+      const response = await fetch('/api/twilio/whatsapp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          to: contact.phone,
+          message: whatsappMessage || `Hi ${contact.name}, this is ${user?.displayName || 'Your Name'} from Your Company. I'd love to connect and discuss how we can help you.`,
+          contactId: contact.id
+        })
+      });
+
+      if (response.ok) {
+        await updateContactStatus(contact.id, 'contacted', 'WhatsApp message sent');
+        setSuccess('WhatsApp message sent successfully');
+        setWhatsappModalOpen(false);
+        setWhatsappMessage('');
+      } else {
+        throw new Error('Failed to send WhatsApp message');
+      }
+    } catch (err) {
+      setError('Failed to send WhatsApp message: ' + err.message);
+    }
+  };
+
+  // Perform AI research on contact
+  const performAIResearch = async (contact) => {
+    try {
+      setLoading(true);
       
-      try {
-        const research = {
-          trigger: target.funding ? `${target.funding} funding round` : 'Recent product launch',
-          triggerDate: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000),
-          triggerSource: 'TechCrunch',
-          observation: `${target.companyName} is growing rapidly with ${target.size} employees in the ${target.industry} space`,
-          impact: 'Likely facing challenges in scaling customer acquisition efficiently',
-          decisionMakers: [
+      // Simulate AI research - in production, this would call actual AI APIs
+      const researchData = {
+        companyInfo: {
+          size: '50-200 employees',
+          industry: 'Technology',
+          revenue: '$10M-$50M',
+          founded: '2015'
+        },
+        contactInsights: {
+          role: 'Key decision maker',
+          interests: ['AI', 'Cloud Computing', 'Digital Transformation'],
+          recentActivity: 'Active on LinkedIn, recently posted about industry trends'
+        },
+        opportunities: [
+          'Looking to expand operations',
+          'Recently raised funding',
+          'Hiring in relevant departments'
+        ],
+        challenges: [
+          'Scaling customer support',
+          'Data management issues',
+          'Need for automation'
+        ]
+      };
+
+      setAiResearch(prev => ({
+        ...prev,
+        [contact.id]: researchData
+      }));
+
+      // Generate follow-up suggestions
+      const suggestions = [
+        {
+          type: 'email',
+          template: 'followup',
+          timing: '2-3 days',
+          reason: 'Follow up on initial introduction'
+        },
+        {
+          type: 'call',
+          timing: '1 week',
+          reason: 'Schedule discovery call to discuss specific needs'
+        },
+        {
+          type: 'content',
+          timing: '1 week',
+          reason: 'Share case study relevant to their industry'
+        }
+      ];
+
+      setFollowUpSuggestions(prev => ({
+        ...prev,
+        [contact.id]: suggestions
+      }));
+
+      setSuccess('AI research completed');
+    } catch (err) {
+      setError('Failed to perform AI research: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Archive old contacts
+  const archiveOldContacts = async () => {
+    try {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const contactsRef = collection(db, 'contacts');
+      const q = query(
+        contactsRef,
+        where('status', 'in', ['contacted', 'replied']),
+        where('updated_at', '<', thirtyDaysAgo)
+      );
+      const querySnapshot = await getDocs(q);
+
+      for (const doc of querySnapshot.docs) {
+        await updateDoc(doc.ref, {
+          status: 'archived',
+          updated_at: serverTimestamp(),
+          statusHistory: [
+            ...doc.data().statusHistory,
             {
-              name: 'John Doe',
-              role: 'CEO',
-              linkedin: `https://linkedin.com/in/johndoe-${target.companyName.toLowerCase().replace(/\s+/g, '')}`,
-              email: target.email || `john@${target.website.replace('https://www.', '').replace('https://', '').replace('/', '')}`,
-              verified: true
+              status: 'archived',
+              timestamp: serverTimestamp(),
+              note: 'Auto-archived after 30 days of inactivity'
             }
           ]
-        };
-        
-        setResearchData(prev => ({ ...prev, [targetId]: research }));
-        updateTargetResearch(targetId, research);
-        setStatus(`✅ Research completed for ${target.companyName}`);
-      } catch (error) {
-        // AI research failed, switch to manual
-        setManualMode(true);
-        setAutomationMode('manual');
-        setStatus('⚠️ AI research failed. Switched to manual mode.');
-      }
-    }
-  };
-
-  const updateTargetResearch = async (targetId, research) => {
-    if (!user?.uid || !db) return;
-    
-    try {
-      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
-      await updateDoc(targetRef, {
-        research: research,
-        status: 'researched',
-        lastUpdated: serverTimestamp()
-      });
-      
-      setTargets(prev => prev.map(t => 
-        t.id === targetId 
-          ? { ...t, research, status: 'researched', lastUpdated: new Date() }
-          : t
-      ));
-      
-      updateKPIs();
-    } catch (error) {
-      console.error('Failed to update research:', error);
-    }
-  };
-
-  // PERSONALIZATION PHASE - Automation + Manual Fallback
-  const startPersonalization = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target || !target.research.trigger) {
-      setStatus('❌ Please complete research first');
-      return;
-    }
-    
-    if (manualMode || automationMode !== 'full') {
-      // Manual personalization interface
-      setManualPersonalization(prev => ({
-        ...prev,
-        [targetId]: {
-          observation: '',
-          impact: '',
-          socialProof: '',
-          caseStudy: ''
-        }
-      }));
-      setStatus(`✍️ Manual personalization: Personalize outreach for ${target.companyName}`);
-    } else {
-      // AI personalization with health check
-      setStatus(`✍️ Personalizing outreach for ${target.companyName}...`);
-      
-      try {
-        const personalization = {
-          observation: target.research.observation,
-          impact: target.research.impact,
-          socialProof: 'We helped 50+ SaaS companies scale their customer acquisition by 40% on average',
-          caseStudy: `Similar to ${target.companyName}, we worked with a ${target.size} SaaS company that increased their MRR by 300% in 6 months`
-        };
-        
-        setPersonalizationData(prev => ({ ...prev, [targetId]: personalization }));
-        updateTargetPersonalization(targetId, personalization);
-        setStatus(`✅ Personalization completed for ${target.companyName}`);
-      } catch (error) {
-        // AI personalization failed, switch to manual
-        setManualMode(true);
-        setAutomationMode('manual');
-        setStatus('⚠️ AI personalization failed. Switched to manual mode.');
-      }
-    }
-  };
-
-  const updateTargetPersonalization = async (targetId, personalization) => {
-    if (!user?.uid || !db) return;
-    
-    try {
-      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
-      await updateDoc(targetRef, {
-        personalization: personalization,
-        status: 'personalized',
-        lastUpdated: serverTimestamp()
-      });
-      
-      setTargets(prev => prev.map(t => 
-        t.id === targetId 
-          ? { ...t, personalization, status: 'personalized', lastUpdated: new Date() }
-          : t
-      ));
-      
-      updateKPIs();
-    } catch (error) {
-      console.error('Failed to update personalization:', error);
-    }
-  };
-
-  // OUTREACH EXECUTION - Automation + Manual Fallback
-  const executeOutreach = async (targetId) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target || !target.personalization.observation) {
-      setStatus('❌ Please complete personalization first');
-      return;
-    }
-    
-    if (manualMode || automationMode !== 'full') {
-      // Manual email sending
-      setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: true, error: null } }));
-      setStatus(`📧 Manual email sending to ${target.companyName}...`);
-      
-      try {
-        const template = PROVEN_TEMPLATES.email1;
-        const renderedEmail = renderTemplate(template, target);
-        
-        // Simulate manual email send
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        const activity = {
-          type: 'email',
-          template: 'email1',
-          sentAt: new Date(),
-          subject: renderedEmail.subject,
-          body: renderedEmail.body,
-          status: 'sent',
-          method: 'manual'
-        };
-        
-        await updateTargetActivity(targetId, activity, 'email1_sent');
-        setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: false, error: null } }));
-        setStatus(`✅ Manual email sent to ${target.companyName}`);
-        
-        // Schedule next contact
-        scheduleNextContact(targetId, 'email1_sent');
-        
-      } catch (error) {
-        setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: false, error: error.message } }));
-        setStatus(`❌ Manual email failed: ${error.message}`);
-      }
-    } else {
-      // Automated email sending with health check
-      setStatus(`📧 Sending automated outreach to ${target.companyName}...`);
-      
-      try {
-        const template = PROVEN_TEMPLATES.email1;
-        const renderedEmail = renderTemplate(template, target);
-        
-        // Simulate automated email send
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        const activity = {
-          type: 'email',
-          template: 'email1',
-          sentAt: new Date(),
-          subject: renderedEmail.subject,
-          body: renderedEmail.body,
-          status: 'sent',
-          method: 'automated'
-        };
-        
-        await updateTargetActivity(targetId, activity, 'email1_sent');
-        setStatus(`✅ Automated outreach sent to ${target.companyName}`);
-        
-        // Schedule next contact
-        scheduleNextContact(targetId, 'email1_sent');
-        
-      } catch (error) {
-        // Automated sending failed, switch to manual
-        setManualMode(true);
-        setAutomationMode('manual');
-        setStatus('⚠️ Automated sending failed. Switched to manual mode.');
-      }
-    }
-  };
-
-  const renderTemplate = (template, target) => {
-    const senderName = user?.displayName || 'Team';
-    const senderTitle = 'Business Development';
-    const senderCompany = 'Your Company';
-    const bookingLink = 'https://calendly.com/your-team/10min';
-    
-    let subject = template.subject;
-    let body = template.body;
-    
-    // Replace variables
-    subject = subject.replace(/\{\{company_name\}\}/g, target.companyName);
-    subject = subject.replace(/\{\{sender_company\}\}/g, senderCompany);
-    
-    body = body.replace(/\{\{first_name\}\}/g, target.research.decisionMakers[0]?.name || 'there');
-    body = body.replace(/\{\{company_name\}\}/g, target.companyName);
-    body = body.replace(/\{\{industry\}\}/g, target.industry);
-    body = body.replace(/\{\{personalization_trigger\}\}/g, target.research.trigger);
-    body = body.replace(/\{\{personalization_observation\}\}/g, target.personalization.observation);
-    body = body.replace(/\{\{personalization_impact\}\}/g, target.personalization.impact);
-    body = body.replace(/\{\{social_proof\}\}/g, target.personalization.socialProof);
-    body = body.replace(/\{\{case_study_relevant_to_them\}\}/g, target.personalization.caseStudy);
-    body = body.replace(/\{\{new_trigger_or_insight\}\}/g, 'I noticed your recent company updates');
-    body = body.replace(/\{\{booking_link\}\}/g, bookingLink);
-    body = body.replace(/\{\{sender_name\}\}/g, senderName);
-    body = body.replace(/\{\{sender_title\}\}/g, senderTitle);
-    
-    return { subject, body };
-  };
-
-  const updateTargetActivity = async (targetId, activity, newStatus) => {
-    if (!user?.uid || !db) return;
-    
-    try {
-      const targetRef = doc(db, 'users', user.uid, 'targets', targetId);
-      await updateDoc(targetRef, {
-        activity: [...(targets.find(t => t.id === targetId)?.activity || []), activity],
-        status: newStatus,
-        lastContacted: serverTimestamp(),
-        lastUpdated: serverTimestamp()
-      });
-      
-      setTargets(prev => prev.map(t => 
-        t.id === targetId 
-          ? { 
-              ...t, 
-              activity: [...(t.activity || []), activity], 
-              status: newStatus, 
-              lastContacted: new Date(),
-              lastUpdated: new Date()
-            }
-          : t
-      ));
-      
-      updateKPIs();
-    } catch (error) {
-      console.error('Failed to update activity:', error);
-    }
-  };
-
-  const scheduleNextContact = (targetId, currentStatus) => {
-    const target = targets.find(t => t.id === targetId);
-    if (!target) return;
-    
-    let nextDate = new Date();
-    let nextAction = null;
-    
-    if (currentStatus === 'email1_sent') {
-      nextDate.setDate(nextDate.getDate() + 3);
-      nextAction = 'email2';
-    } else if (currentStatus === 'email2_sent') {
-      nextDate.setDate(nextDate.getDate() + 4);
-      nextAction = 'breakup';
-    }
-    
-    if (nextAction) {
-      setTimeout(() => {
-        setStatus(`📅 ${target.companyName}: ${nextAction} scheduled for ${nextDate.toLocaleDateString()}`);
-      }, 1000);
-    }
-  };
-
-  // MANUAL WORKFLOW HANDLERS
-  const saveManualResearch = async (targetId, research) => {
-    setManualResearch(prev => ({ ...prev, [targetId]: research }));
-    await updateTargetResearch(targetId, research);
-  };
-
-  const saveManualPersonalization = async (targetId, personalization) => {
-    setManualPersonalization(prev => ({ ...prev, [targetId]: personalization }));
-    await updateTargetPersonalization(targetId, personalization);
-  };
-
-  // UTILITY FUNCTIONS
-  const parseCsvRow = (text) => {
-    const result = [];
-    let current = '';
-    let inQuotes = false;
-    
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        result.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    
-    result.push(current);
-    return result.map(field => {
-      let cleaned = field.replace(/[\r\n]/g, '').trim();
-      if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
-        cleaned = cleaned.slice(1, -1).replace(/""/g, '"');
-      }
-      return cleaned;
-    });
-  };
-
-  const isValidEmail = (email) => {
-    if (!email || typeof email !== 'string') return false;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email.trim());
-  };
-
-  const saveTargets = async (targets) => {
-    if (!user?.uid || !db || targets.length === 0) return;
-    
-    try {
-      const targetsRef = collection(db, 'users', user.uid, 'targets');
-      
-      for (const target of targets) {
-        const targetRef = doc(targetsRef);
-        await setDoc(targetRef, {
-          ...target,
-          createdAt: serverTimestamp(),
-          lastUpdated: serverTimestamp()
         });
       }
-      
-      await loadTargets(user.uid);
-    } catch (error) {
-      console.error('Failed to save targets:', error);
-      throw error;
+
+      await loadContacts();
+      await loadAnalytics();
+      setSuccess(`${querySnapshot.docs.length} contacts archived`);
+    } catch (err) {
+      setError('Failed to archive contacts: ' + err.message);
     }
   };
 
-  const updateKPIs = useCallback(() => {
-    const totalTargets = targets.length;
-    const researched = targets.filter(t => t.status === 'researched' || t.status === 'personalized' || t.status.includes('sent')).length;
-    const personalized = targets.filter(t => t.status === 'personalized' || t.status.includes('sent')).length;
-    const sent = targets.filter(t => t.status.includes('sent')).length;
-    const replies = targets.filter(t => t.status === 'replied').length;
-    const meetings = targets.filter(t => t.status === 'booked').length;
-    
-    setKpi({
-      totalTargets,
-      researched,
-      personalized,
-      sent,
-      replies,
-      meetings,
-      replyRate: sent > 0 ? (replies / sent) * 100 : 0,
-      meetingRate: sent > 0 ? (meetings / sent) * 100 : 0,
-      costPerReply: sent > 0 ? (sent * 50) / replies : 0, // Assuming $50 per send
-      costPerMeeting: meetings > 0 ? (sent * 50) / meetings : 0
-    });
-  }, [targets]);
-
-  // EFFECTS
-  useEffect(() => {
-    if (!auth) {
-      setLoading(false);
-      return;
-    }
-    
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-      if (user) {
-        initializeUserData(user.uid);
-      }
-    });
-    
-    return unsubscribe;
-  }, []);
-
-  // LOADING STATE
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p>Loading Final Optimal Sales Machine...</p>
-          <p className="text-sm text-gray-400 mt-2">Real B2B Sales, Real Results</p>
-        </div>
-      </div>
-    );
-  }
-
-  // AUTH STATE
-  if (!user) {
-    return (
-      <>
-        <Head>
-          <title>Final Optimal B2B Sales Machine - Sign In</title>
-        </Head>
-        
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-blue-900 to-purple-900 text-white flex items-center justify-center p-4">
-          <div className="max-w-md w-full">
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700/50 shadow-2xl">
-              <div className="text-center mb-8">
-                <h1 className="text-3xl font-bold mb-2">Final Optimal B2B Sales Machine</h1>
-                <p className="text-gray-300">Real B2B Sales, Real Results</p>
-                <p className="text-sm text-gray-400 mt-2">Manual + AI = Maximum Results</p>
-              </div>
-              
-              <div className="space-y-6">
-                <div className="text-center">
-                  <p className="text-gray-300 mb-4">Sign in to access your sales machine</p>
-                  <button
-                    onClick={signInWithGoogle}
-                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
-                  >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                    </svg>
-                    <span>Continue with Google</span>
-                  </button>
-                </div>
-              </div>
-              
-              <div className="mt-8 text-center">
-                <p className="text-sm text-gray-400">
-                  Secure authentication powered by Google
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-
   return (
-    <>
-      <Head>
-        <title>Final Optimal B2B Sales Machine</title>
-      </Head>
-      
-      <div className="min-h-screen bg-gray-900 text-white">
-        {/* Header */}
-        <header className="bg-gray-800 border-b border-gray-700">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <div className="flex items-center">
-                <h1 className="text-xl font-bold">Final Optimal B2B Sales Machine</h1>
-                <span className="ml-4 text-sm text-gray-400">
-                  Step: {currentStep} | {targets.length} targets
-                </span>
-              </div>
-              
-              <div className="flex items-center space-x-4">
-                {/* Automation Health Indicator */}
-                <div className="flex items-center space-x-2">
-                  <div className={`w-3 h-3 rounded-full ${
-                    automationHealth.aiResearch === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                  <div className={`w-3 h-3 rounded-full ${
-                    automationHealth.aiPersonalization === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                  <div className={`w-3 h-3 rounded-full ${
-                    automationHealth.emailSending === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                  <div className={`w-3 h-3 rounded-full ${
-                    automationHealth.linkedinAutomation === 'healthy' ? 'bg-green-500' : 'bg-red-500'
-                  }`}></div>
-                </div>
-                
-                {/* Automation Mode Selector */}
-                <select
-                  value={automationMode}
-                  onChange={(e) => setAutomationMode(e.target.value)}
-                  className="px-3 py-1 rounded text-sm bg-gray-700 text-white"
-                >
-                  <option value="full">Full Automation</option>
-                  <option value="partial">Partial Automation</option>
-                  <option value="manual">Manual Only</option>
-                </select>
-                
-                {/* Manual Override Toggle */}
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Sales Machine</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              {user ? (
+                <>
+                  <span className="text-sm text-gray-600">Welcome, {user.displayName}</span>
+                  <button
+                    onClick={handleSignOut}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
                 <button
-                  onClick={() => setManualMode(!manualMode)}
-                  className={`px-3 py-1 rounded text-sm ${
-                    manualMode 
-                      ? 'bg-orange-600 hover:bg-orange-700' 
-                      : 'bg-blue-600 hover:bg-blue-700'
-                  }`}
+                  onClick={handleGoogleSignIn}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
                 >
-                  {manualMode ? 'Manual Override' : 'AI Assisted'}
+                  Sign In with Google
                 </button>
-                
-                <div className="text-sm text-gray-300">
-                  {user.email}
-                </div>
-                <button
-                  onClick={signOutUser}
-                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-                >
-                  Sign Out
-                </button>
-              </div>
+              )}
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Status Messages */}
-        {status && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
-            <div className="p-4 bg-blue-600/20 border border-blue-600/50 rounded-lg">
-              <p>{status}</p>
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Analytics Dashboard */}
+        {user && (
+          <div className="mb-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-sm font-medium text-gray-500">Total Contacts</h3>
+              <p className="mt-2 text-3xl font-bold text-gray-900">{analytics.totalContacts || 0}</p>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-sm font-medium text-gray-500">Active Contacts</h3>
+              <p className="mt-2 text-3xl font-bold text-blue-600">{analytics.activeContacts || 0}</p>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-sm font-medium text-gray-500">Conversion Rate</h3>
+              <p className="mt-2 text-3xl font-bold text-green-600">{analytics.conversionRate || 0}%</p>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-sm font-medium text-gray-500">Closed Won</h3>
+              <p className="mt-2 text-3xl font-bold text-green-500">{analytics.statusCounts?.closed_won || 0}</p>
             </div>
           </div>
         )}
 
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* KPI Dashboard */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center mr-3">
-                  <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2a3 3 0 00-5.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2a3 3 0 015.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
+        {/* Status Breakdown */}
+        {user && analytics.statusCounts && (
+          <div className="mb-8 bg-white p-6 rounded-lg shadow">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Status Breakdown</h2>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {Object.entries(CONTACT_STATUSES).map(([status, info]) => (
+                <div key={status} className="text-center">
+                  <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${info.color}`}>
+                    {info.label}
+                  </div>
+                  <p className="mt-1 text-sm font-semibold text-gray-900">
+                    {analytics.statusCounts[status] || 0}
+                  </p>
                 </div>
-                <div>
-                  <p className="text-sm text-gray-400">Total Targets</p>
-                  <p className="text-2xl font-bold text-blue-400">{kpi.totalTargets}</p>
-                  <p className="text-xs text-gray-500">Max: 50</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Upload Section */}
+        {user && (
+          <div className="mb-8 bg-white p-6 rounded-lg shadow">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Import Contacts</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload CSV File
+                </label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+              {csvFile && (
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-600">Selected: {csvFile.name}</p>
+                  {uploadProgress > 0 && (
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  )}
+                  <button
+                    onClick={processCSV}
+                    disabled={loading}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {loading ? 'Processing...' : 'Import Contacts'}
+                  </button>
                 </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Filters and Controls */}
+        {user && (
+          <div className="mb-6 bg-white p-4 rounded-lg shadow">
+            <div className="flex flex-wrap gap-4 items-center">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="all">All Statuses</option>
+                  {Object.entries(CONTACT_STATUSES).map(([status, info]) => (
+                    <option key={status} value={status}>
+                      {info.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex-1 min-w-64">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by name, email, or company..."
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="block px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="created_at">Created Date</option>
+                  <option value="name">Name</option>
+                  <option value="company">Company</option>
+                  <option value="leadScore">Lead Score</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Order</label>
+                <select
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value)}
+                  className="block px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="desc">Newest First</option>
+                  <option value="asc">Oldest First</option>
+                </select>
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={archiveOldContacts}
+                  className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm"
+                >
+                  Archive Old Contacts
+                </button>
               </div>
             </div>
-            
-            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center mr-3">
-                  <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">Replies</p>
-                  <p className="text-2xl font-bold text-green-400">{kpi.replies}</p>
-                  <p className="text-xs text-gray-500">Rate: {kpi.replyRate.toFixed(1)}%</p>
-                </div>
-              </div>
+          </div>
+        )}
+
+        {/* Contacts Table */}
+        {user && (
+          <div className="bg-white shadow rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Contact
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Company
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Lead Score
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredContacts.map((contact) => (
+                    <tr key={contact.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {contact.name}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {contact.email}
+                          </div>
+                          {contact.phone && (
+                            <div className="text-sm text-gray-500">
+                              {contact.phone}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">
+                          {contact.company || '-'}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {contact.position || '-'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${CONTACT_STATUSES[contact.status]?.color || 'bg-gray-100 text-gray-800'}`}>
+                          {CONTACT_STATUSES[contact.status]?.label || contact.status}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="text-sm text-gray-900">
+                            {contact.leadScore || 0}
+                          </div>
+                          <div className="ml-2 w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
+                              style={{ width: `${contact.leadScore || 0}%` }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => {
+                              setSelectedContact(contact);
+                              setStatusModalOpen(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            Status
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedContact(contact);
+                              setEmailModalOpen(true);
+                            }}
+                            className="text-green-600 hover:text-green-900"
+                          >
+                            Email
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedContact(contact);
+                              setCallModalOpen(true);
+                            }}
+                            className="text-purple-600 hover:text-purple-900"
+                          >
+                            Call
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedContact(contact);
+                              setSmsModalOpen(true);
+                            }}
+                            className="text-orange-600 hover:text-orange-900"
+                          >
+                            SMS
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedContact(contact);
+                              performAIResearch(contact);
+                            }}
+                            className="text-indigo-600 hover:text-indigo-900"
+                          >
+                            Research
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            
-            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center mr-3">
-                  <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-400">Meetings</p>
-                  <p className="text-2xl font-bold text-purple-400">{kpi.meetings}</p>
-                  <p className="text-xs text-gray-500">Rate: {kpi.meetingRate.toFixed(1)}%</p>
-                </div>
+            {filteredContacts.length === 0 && (
+              <div className="text-center py-12">
+                <p className="text-gray-500">No contacts found</p>
               </div>
-            </div>
-            
-            <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-              <div className="flex items-center">
-                <div className="w-8 h-8 bg-yellow-500/20 rounded-full flex items-center justify-center mr-3">
-                  <svg className="w-4 h-4 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v8m0-8c.538 0 1.045.091 1.5.256M12 8V7m0 1v8m0 0v8m0-8c.538 0 1.045.091 1.5.256" />
-                  </svg>
+            )}
+          </div>
+        )}
+
+        {/* Status Modal */}
+        {statusModalOpen && selectedContact && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Update Status - {selectedContact.name}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    New Status
+                  </label>
+                  <select
+                    value={newStatus}
+                    onChange={(e) => setNewStatus(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="">Select a status</option>
+                    {VALID_TRANSITIONS[selectedContact.status]?.map(status => (
+                      <option key={status} value={status}>
+                        {CONTACT_STATUSES[status].label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-400">Cost/Reply</p>
-                  <p className="text-2xl font-bold text-yellow-400">${kpi.costPerReply.toFixed(0)}</p>
-                  <p className="text-xs text-gray-500">Per reply</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Note (optional)
+                  </label>
+                  <textarea
+                    value={statusNote}
+                    onChange={(e) => setStatusNote(e.target.value)}
+                    rows={3}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Add a note about this status change..."
+                  />
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setStatusModalOpen(false);
+                      setNewStatus('');
+                      setStatusNote('');
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => updateContactStatus(selectedContact.id, newStatus, statusNote)}
+                    disabled={!newStatus}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Update Status
+                  </button>
                 </div>
               </div>
             </div>
           </div>
+        )}
 
-          {/* Workflow Steps */}
-          {currentStep === 'setup' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Campaign Setup</h2>
-                
-                <div className="mb-6">
-                  <h3 className="text-lg font-medium mb-3">Target Profile (ICP)</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Industry:</span>
-                        <span className="font-medium">{TIGHT_ICP.industry}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Size:</span>
-                        <span className="font-medium">{TIGHT_ICP.size}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Funding:</span>
-                        <span className="font-medium">{TIGHT_ICP.funding}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-gray-400">Geography:</span>
-                        <span className="font-medium">{TIGHT_ICP.geo}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400">Primary Pain:</span>
-                        <p className="font-medium mt-1">{TIGHT_ICP.pain}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {!activeCampaign ? (
-                  <div className="text-center">
-                    <button
-                      onClick={createCampaign}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                    >
-                      Create Campaign
-                    </button>
-                    <p className="text-gray-400 mt-2">Start by creating your campaign</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-lg font-medium">{activeCampaign.name}</h3>
-                      <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">
-                        Active
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-400 mb-2">Templates</h4>
-                        <div className="space-y-1 text-sm">
-                          <div>• Email 1: Introduction + Personalization</div>
-                          <div>• Email 2: Follow-up + New Insight</div>
-                          <div>• Breakup: Professional Closing</div>
-                        </div>
-                      </div>
-                      
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-400 mb-2">Cadence</h4>
-                        <div className="space-y-1 text-sm">
-                          <div>• Day 0: Email 1</div>
-                          <div>• Day 3: Email 2 + LinkedIn</div>
-                          <div>• Day 7: Breakup + LinkedIn</div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <button
-                      onClick={() => setCurrentStep('targets')}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                    >
-                      Next: Upload Targets
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {currentStep === 'targets' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Upload Target Companies</h2>
-                
-                <div className="border-2 border-dashed border-gray-600 rounded-lg p-8 text-center">
-                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                  </svg>
-                  <p className="text-gray-400 mb-2">Drop your CSV file here or click to browse</p>
-                  <p className="text-sm text-gray-500 mb-4">
-                    Required: company_name, email, website, industry, size, funding
-                  </p>
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleCsvUpload}
-                    className="hidden"
-                    id="csv-upload"
-                  />
-                  <label
-                    htmlFor="csv-upload"
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors"
-                  >
-                    Choose CSV File
+        {/* Email Modal */}
+        {emailModalOpen && selectedContact && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Send Email - {selectedContact.name}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Template
                   </label>
+                  <select
+                    value={emailTemplate}
+                    onChange={(e) => setEmailTemplate(e.target.value)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="initial">Initial Introduction</option>
+                    <option value="followup">Follow Up</option>
+                    <option value="meeting">Meeting Confirmation</option>
+                    <option value="custom">Custom Email</option>
+                  </select>
                 </div>
-                
-                {targets.length > 0 && (
-                  <div className="mt-6">
-                    <div className="flex justify-between items-center mb-4">
-                      <h3 className="text-lg font-medium">Loaded Targets ({targets.length}/50)</h3>
-                      <button
-                        onClick={() => setCurrentStep('research')}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-                      >
-                        Next: Research
-                      </button>
+                {emailTemplate === 'custom' ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Subject
+                      </label>
+                      <input
+                        type="text"
+                        value={customEmail.subject}
+                        onChange={(e) => setCustomEmail(prev => ({ ...prev, subject: e.target.value }))}
+                        className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                        placeholder="Email subject..."
+                      />
                     </div>
-                    
-                    <div className="space-y-2">
-                      {targets.slice(0, 5).map(target => (
-                        <div key={target.id} className="bg-gray-700 p-3 rounded flex justify-between items-center">
-                          <div>
-                            <div className="font-medium">{target.companyName}</div>
-                            <div className="text-sm text-gray-400">{target.industry} • {target.size}</div>
-                          </div>
-                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
-                            {target.status}
-                          </span>
-                        </div>
-                      ))}
-                      {targets.length > 5 && (
-                        <p className="text-center text-gray-400 text-sm">
-                          ... and {targets.length - 5} more
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Message
+                      </label>
+                      <textarea
+                        value={customEmail.body}
+                        onChange={(e) => setCustomEmail(prev => ({ ...prev, body: e.target.value }))}
+                        rows={10}
+                        className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                        placeholder="Email message..."
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Preview
+                    </label>
+                    <div className="border border-gray-300 rounded-md p-4 bg-gray-50">
+                      <p className="font-medium text-sm text-gray-700 mb-2">
+                        Subject: {personalizeEmail(EMAIL_TEMPLATES[emailTemplate].subject, selectedContact)}
+                      </p>
+                      <div className="text-sm text-gray-600 whitespace-pre-wrap">
+                        {personalizeEmail(EMAIL_TEMPLATES[emailTemplate].body, selectedContact)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setEmailModalOpen(false);
+                      setEmailTemplate('initial');
+                      setCustomEmail({ subject: '', body: '' });
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (emailTemplate === 'custom') {
+                        sendEmail(selectedContact, null, customEmail);
+                      } else {
+                        sendEmail(selectedContact, emailTemplate);
+                      }
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700"
+                  >
+                    Send Email
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Call Modal */}
+        {callModalOpen && selectedContact && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Make Call - {selectedContact.name}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600">
+                    Phone: {selectedContact.phone}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Call Notes
+                  </label>
+                  <textarea
+                    value={callNotes}
+                    onChange={(e) => setCallNotes(e.target.value)}
+                    rows={3}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Add notes about this call..."
+                  />
+                </div>
+                {callStatus[selectedContact.id] && (
+                  <div className="bg-blue-50 p-3 rounded-md">
+                    <p className="text-sm text-blue-800">
+                      Call Status: {callStatus[selectedContact.id].status}
+                    </p>
+                  </div>
+                )}
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setCallModalOpen(false);
+                      setCallNotes('');
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => makePhoneCall(selectedContact)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-purple-600 rounded-md hover:bg-purple-700"
+                  >
+                    Make Call
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SMS Modal */}
+        {smsModalOpen && selectedContact && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Send SMS - {selectedContact.name}
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm text-gray-600">
+                    Phone: {selectedContact.phone}
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Message
+                  </label>
+                  <textarea
+                    value={smsMessage}
+                    onChange={(e) => setSmsMessage(e.target.value)}
+                    rows={4}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Type your SMS message..."
+                  />
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setSmsModalOpen(false);
+                      setSmsMessage('');
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => sendSMS(selectedContact)}
+                    className="px-4 py-2 text-sm font-medium text-white bg-orange-600 rounded-md hover:bg-orange-700"
+                  >
+                    Send SMS
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI Research Results */}
+        {selectedContact && aiResearch[selectedContact.id] && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                AI Research - {selectedContact.name}
+              </h3>
+              <div className="space-y-6">
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Company Information</h4>
+                  <div className="bg-gray-50 p-3 rounded-md">
+                    <p className="text-sm text-gray-600">
+                      Size: {aiResearch[selectedContact.id].companyInfo.size}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Industry: {aiResearch[selectedContact.id].companyInfo.industry}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Revenue: {aiResearch[selectedContact.id].companyInfo.revenue}
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Contact Insights</h4>
+                  <div className="bg-gray-50 p-3 rounded-md">
+                    <p className="text-sm text-gray-600">
+                      Role: {aiResearch[selectedContact.id].contactInsights.role}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      Interests: {aiResearch[selectedContact.id].contactInsights.interests.join(', ')}
+                    </p>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Opportunities</h4>
+                  <ul className="list-disc list-inside text-sm text-gray-600">
+                    {aiResearch[selectedContact.id].opportunities.map((opp, index) => (
+                      <li key={index}>{opp}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Follow-up Suggestions</h4>
+                  <ul className="space-y-2">
+                    {followUpSuggestions[selectedContact.id]?.map((suggestion, index) => (
+                      <li key={index} className="bg-blue-50 p-3 rounded-md">
+                        <p className="text-sm font-medium text-blue-900">
+                          {suggestion.type.toUpperCase()} - {suggestion.timing}
                         </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {currentStep === 'research' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Research Phase</h2>
-                <p className="text-gray-400 mb-4">
-                  {manualMode ? 'Manual research mode: Research each company manually' : 'AI research mode: AI will research companies for you'}
-                </p>
-                
-                <div className="space-y-4">
-                  {targets.map(target => (
-                    <div key={target.id} className="bg-gray-700 p-4 rounded-lg">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-semibold text-lg">{target.companyName}</h3>
-                          <p className="text-gray-400">{target.industry} • {target.size}</p>
-                        </div>
-                        <div className="flex space-x-2">
-                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
-                            {target.status}
-                          </span>
-                          {target.status === 'new' && (
-                            <button
-                              onClick={() => startResearch(target.id)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 text-xs rounded transition-colors"
-                            >
-                              Research
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {target.research.trigger && (
-                        <div className="bg-gray-600/50 p-3 rounded">
-                          <p className="text-sm text-gray-300">
-                            <strong>Trigger:</strong> {target.research.trigger}
-                          </p>
-                          <p className="text-sm text-gray-400 mt-1">
-                            <strong>Observation:</strong> {target.research.observation}
-                          </p>
-                          <p className="text-sm text-gray-400 mt-1">
-                            <strong>Impact:</strong> {target.research.impact}
-                          </p>
-                          {target.research.decisionMakers.length > 0 && (
-                            <div className="mt-2">
-                              <strong>Decision Makers:</strong>
-                              <ul className="text-sm text-gray-400 mt-1">
-                                {target.research.decisionMakers.map((dm, idx) => (
-                                  <li key={idx}>
-                                    {dm.name} - {dm.role} ({dm.verified ? '✓' : '?'})
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      
-                      {manualMode && manualResearch[target.id] && (
-                        <ManualResearchForm
-                          target={target}
-                          research={manualResearch[target.id]}
-                          onSave={(research) => saveManualResearch(target.id, research)}
-                        />
-                      )}
-                    </div>
-                  ))}
+                        <p className="text-sm text-blue-700">{suggestion.reason}</p>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                
-                {targets.filter(t => t.status === 'researched' || t.status === 'personalized').length > 0 && (
-                  <div className="mt-6 text-center">
-                    <button
-                      onClick={() => setCurrentStep('personalization')}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-                    >
-                      Next: Personalization
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {currentStep === 'personalization' && (
-            <div className="space-y-6">
-              <div className="bg-gray-800 rounded-lg p-6 border border-gray-700">
-                <h2 className="text-xl font-semibold mb-4">Personalization Phase</h2>
-                <p className="text-gray-400 mb-4">
-                  {manualMode ? 'Manual personalization: Craft personalized outreach for each company' : 'AI personalization: AI will create personalized outreach'}
-                </p>
-                
-                <div className="space-y-4">
-                  {targets.filter(t => t.status === 'researched' || t.status === 'personalized').map(target => (
-                    <div key={target.id} className="bg-gray-700 p-4 rounded-lg">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-semibold text-lg">{target.companyName}</h3>
-                          <p className="text-sm text-gray-400">{target.research.trigger}</p>
-                        </div>
-                        <div className="flex space-x-2">
-                          <span className="px-2 py-1 bg-gray-600 text-white text-xs rounded">
-                            {target.status}
-                          </span>
-                          {target.status === 'researched' && (
-                            <button
-                              onClick={() => startPersonalization(target.id)}
-                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 text-xs rounded transition-colors"
-                            >
-                              Personalize
-                            </button>
-                          )}
-                          {target.status === 'personalized' && (
-                            <button
-                              onClick={() => executeOutreach(target.id)}
-                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 text-xs rounded transition-colors"
-                            >
-                              Send Outreach
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {target.personalization.observation && (
-                        <div className="bg-blue-600/20 p-3 rounded">
-                          <p className="text-sm text-gray-300">
-                            <strong>Observation:</strong> {target.personalization.observation}
-                          </p>
-                          <p className="text-sm text-gray-400 mt-1">
-                            <strong>Impact:</strong> {target.personalization.impact}
-                          </p>
-                          <p className="text-sm text-gray-400 mt-1">
-                            <strong>Social Proof:</strong> {target.personalization.socialProof}
-                          </p>
-                        </div>
-                      )}
-                      
-                      {manualMode && manualPersonalization[target.id] && (
-                        <ManualPersonalizationForm
-                          target={target}
-                          personalization={manualPersonalization[target.id]}
-                          onSave={(personalization) => saveManualPersonalization(target.id, personalization)}
-                        />
-                      )}
-                    </div>
-                  ))}
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      setSelectedContact(null);
+                      setAiResearch(prev => {
+                        const newState = { ...prev };
+                        delete newState[selectedContact.id];
+                        return newState;
+                      });
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
             </div>
-          )}
-        </main>
-      </div>
-    </>
-  );
-}
+          </div>
+        )}
 
-// Manual Research Form Component
-function ManualResearchForm({ target, research, onSave }) {
-  const [formData, setFormData] = useState(research || {
-    trigger: '',
-    triggerDate: null,
-    triggerSource: '',
-    observation: '',
-    impact: '',
-    decisionMakers: []
-  });
+        {/* Error and Success Messages */}
+        {error && (
+          <div className="fixed bottom-4 right-4 bg-red-50 border border-red-200 rounded-md p-4 max-w-sm">
+            <p className="text-sm text-red-800">{error}</p>
+            <button
+              onClick={() => setError('')}
+              className="mt-2 text-sm text-red-600 hover:text-red-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSave(formData);
-  };
+        {success && (
+          <div className="fixed bottom-4 right-4 bg-green-50 border border-green-200 rounded-md p-4 max-w-sm">
+            <p className="text-sm text-green-800">{success}</p>
+            <button
+              onClick={() => setSuccess('')}
+              className="mt-2 text-sm text-green-600 hover:text-green-800"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
-  return (
-    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Trigger</label>
-        <input
-          type="text"
-          value={formData.trigger}
-          onChange={(e) => setFormData(prev => ({ ...prev, trigger: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          placeholder="e.g., Series A funding, product launch, hiring growth"
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Observation</label>
-        <textarea
-          value={formData.observation}
-          onChange={(e) => setFormData(prev => ({ ...prev, observation: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          rows={2}
-          placeholder="What did you observe about this company?"
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Impact</label>
-        <textarea
-          value={formData.impact}
-          onChange={(e) => setFormData(prev => ({ ...prev, impact: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          rows={2}
-          placeholder="What business problem might they be facing?"
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Decision Maker</label>
-        <input
-          type="text"
-          value={formData.decisionMakers[0]?.name || ''}
-          onChange={(e) => setFormData(prev => ({
-            ...prev,
-            decisionMakers: [{ ...prev.decisionMakers[0], name: e.target.value }]
-          }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          placeholder="Name of decision maker"
-        />
-      </div>
-      
-      <button
-        type="submit"
-        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition-colors"
-      >
-        Save Research
-      </button>
-    </form>
-  );
-}
-
-// Manual Personalization Form Component
-function ManualPersonalizationForm({ target, personalization, onSave }) {
-  const [formData, setFormData] = useState(personalization || {
-    observation: '',
-    impact: '',
-    socialProof: '',
-    caseStudy: ''
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSave(formData);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-4 space-y-3">
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Observation</label>
-        <textarea
-          value={formData.observation}
-          onChange={(e) => setFormData(prev => ({ ...prev, observation: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          rows={2}
-          placeholder="Specific observation about their company"
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Impact</label>
-        <textarea
-          value={formData.impact}
-          onChange={(e) => setFormData(prev => ({ ...prev, impact: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          rows={2}
-          placeholder="How can you help them?"
-        />
-      </div>
-      
-      <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Social Proof</label>
-        <textarea
-          value={formData.socialProof}
-          onChange={(e) => setFormData(prev => ({ ...prev, socialProof: e.target.value }))}
-          className="w-full bg-gray-600 border border-gray-500 rounded px-3 py-2 text-white"
-          rows={2}
-          placeholder="Relevant success story or client result"
-        />
-      </div>
-      
-      <button
-        type="submit"
-        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm transition-colors"
-      >
-        Save Personalization
-      </button>
-    </form>
+        {/* Loading Overlay */}
+        {loading && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-sm text-gray-600">Loading...</p>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
