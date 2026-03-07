@@ -45,7 +45,7 @@
  * - WhatsApp: Multi-channel follow-up
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, Timestamp, orderBy, limit, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
@@ -349,7 +349,7 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
 // ✅ EXPORT TEMPLATES FOR API USE
 export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
-export default function Dashboard() {
+export default function FinalOptimalSalesMachine() {
   // STATE INITIALIZATION
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -1028,8 +1028,8 @@ ${senderName}`
     }
   }, [useAI, whatsappLinks, senderName]); // ✅ FIXED: Correct dependencies
 
-  // ✅ STATUS BADGE COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
-  const StatusBadge = memo(({ status, small = false }) => {
+  // ✅ STATUS BADGE COMPONENT - SIMPLE INLINE FUNCTION
+  const StatusBadge = ({ status, small = false }) => {
     const statusInfo = CONTACT_STATUSES.find(s => s.id === status);
     if (!statusInfo) return null;
     
@@ -1050,10 +1050,10 @@ ${senderName}`
         {statusInfo.label}
       </span>
     );
-  });
+  };
 
-  // ✅ STATUS DROPDOWN COMPONENT - MEMOIZED TO PREVENT RE-RENDERS
-  const StatusDropdown = memo(({ contact, compact = false }) => {
+  // ✅ STATUS DROPDOWN COMPONENT - SIMPLE INLINE FUNCTION
+  const StatusDropdown = ({ contact, compact = false }) => {
     const currentStatus = contact.status || 'new';
     const statusInfo = CONTACT_STATUSES.find(s => s.id === currentStatus);
     
@@ -1085,7 +1085,7 @@ ${senderName}`
         </button>
       </div>
     );
-  });
+  };
 
   // ✅ GET FILTERED CONTACTS - MEMOIZED TO PREVENT RE-RENDERS
   const getFilteredContacts = useMemo(() => {
