@@ -468,9 +468,9 @@ export default function Dashboard() {
           tech_stack_detected: data.tech_stack_detected || '',
           company_size_indicator: data.company_size_indicator || 'unknown',
           status: data.status || 'new',
-          lastContacted: data.lastContacted?.toDate?.() || data.lastContacted || null,
-          createdAt: data.createdAt?.toDate?.() || data.createdAt || new Date(),
-          lastUpdated: data.lastUpdated?.toDate?.() || data.lastUpdated || new Date(),
+          lastContacted: (data.lastContacted && data.lastContacted.toDate) ? data.lastContacted.toDate() : data.lastContacted || null,
+          createdAt: (data.createdAt && data.createdAt.toDate) ? data.createdAt.toDate() : data.createdAt || new Date(),
+          lastUpdated: (data.lastUpdated && data.lastUpdated.toDate) ? data.lastUpdated.toDate() : data.lastUpdated || new Date(),
           statusHistory: data.statusHistory || [],
           notes: data.notes || [],
           url: data.phone ? `https://wa.me/${data.phone}?text=${encodeURIComponent(
@@ -956,7 +956,7 @@ export default function Dashboard() {
   // ✅ SEND SAFETY RULES - FIXED DEPENDENCIES
   const checkSendSafety = useCallback(() => {
     const today = new Date().toDateString();
-    const todaySent = sentEmails?.filter(e => new Date(e.sentAt).toDateString() === today).length || 0;
+    const todaySent = sentEmails?.filter(e => e.sentAt && (new Date(e.sentAt).toDateString() === today)).length || 0;
     
     if (todaySent >= sendSafety.maxPerDay) {
       setSendSafety(prev => ({ ...prev, paused: true, currentDaySent: todaySent }));
