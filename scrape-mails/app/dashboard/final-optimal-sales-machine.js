@@ -1297,125 +1297,207 @@ ${senderName}`
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
       <Head>
         <title>Final Optimal B2B Sales Machine</title>
         <meta name="description" content="Best of both worlds: Complete manual control + Strategic AI enhancement" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       </Head>
 
+      {/* Animated Background Pattern */}
+      <div className="fixed inset-0 opacity-5 pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/10 via-purple-600/10 to-pink-600/10 animate-pulse"></div>
+        <div className="absolute inset-0" style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%239C92AC' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-2v-4h-2v4h-2v-4h-2v4h-2v-4h-2v4h-2v-4h-2v4h-2v-4h-2v4h-2v-4h-2v4z'/%3E%3C/g%3E%3C/svg%3E")`,
+        }}></div>
+      </div>
+
       {/* Header */}
-      <div className="bg-gray-800 border-b border-gray-700 p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Final Optimal Sales Machine</h1>
-            <p className="text-gray-400 text-sm">Complete Manual Control + Strategic AI Enhancement</p>
+      <div className="bg-gray-800/90 backdrop-blur-md border-b border-gray-700/50 p-4 sticky top-0 z-50 shadow-2xl">
+        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-y-2 lg:space-y-0">
+            <h1 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              Final Optimal Sales Machine
+            </h1>
+            <p className="text-gray-400 text-sm lg:text-base">Complete Manual Control + Strategic AI Enhancement</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3 justify-center lg:justify-end">
             {/* AI Toggle */}
-            <div className="flex items-center gap-2 bg-gray-700 px-3 py-2 rounded-lg">
-              <span className="text-sm">AI:</span>
+            <div className="flex items-center gap-2 bg-gray-700/80 backdrop-blur-sm px-4 py-2.5 rounded-xl border border-gray-600/50 shadow-lg">
+              <span className="text-sm font-medium">AI:</span>
               <button
                 onClick={() => setUseAI(!useAI)}
-                className={`px-3 py-1 rounded text-sm transition-colors ${
-                  useAI ? 'bg-green-600 text-white' : 'bg-gray-600 text-gray-300'
+                className={`relative px-4 py-1.5 rounded-lg text-sm font-semibold transition-all duration-300 transform hover:scale-105 ${
+                  useAI 
+                    ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-green-500/25' 
+                    : 'bg-gray-600 text-gray-300 hover:bg-gray-500'
                 }`}
               >
                 {useAI ? 'ON' : 'OFF'}
+                <span className={`absolute -top-1 -right-1 w-3 h-3 rounded-full ${
+                  aiStatus === 'available' ? 'bg-green-400' : 
+                  aiStatus === 'loading' ? 'bg-yellow-400 animate-pulse' : 'bg-red-400'
+                }`}></span>
               </button>
-              <span className={`w-2 h-2 rounded-full ${
-                aiStatus === 'available' ? 'bg-green-400' : 
-                aiStatus === 'loading' ? 'bg-yellow-400' : 'bg-red-400'
-              }`}></span>
             </div>
             
             {/* Send Safety Status */}
-            <div className="flex items-center gap-2 bg-gray-700 px-3 py-2 rounded-lg">
-              <span className="text-sm">Safety:</span>
-              <span className={`px-2 py-1 rounded text-xs ${
-                sendSafety.paused ? 'bg-red-600' : 'bg-green-600'
+            <div className="flex items-center gap-2 bg-gray-700/80 backdrop-blur-sm px-4 py-2.5 rounded-xl border border-gray-600/50 shadow-lg">
+              <span className="text-sm font-medium">Safety:</span>
+              <span className={`px-3 py-1 rounded-lg text-xs font-bold transition-all duration-300 ${
+                sendSafety.paused 
+                  ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/25' 
+                  : 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-green-500/25'
               }`}>
                 {sendSafety.paused ? 'PAUSED' : 'ACTIVE'}
               </span>
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 font-medium">
                 {sendSafety.currentDaySent}/{sendSafety.maxPerDay}
               </span>
             </div>
             
-            <div className="text-right">
-              <p className="text-sm text-gray-400">Welcome</p>
-              <p className="font-semibold">{user.displayName}</p>
+            {/* User Info & Sign Out */}
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden lg:block">
+                <p className="text-sm text-gray-400">Welcome</p>
+                <p className="font-semibold text-white">{user.displayName}</p>
+              </div>
+              <button
+                onClick={() => {
+                  if (auth) {
+                    signOut(auth);
+                  }
+                }}
+                className="bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg shadow-red-500/25"
+              >
+                Sign Out
+              </button>
             </div>
-            <button
-              onClick={() => {
-                if (auth) {
-                  signOut(auth);
-                }
-              }}
-              className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm transition-colors"
-            >
-              Sign Out
-            </button>
           </div>
         </div>
       </div>
 
       {/* KPI Dashboard */}
-      <div className="bg-gray-800 p-6 border-b border-gray-700">
-        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-gray-700 p-4 rounded-lg">
-            <p className="text-gray-400 text-sm">Sent</p>
-            <p className="text-2xl font-bold">{kpis.sent}</p>
-            <p className="text-xs text-gray-400 mt-1">Today: {sendSafety.currentDaySent}</p>
+      <div className="bg-gray-800/90 backdrop-blur-md border-b border-gray-700/50 p-4 lg:p-6">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-6">
+          <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-blue-500/20 shadow-2xl shadow-blue-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-blue-300 text-sm font-medium">Sent</p>
+              <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-bold text-white mb-1">{kpis.sent}</p>
+            <p className="text-xs text-blue-300 font-medium">Today: {sendSafety.currentDaySent}</p>
+            <div className="mt-2 h-1 bg-gradient-to-r from-blue-500/50 to-transparent rounded-full"></div>
           </div>
-          <div className="bg-gray-700 p-4 rounded-lg">
-            <p className="text-gray-400 text-sm">Replies</p>
-            <p className="text-2xl font-bold text-green-400">{kpis.replies}</p>
-            <p className="text-xs text-green-400 mt-1">
+          
+          <div className="bg-gradient-to-br from-green-600/20 to-emerald-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-green-500/20 shadow-2xl shadow-green-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-green-300 text-sm font-medium">Replies</p>
+              <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center">
+                <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 1.664-1.344 3.015-3 3.015s3 .664 3 3.015 3 3.015c0-1.398.884-2.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7c0-.6.398-.884-1.572-1.965-3.015L12 8.985V7.015l4.035 3.97C16.116 7.884 16.602 7.5 16 7z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-bold text-white mb-1 text-green-400">{kpis.replies}</p>
+            <p className="text-xs text-green-300 font-medium">
               {kpis.sent > 0 ? ((kpis.replies/kpis.sent)*100).toFixed(1) : 0}%
             </p>
+            <div className="mt-2 h-1 bg-gradient-to-r from-green-500/50 to-transparent rounded-full"></div>
           </div>
-          <div className="bg-gray-700 p-4 rounded-lg">
-            <p className="text-gray-400 text-sm">Meetings</p>
-            <p className="text-2xl font-bold">{kpis.meetings}</p>
-            <p className="text-xs text-blue-400 mt-1">
+          
+          <div className="bg-gradient-to-br from-purple-600/20 to-purple-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-purple-500/20 shadow-2xl shadow-purple-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-purple-300 text-sm font-medium">Meetings</p>
+              <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+                <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-4z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-bold text-white mb-1 text-purple-400">{kpis.meetings}</p>
+            <p className="text-xs text-purple-300 font-medium">
               {kpis.sent > 0 ? ((kpis.meetings/kpis.sent)*100).toFixed(1) : 0}%
             </p>
+            <div className="mt-2 h-1 bg-gradient-to-r from-purple-500/50 to-transparent rounded-full"></div>
           </div>
-          <div className="bg-gray-700 p-4 rounded-lg">
-            <p className="text-gray-400 text-sm">Bounces</p>
-            <p className="text-2xl font-bold text-red-400">{kpis.bounces}</p>
-            <p className="text-xs text-red-400 mt-1">
+          
+          <div className="bg-gradient-to-br from-red-600/20 to-red-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-red-500/20 shadow-2xl shadow-red-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-red-300 text-sm font-medium">Bounces</p>
+              <div className="w-8 h-8 bg-red-500/20 rounded-full flex items-center justify-center">
+                <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl lg:text-4xl font-bold text-white mb-1 text-red-400">{kpis.bounces}</p>
+            <p className="text-xs text-red-300 font-medium">
               {kpis.sent > 0 ? ((kpis.bounces/kpis.sent)*100).toFixed(1) : 0}%
             </p>
+            <div className="mt-2 h-1 bg-gradient-to-r from-red-500/50 to-transparent rounded-full"></div>
           </div>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="flex space-x-1 mb-6 bg-gray-800 p-1 rounded-lg">
+      <div className="max-w-7xl mx-auto p-4 lg:p-6">
+        <div className="flex space-x-1 lg:space-x-2 mb-6 lg:mb-8 bg-gray-800/80 backdrop-blur-md p-1.5 lg:p-2 rounded-2xl shadow-2xl">
           {['targets', 'templates', 'send', 'analytics'].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-2 px-4 rounded-md transition-colors ${
+              className={`flex-1 py-3 lg:py-4 px-3 lg:px-6 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 ${
                 activeTab === tab
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
+                  ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg shadow-blue-500/25'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
               }`}
             >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              <span className="flex items-center justify-center space-x-2">
+                {tab === 'targets' && (
+                  <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3 3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
+                  </svg>
+                )}
+                {tab === 'templates' && (
+                  <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2z" />
+                  </svg>
+                )}
+                {tab === 'send' && (
+                  <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                  </svg>
+                )}
+                {tab === 'analytics' && (
+                  <svg className="w-4 h-4 lg:w-5 lg:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 00-2 2H8a2 2 0 00-2 2v4a2 2 0 002 2h2a2 2 0 002-2V9z" />
+                  </svg>
+                )}
+                <span className="hidden sm:inline lg:inline font-medium">
+                  {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                </span>
+              </span>
             </button>
           ))}
         </div>
 
         {/* TARGETS TAB */}
         {activeTab === 'targets' && (
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">Contact Management</h2>
-                <div className="flex gap-4">
+          <div className="space-y-6 lg:space-y-8">
+            <div className="bg-gray-800/90 backdrop-blur-md p-6 lg:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 lg:mb-8 gap-4">
+                <div className="flex items-center space-y-2 lg:space-y-0">
+                  <h2 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                    Contact Management
+                  </h2>
+                  <p className="text-gray-400 text-sm lg:text-base">Manage your leads with advanced status tracking</p>
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
                   <input
                     type="file"
                     accept=".csv"
@@ -1423,37 +1505,64 @@ ${senderName}`
                     className="hidden"
                     id="csv-upload"
                   />
-                  <label htmlFor="csv-upload" className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg cursor-pointer transition-colors">
-                    📤 Upload CSV
+                  <label htmlFor="csv-upload" className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-3 rounded-xl cursor-pointer transition-all duration-300 transform hover:scale-105 shadow-lg shadow-blue-500/25 font-semibold flex items-center justify-center space-x-2">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4a2 2 0 002 2h6a2 2 0 002-2v4a2 2 0 002 2z" />
+                    </svg>
+                    <span>Upload CSV</span>
                   </label>
                 </div>
               </div>
 
               {whatsappLinks.length === 0 && (
-                <div className="text-center py-12 text-gray-400">
-                  <div className="text-4xl mb-2">📥</div>
-                  <h2 className="text-xl font-bold mb-2">Upload Your First Lead List</h2>
-                  <p className="text-gray-400 mb-4">
-                    Start by uploading a CSV file with your leads. We'll automatically save contacts to your database with full status tracking.
+                <div className="text-center py-12 lg:py-16 text-gray-400">
+                  <div className="text-6xl lg:text-8xl mb-6 animate-bounce">📥</div>
+                  <h2 className="text-2xl lg:text-3xl font-bold mb-4">Upload Your First Lead List</h2>
+                  <p className="text-gray-400 text-base lg:text-lg mb-6 max-w-md mx-auto">
+                    Start by uploading a CSV file with your leads. We'll automatically save contacts to your database with full status tracking and advanced analytics.
                   </p>
+                  <div className="flex justify-center">
+                    <label htmlFor="csv-upload" className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl cursor-pointer transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25 font-semibold text-lg flex items-center space-x-3">
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 11a4 4 0 01-4 4v0M14 2a2 2 0 012-2v-4a2 2 0 00-2-2H8a2 2 0 00-2 2v4A2 2 0 002 2h6a2 2 0 002 2v4a2 2 0 002 2z" />
+                      </svg>
+                      <span>Get Started</span>
+                    </label>
+                  </div>
                 </div>
               )}
 
               {whatsappLinks.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {getFilteredContacts.map((contact) => {
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 lg:gap-6">
+                  {getFilteredContacts().map((contact, index) => {
                     const contactKey = contact.email || contact.phone;
                     const last = contact.lastContacted;
                     const score = leadScores[contact.email] || 0;
                     
                     return (
-                      <div key={contact.id} className="bg-gray-700 p-4 rounded-lg border-2 border-transparent hover:border-blue-500 transition-all">
-                        <div className="flex justify-between items-start mb-3">
-                          <div className="flex-1">
-                            <h3 className="font-bold text-white text-lg">{contact.business}</h3>
-                            <p className="text-sm text-gray-400">📞 +{contact.phone}</p>
+                      <div 
+                        key={contact.id} 
+                        className="bg-gradient-to-br from-gray-700/80 to-gray-800/80 backdrop-blur-sm p-5 lg:p-6 rounded-2xl border border-gray-600/50 hover:border-blue-500/50 transition-all duration-300 transform hover:scale-102 hover:shadow-2xl hover:shadow-blue-500/10"
+                        style={{
+                          animationDelay: `${index * 100}ms`
+                        }}
+                      >
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-white text-base lg:text-lg mb-2 truncate">{contact.business}</h3>
+                            <div className="flex items-center text-sm text-gray-400 mb-2">
+                              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
+                              </svg>
+                              <span className="truncate">+{contact.phone}</span>
+                            </div>
                             {contact.email && (
-                              <p className="text-xs text-blue-400 mt-1 break-all">{contact.email}</p>
+                              <div className="flex items-center text-xs text-blue-400 mb-2">
+                                <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                                </svg>
+                                <span className="truncate">{contact.email}</span>
+                              </div>
                             )}
                           </div>
                           <div className="ml-3 flex-shrink-0">
@@ -1461,59 +1570,82 @@ ${senderName}`
                           </div>
                         </div>
                         
-                        <div className="space-y-2 mb-3">
+                        <div className="space-y-3 mb-4">
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">Lead Score</span>
-                            <span className={`font-bold ${
-                              score >= 70 ? 'text-green-400' : 
-                              score >= 50 ? 'text-yellow-400' : 'text-orange-400'
-                            }`}>
-                              {score}/100
-                            </span>
+                            <span className="text-gray-300 font-medium">Lead Score</span>
+                            <div className="flex items-center space-x-2">
+                              <div className="w-16 bg-gray-600 rounded-full h-2">
+                                <div 
+                                  className={`h-2 rounded-full transition-all duration-500 ${
+                                    score >= 70 ? 'bg-gradient-to-r from-green-400 to-green-500 w-full' : 
+                                    score >= 50 ? 'bg-gradient-to-r from-yellow-400 to-yellow-500' : 
+                                    'bg-gradient-to-r from-orange-400 to-orange-500'
+                                  }`}
+                                  style={{ width: `${score}%` }}
+                                ></div>
+                              </div>
+                              <span className={`font-bold text-xs ${
+                                score >= 70 ? 'text-green-400' : 
+                                score >= 50 ? 'text-yellow-400' : 'text-orange-400'
+                              }`}>
+                                {score}/100
+                              </span>
+                            </div>
                           </div>
                           
                           {last && (
                             <div className="flex items-center justify-between text-xs">
-                              <span className="text-gray-300">Last Contacted</span>
-                              <span className="text-green-400 font-medium">
+                              <span className="text-gray-300 font-medium">Last Contacted</span>
+                              <span className="text-green-400 font-medium bg-green-500/20 px-2 py-1 rounded-lg">
                                 {new Date(last).toLocaleDateString()}
                               </span>
                             </div>
                           )}
                           
                           <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-300">Status</span>
+                            <span className="text-gray-300 font-medium">Status</span>
                             <StatusBadge status={contact.status} />
                           </div>
                         </div>
                         
-                        <div className="pt-3 border-t border-gray-700/50">
-                          <div className="grid grid-cols-3 gap-1.5">
+                        <div className="pt-4 border-t border-gray-700/50">
+                          <div className="grid grid-cols-3 gap-2">
                             <button
                               onClick={() => handleCall(contact.phone)}
-                              className="p-1.5 bg-green-700 hover:bg-green-600 text-white rounded text-xs font-medium transition"
+                              className="p-2 lg:p-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl text-xs font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center justify-center space-x-1"
                               title="Direct call"
                             >
-                              📞 Call
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2v3a2 2 0 012 2h6a2 2 0 012-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2zm0 2a1 1 0 011 1h6a1 1 0 011 1v1a1 1 0 011-1h6a1 1 0 011-1v-1z" />
+                              </svg>
+                              <span className="hidden sm:inline lg:inline">Call</span>
                             </button>
                             <a
                               href={contact.url}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={() => handleWhatsAppClick(contact)}
-                              className="p-1.5 bg-green-700 hover:bg-green-600 text-white rounded text-xs font-medium transition block text-center"
+                              className="p-2 lg:p-3 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white rounded-xl text-xs font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center justify-center space-x-1 block text-center"
                               title="WhatsApp"
                             >
-                              💬 WhatsApp
+                              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M17.472 14.382c-.297-.149-.461-.296-.597-.296-.653 0-1.208.021-1.877.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053l-2.694.518c-.355-.07-.576-.206-.785-.206-.631 0-1.159.021-1.838.053z" />
+                              </svg>
+                              <span className="hidden sm:inline lg:inline">WhatsApp</span>
                             </a>
                             {contact.email && (
                               <button
                                 onClick={() => performAIResearch(contact.contactId)}
                                 disabled={!useAI || researchingCompany === contact.contactId}
-                                className="p-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded text-xs font-medium transition disabled:opacity-50"
+                                className="p-2 lg:p-3 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl text-xs font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center justify-center space-x-1 disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="AI Research"
                               >
-                                {researchingCompany === contact.contactId ? '⏳' : '🧠'} AI Research
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l.536.536m0 0l-.536.536" />
+                                </svg>
+                                <span className="hidden sm:inline lg:inline">
+                                  {researchingCompany === contact.contactId ? '⏳' : '🧠'} AI Research
+                                </span>
                               </button>
                             )}
                           </div>
@@ -1529,46 +1661,74 @@ ${senderName}`
 
         {/* TEMPLATES TAB */}
         {activeTab === 'templates' && (
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-bold mb-4">Email Templates</h2>
+          <div className="space-y-6 lg:space-y-8">
+            <div className="bg-gray-800/90 backdrop-blur-md p-6 lg:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
+              <h2 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-6 lg:mb-8">
+                Email Templates
+              </h2>
               
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="font-semibold mb-2">Your Initial Pitch</h3>
-                  <div className="bg-gray-700 p-4 rounded-lg">
-                    <div className="mb-2">
-                      <label className="block text-sm font-medium mb-2">Subject</label>
-                      <input
-                        type="text"
-                        value={templateA.subject}
-                        onChange={(e) => setTemplateA(prev => ({ ...prev, subject: e.target.value }))}
-                        className="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-2"
-                      />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+                <div className="space-y-4 lg:space-y-6">
+                  <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-blue-500/20 shadow-2xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg lg:text-xl font-semibold text-blue-300">Your Initial Pitch</h3>
+                      <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                        <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2V7a2 2 0 00-2-2z" />
+                        </svg>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Body</label>
-                      <textarea
-                        value={templateA.body}
-                        onChange={(e) => setTemplateA(prev => ({ ...prev, body: e.target.value }))}
-                        rows={12}
-                        className="w-full bg-gray-600 border border-gray-500 rounded-lg px-4 py-2 font-mono text-sm"
-                      />
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-blue-300 mb-2">Subject</label>
+                        <input
+                          type="text"
+                          value={templateA.subject}
+                          onChange={(e) => setTemplateA(prev => ({ ...prev, subject: e.target.value }))}
+                          className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:border-blue-500/50 focus:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300"
+                          placeholder="Enter email subject..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-blue-300 mb-2">Body</label>
+                        <textarea
+                          value={templateA.body}
+                          onChange={(e) => setTemplateA(prev => ({ ...prev, body: e.target.value }))}
+                          rows={12}
+                          className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:border-blue-500/50 focus:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all duration-300 font-mono text-sm"
+                          placeholder="Write your email content..."
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
                 
-                <div>
-                  <h3 className="font-semibold mb-2">AI-Enhanced Templates</h3>
-                  <div className="space-y-4">
-                    {Object.entries(CONTROLLED_TEMPLATES).map(([key, template]) => (
-                      <div key={key} className="bg-gray-700 p-4 rounded-lg">
-                        <h4 className="font-semibold mb-2">{template.name}</h4>
-                        <p className="text-blue-400 text-sm mb-2">{template.subject}</p>
-                        <pre className="text-xs text-gray-400 whitespace-pre-wrap">{template.body.substring(0, 200)}...</pre>
-                        <p className="text-xs text-gray-500 mt-2">Word count: {template.wordCount}</p>
+                <div className="space-y-4 lg:space-y-6">
+                  <div className="bg-gradient-to-br from-purple-600/20 to-purple-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-purple-500/20 shadow-2xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-lg lg:text-xl font-semibold text-purple-300">AI-Enhanced Templates</h3>
+                      <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+                        <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 3h4.674M12 3h4.674M12 3v4.674M16 3h4.674M12 3v4.674M16 3v4.674M12 8v4.674M16 8v4.674M12 8v4.674M16 8v4.674M12 13v4.674M16 13v4.674M12 13v4.674M16 13v4.674" />
+                        </svg>
                       </div>
-                    ))}
+                    </div>
+                    <div className="space-y-4">
+                      {Object.entries(CONTROLLED_TEMPLATES).map(([key, template]) => (
+                        <div key={key} className="bg-gray-700/50 backdrop-blur-sm p-4 lg:p-6 rounded-xl border border-gray-600/50 hover:border-purple-500/50 transition-all duration-300">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-white text-base lg:text-lg">{template.name}</h4>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-xs text-gray-400">Word count:</span>
+                              <span className="text-xs font-bold text-purple-400 bg-purple-500/20 px-2 py-1 rounded-lg">{template.wordCount}</span>
+                            </div>
+                          </div>
+                          <p className="text-purple-300 text-sm font-medium mb-2">{template.subject}</p>
+                          <pre className="text-xs text-gray-400 whitespace-pre-wrap bg-gray-800/50 p-3 rounded-lg border border-gray-700/50">{template.body.substring(0, 200)}...</pre>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1578,37 +1738,103 @@ ${senderName}`
 
         {/* SEND TAB */}
         {activeTab === 'send' && (
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">Send Emails</h2>
+          <div className="space-y-6 lg:space-y-8">
+            <div className="bg-gray-800/90 backdrop-blur-md p-6 lg:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
+              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 lg:mb-8 gap-4">
+                <div className="space-y-2">
+                  <h2 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+                    Send Emails
+                  </h2>
+                  <p className="text-gray-400 text-sm lg:text-base">Send personalized emails to your qualified leads</p>
+                </div>
                 <button
                   onClick={() => handleSendEmails()}
                   disabled={isSending || !checkSendSafety()}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                  className={`px-6 lg:px-8 py-3 lg:py-4 rounded-2xl text-base lg:text-lg font-bold transition-all duration-300 transform hover:scale-105 shadow-lg flex items-center justify-center space-x-3 ${
                     isSending || !checkSendSafety()
                       ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                      : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-green-500/25'
                   }`}
                 >
-                  {isSending ? '📤 Sending...' : '📤 Send to All Valid Emails'}
+                  {isSending ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/30 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Sending...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                      </svg>
+                      <span>Send to All Valid Emails</span>
+                    </>
+                  )}
                 </button>
               </div>
               
               {previewRecipient && (
-                <div className="bg-gray-700 p-4 rounded-lg mb-6">
-                  <h3 className="font-semibold mb-2">Preview: {previewRecipient.business}</h3>
-                  <div className="bg-gray-800 p-4 rounded border border-gray-600">
-                    <p className="text-blue-400 font-semibold mb-2">{renderPreviewText(templateA.subject, previewRecipient, fieldMappings, senderName)}</p>
-                    <pre className="text-sm text-gray-300 whitespace-pre-wrap">{renderPreviewText(templateA.body, previewRecipient, fieldMappings, senderName)}</pre>
+                <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-blue-500/20 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg lg:text-xl font-semibold text-blue-300">Preview: {previewRecipient.business}</h3>
+                    <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0zm-2 0a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1v-4a1 1 0 00-1-1z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="bg-gray-800/50 backdrop-blur-sm p-6 rounded-xl border border-gray-700/50">
+                    <div className="mb-3">
+                      <p className="text-sm font-medium text-blue-300 mb-2">Subject Preview</p>
+                      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-600/50">
+                        <p className="text-blue-400 font-semibold text-base lg:text-lg">{renderPreviewText(templateA.subject, previewRecipient, fieldMappings, senderName)}</p>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-blue-300 mb-2">Body Preview</p>
+                      <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-600/50">
+                        <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{renderPreviewText(templateA.body, previewRecipient, fieldMappings, senderName)}</pre>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
               
-              <div className="text-sm text-gray-400">
-                <p>✅ Valid emails: {validEmails}</p>
-                <p>✅ Valid WhatsApp: {validWhatsApp}</p>
-                <p>📊 Total contacts: {whatsappLinks.length}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-gradient-to-br from-green-600/20 to-emerald-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-green-500/20 shadow-2xl">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a12 12 0 0118.68 5.68L12 22l2.32-9.68A12 12 0 0021.32 2.32L3 8z" />
+                      </svg>
+                    </div>
+                    <p className="text-2xl lg:text-3xl font-bold text-white mb-1">{validEmails}</p>
+                    <p className="text-sm text-green-300 font-medium">Valid Emails</p>
+                  </div>
+                </div>
+                
+                <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-blue-500/20 shadow-2xl">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17.472 14.382s-.497.801-.497-1.99c0-1.188.4-1.99 1.188-1.99h2.99c1.188 0 1.99.4 1.99.4v.01z" />
+                      </svg>
+                    </div>
+                    <p className="text-2xl lg:text-3xl font-bold text-white mb-1">{validWhatsApp}</p>
+                    <p className="text-sm text-blue-300 font-medium">Valid WhatsApp</p>
+                  </div>
+                </div>
+                
+                <div className="bg-gradient-to-br from-purple-600/20 to-purple-700/20 backdrop-blur-sm p-4 lg:p-6 rounded-2xl border border-purple-500/20 shadow-2xl">
+                  <div className="text-center">
+                    <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-3-3H5a3 3 0 00-3-3v14m11-9l-4-4m0 0L5 16m4-4l0 0" />
+                      </svg>
+                    </div>
+                    <p className="text-2xl lg:text-3xl font-bold text-white mb-1">{whatsappLinks.length}</p>
+                    <p className="text-sm text-purple-300 font-medium">Total Contacts</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1616,70 +1842,145 @@ ${senderName}`
 
         {/* ANALYTICS TAB */}
         {activeTab === 'analytics' && (
-          <div className="space-y-6">
-            <div className="bg-gray-800 p-6 rounded-lg">
-              <h2 className="text-xl font-bold mb-4">Analytics & Business Intelligence</h2>
+          <div className="space-y-6 lg:space-y-8">
+            <div className="bg-gray-800/90 backdrop-blur-md p-6 lg:p-8 rounded-2xl shadow-2xl border border-gray-700/50">
+              <h2 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent mb-6 lg:mb-8">
+                Analytics & Business Intelligence
+              </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-gray-700 p-4 rounded-lg">
-                  <h3 className="font-semibold mb-4">System Status</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span>AI Status:</span>
-                      <span className={aiStatus === 'available' ? 'text-green-400' : 'text-yellow-400'}>
-                        {aiStatus}
-                      </span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 lg:gap-8">
+                <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-blue-500/20 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg lg:text-xl font-semibold text-blue-300">System Status</h3>
+                    <div className="w-8 h-8 bg-blue-500/20 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 012 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
+                      </svg>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Send Safety:</span>
-                      <span className={sendSafety.paused ? 'text-red-400' : 'text-green-400'}>
-                        {sendSafety.paused ? 'PAUSED' : 'ACTIVE'}
-                      </span>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-blue-300 font-medium">AI Status</span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-3 py-1 rounded-lg text-xs font-bold transition-all duration-300 ${
+                          aiStatus === 'available' 
+                            ? 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-green-500/25' 
+                            : 'bg-gradient-to-r from-yellow-500 to-orange-500 text-white shadow-yellow-500/25 animate-pulse'
+                        }`}>
+                          {aiStatus === 'available' ? 'READY' : 'PROCESSING'}
+                        </span>
+                        <div className={`w-3 h-3 rounded-full ${
+                          aiStatus === 'available' ? 'bg-green-400' : 
+                          aiStatus === 'loading' ? 'bg-yellow-400 animate-pulse' : 'bg-red-400'
+                        }`}></div>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Daily Limit:</span>
-                      <span>{sendSafety.currentDaySent}/{sendSafety.maxPerDay}</span>
+                    
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-blue-300 font-medium">Send Safety</span>
+                      <div className="flex items-center space-x-2">
+                        <span className={`px-3 py-1 rounded-lg text-xs font-bold transition-all duration-300 ${
+                          sendSafety.paused 
+                            ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-red-500/25' 
+                            : 'bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-green-500/25'
+                        }`}>
+                          {sendSafety.paused ? 'PAUSED' : 'ACTIVE'}
+                        </span>
+                        <div className={`w-3 h-3 rounded-full ${
+                          sendSafety.paused ? 'bg-red-400' : 'bg-green-400'
+                        }`}></div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-blue-300 font-medium">Daily Limit</span>
+                      <div className="flex items-center space-x-2">
+                        <div className="text-white">
+                          <span className="text-lg font-bold">{sendSafety.currentDaySent}</span>
+                          <span className="text-sm text-blue-300">/</span>
+                          <span className="text-lg font-bold">{sendSafety.maxPerDay}</span>
+                        </div>
+                        <div className="w-16 bg-gray-600 rounded-full h-2">
+                          <div 
+                            className="h-2 bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full transition-all duration-500"
+                            style={{ width: `${(sendSafety.currentDaySent / sendSafety.maxPerDay) * 100}%` }}
+                          ></div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-gray-700 p-4 rounded-lg">
-                  <h3 className="font-semibold mb-4">Strategic Overview</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span>Tight ICP:</span>
-                      <span>{TIGHT_ICP.industry} • {TIGHT_ICP.size}</span>
+                <div className="bg-gradient-to-br from-purple-600/20 to-purple-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-purple-500/20 shadow-2xl">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg lg:text-xl font-semibold text-purple-300">Strategic Overview</h3>
+                    <div className="w-8 h-8 bg-purple-500/20 rounded-full flex items-center justify-center">
+                      <svg className="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H3a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002 2v4a2 2 0 002 2h2a2 2 0 012 2v4a2 2 0 012 2z" />
+                      </svg>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Target Pain:</span>
-                      <span>{TIGHT_ICP.pain}</span>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-purple-300 font-medium">Tight ICP</span>
+                      <span className="text-white font-bold bg-purple-500/20 px-3 py-1 rounded-lg">{TIGHT_ICP.industry} • {TIGHT_ICP.size}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Total Contacts:</span>
-                      <span>{whatsappLinks.length}</span>
+                    
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-purple-300 font-medium">Target Pain</span>
+                      <span className="text-white font-bold bg-purple-500/20 px-3 py-1 rounded-lg">{TIGHT_ICP.pain}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Templates:</span>
-                      <span>3 controlled (&lt;120 words)</span>
+                    
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-purple-300 font-medium">Total Contacts</span>
+                      <span className="text-white font-bold bg-purple-500/20 px-3 py-1 rounded-lg">{whatsappLinks.length}</span>
+                    </div>
+                    
+                    <div className="flex items-center justify-between p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50">
+                      <span className="text-purple-300 font-medium">Templates</span>
+                      <span className="text-white font-bold bg-purple-500/20 px-3 py-1 rounded-lg">3 controlled (&lt;120 words)</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-gray-700 p-4 rounded-lg mt-6">
-                <h3 className="font-semibold mb-2">Final Optimal Philosophy</h3>
-                <ul className="text-sm text-gray-400 space-y-1">
-                  <li>✅ Complete manual control when AI is down</li>
-                  <li>✅ Strategic AI enhancement for speed and scale</li>
-                  <li>✅ Your actual business pitch and templates</li>
-                  <li>✅ Advanced contact management with status tracking</li>
-                  <li>✅ Multi-channel outreach (Email, WhatsApp, SMS, Calls)</li>
-                  <li>✅ Send safety rules protect deliverability</li>
-                  <li>✅ Real-time analytics and business intelligence</li>
-                  <li>✅ Tight ICP targeting for better conversion</li>
-                  <li>✅ 2-minute AI research for fast personalization</li>
-                  <li>✅ 3 controlled templates prevent errors</li>
-                </ul>
+              <div className="bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 backdrop-blur-sm p-6 lg:p-8 rounded-2xl border border-emerald-500/20 shadow-2xl">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg lg:text-xl font-semibold text-emerald-300">Final Optimal Philosophy</h3>
+                  <div className="w-8 h-8 bg-emerald-500/20 rounded-full flex items-center justify-center">
+                    <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.252v.001A2.25 2.25 0 012.25 2.25H6.75a2.25 2.25 0 00-2.25 2.25v9.496c0 .414.336.75-.75.75-.75.75v-9.496a.75.75 0 001.5.5h7.5a.75.75 0 001.5.5v9.496a.75.75 0 001.5.5v-9.496a.75.75 0 001.5.5v-9.496z" />
+                    </svg>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { icon: '🎯', title: 'Complete manual control when AI is down', desc: 'Every feature works 100% without AI' },
+                    { icon: '🚀', title: 'Strategic AI enhancement for speed and scale', desc: 'Optional AI for faster operations' },
+                    { icon: '📋', title: 'Your actual business pitch and templates', desc: 'Personalized messaging that converts' },
+                    { icon: '📊', title: 'Advanced contact management with status tracking', desc: 'Full lifecycle management' },
+                    { icon: '📱', title: 'Multi-channel outreach (Email, WhatsApp, SMS, Calls)', desc: 'Reach prospects everywhere' },
+                    { icon: '🛡️', title: 'Send safety rules protect deliverability', desc: 'Maintain sender reputation' },
+                    { icon: '📈', title: 'Real-time analytics and business intelligence', desc: 'Data-driven decisions' },
+                    { icon: '🎯', title: 'Tight ICP targeting for better conversion', desc: 'Focus on high-value prospects' },
+                    { icon: '⚡', title: '2-minute AI research for fast personalization', desc: 'Quick insights for every lead' },
+                    { icon: '📝', title: '3 controlled templates prevent errors', desc: 'Consistent, compliant messaging' }
+                  ].map((feature, index) => (
+                    <div 
+                      key={index}
+                      className="flex items-start space-x-3 p-3 lg:p-4 bg-gray-700/50 backdrop-blur-sm rounded-xl border border-gray-600/50 hover:border-emerald-500/50 transition-all duration-300"
+                      style={{
+                        animationDelay: `${index * 100}ms`
+                      }}
+                    >
+                      <div className="text-2xl lg:text-3xl">{feature.icon}</div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-white text-base lg:text-lg mb-1">{feature.title}</h4>
+                        <p className="text-emerald-300 text-sm">{feature.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -1688,65 +1989,82 @@ ${senderName}`
 
       {/* STATUS MODAL */}
       {showStatusModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-hidden border border-gray-700">
-            <div className="relative p-5 border-b border-gray-700">
-              <h2 className="text-xl font-bold text-white">Update Contact Status</h2>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800/95 backdrop-blur-md rounded-3xl shadow-2xl w-full max-w-2xl lg:max-w-md max-h-[90vh] overflow-hidden border border-gray-700/50 transform transition-all duration-300 scale-100">
+            <div className="relative p-6 lg:p-8 border-b border-gray-700/50">
+              <h2 className="text-2xl lg:text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-4">
+                Update Contact Status
+              </h2>
               <button
                 onClick={() => setShowStatusModal(false)}
-                className="absolute top-4 right-4 text-gray-400 hover:text-white text-xl"
+                className="absolute top-6 right-6 text-gray-400 hover:text-white text-2xl lg:text-3xl transition-colors duration-300 transform hover:scale-110"
               >
                 ✕
               </button>
             </div>
             
-            <div className="p-5">
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">Contact</label>
-                <div className="bg-gray-700 p-3 rounded-lg">
-                  <p className="font-semibold text-white">{selectedContactForStatus?.business}</p>
-                  <p className="text-sm text-gray-400">{selectedContactForStatus?.email}</p>
+            <div className="p-6 lg:p-8 space-y-6">
+              <div className="bg-gradient-to-br from-blue-600/20 to-blue-700/20 backdrop-blur-sm p-6 rounded-2xl border border-blue-500/20">
+                <label className="block text-sm font-medium text-blue-300 mb-2">Contact Information</label>
+                <div className="bg-gray-700/50 backdrop-blur-sm p-4 rounded-xl border border-gray-600/50">
+                  <div className="flex items-start space-x-3 mb-3">
+                    <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 011.784 1.216 1.216 0 011.784 1.216 0 01-2.828 0-4 4 0 012.828 0-4-4z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-white font-bold text-lg">{selectedContactForStatus?.business}</p>
+                      <p className="text-blue-300 text-sm truncate">{selectedContactForStatus?.email}</p>
+                    </div>
+                  </div>
                 </div>
               </div>
               
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">New Status</label>
+              <div className="bg-gradient-to-br from-purple-600/20 to-purple-700/20 backdrop-blur-sm p-6 rounded-2xl border border-purple-500/20">
+                <label className="block text-sm font-medium text-purple-300 mb-2">New Status</label>
                 <select
                   value={selectedContactForStatus?.status || 'new'}
                   onChange={(e) => setSelectedContactForStatus(prev => ({ ...prev, status: e.target.value }))}
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2"
+                  className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-3 text-white focus:border-purple-500/50 focus:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-500/20 transition-all duration-300 text-base lg:text-lg"
                 >
                   {CONTACT_STATUSES.map(status => (
-                    <option key={status.id} value={status.id}>
+                    <option key={status.id} value={status.id} className="text-white">
                       {status.label}
                     </option>
                   ))}
                 </select>
               </div>
               
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">Note (Optional)</label>
+              <div className="bg-gradient-to-br from-emerald-600/20 to-emerald-700/20 backdrop-blur-sm p-6 rounded-2xl border border-emerald-500/20">
+                <label className="block text-sm font-medium text-emerald-300 mb-2">Status Change Note</label>
                 <textarea
                   value={statusNote}
                   onChange={(e) => setStatusNote(e.target.value)}
-                  rows={3}
+                  rows={4}
                   placeholder="Add a note explaining this status change..."
-                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2"
+                  className="w-full bg-gray-700/50 border border-gray-600/50 rounded-xl px-4 py-3 text-white placeholder-gray-400 focus:border-emerald-500/50 focus:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 transition-all duration-300 text-sm"
                 />
               </div>
               
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={handleStatusModalSubmit}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
+                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-6 py-3 lg:py-4 rounded-2xl text-base lg:text-lg font-bold transition-all duration-300 transform hover:scale-105 shadow-lg shadow-green-500/25 flex items-center justify-center space-x-2"
                 >
-                  Update Status
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L7 5v8l-4 4H5z" />
+                  </svg>
+                  <span>Update Status</span>
                 </button>
                 <button
                   onClick={() => setShowStatusModal(false)}
-                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg font-medium transition"
+                  className="flex-1 bg-gradient-to-r from-gray-500 to-gray-600 hover:from-gray-600 hover:to-gray-700 text-white px-6 py-3 lg:py-4 rounded-2xl text-base lg:text-lg font-bold transition-all duration-300 transform hover:scale-105 shadow-lg shadow-gray-500/25 flex items-center justify-center space-x-2"
                 >
-                  Cancel
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                  <span>Cancel</span>
                 </button>
               </div>
             </div>
