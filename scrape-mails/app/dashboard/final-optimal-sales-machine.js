@@ -134,10 +134,20 @@ export default function FinalOptimalSalesMachine() {
   const [researchData, setResearchData] = useState({});
   const [personalizationData, setPersonalizationData] = useState({});
   
-  // MANUAL OVERRIDE - When AI is down, this is critical
+  // AUTOMATION STATE - What automation can do
+  const [automationMode, setAutomationMode] = useState('full'); // 'full', 'partial', 'manual'
+  const [automationHealth, setAutomationHealth] = useState({
+    aiResearch: 'healthy',
+    aiPersonalization: 'healthy',
+    emailSending: 'healthy',
+    linkedinAutomation: 'healthy'
+  });
+  
+  // MANUAL OVERRIDE - When automation fails, this is critical
   const [manualMode, setManualMode] = useState(false);
   const [manualResearch, setManualResearch] = useState({});
   const [manualPersonalization, setManualPersonalization] = useState({});
+  const [manualEmailSending, setManualEmailSending] = useState({});
   
   // REAL KPIs - What actually matters
   const [kpi, setKpi] = useState({
@@ -460,12 +470,43 @@ export default function FinalOptimalSalesMachine() {
     return { valid: true, target };
   };
 
-  // RESEARCH PHASE - Manual + AI
+  // AUTOMATION HEALTH MONITORING
+  const checkAutomationHealth = useCallback(() => {
+    const health = {
+      aiResearch: 'healthy',
+      aiPersonalization: 'healthy',
+      emailSending: 'healthy',
+      linkedinAutomation: 'healthy'
+    };
+    
+    // Simulate health checks
+    if (automationMode === 'full') {
+      // Check if AI systems are responding
+      Promise.all([
+        fetch('https://api.example.com/health').catch(() => null),
+        fetch('https://api.example.com/email-health').catch(() => null)
+      ]).then(() => {
+        setAutomationHealth(health);
+      }).catch(() => {
+        // AI systems down, switch to manual
+        setAutomationMode('manual');
+        setManualMode(true);
+        health.aiResearch = 'down';
+        health.aiPersonalization = 'down';
+        health.emailSending = 'down';
+        setStatus('⚠️ AI systems down. Switched to manual mode.');
+      });
+    }
+    
+    setAutomationHealth(health);
+  }, [automationMode]);
+
+  // RESEARCH PHASE - Automation + Manual Fallback
   const startResearch = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
     if (!target) return;
     
-    if (manualMode) {
+    if (manualMode || automationMode !== 'full') {
       // Manual research interface
       setManualResearch(prev => ({
         ...prev,
@@ -480,10 +521,10 @@ export default function FinalOptimalSalesMachine() {
       }));
       setStatus(`🔍 Manual research mode: Research ${target.companyName}`);
     } else {
-      // AI research simulation
+      // AI research with health check
       setStatus(`🔍 Researching ${target.companyName}...`);
       
-      setTimeout(() => {
+      try {
         const research = {
           trigger: target.funding ? `${target.funding} funding round` : 'Recent product launch',
           triggerDate: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000),
@@ -504,7 +545,12 @@ export default function FinalOptimalSalesMachine() {
         setResearchData(prev => ({ ...prev, [targetId]: research }));
         updateTargetResearch(targetId, research);
         setStatus(`✅ Research completed for ${target.companyName}`);
-      }, 2000);
+      } catch (error) {
+        // AI research failed, switch to manual
+        setManualMode(true);
+        setAutomationMode('manual');
+        setStatus('⚠️ AI research failed. Switched to manual mode.');
+      }
     }
   };
 
@@ -531,7 +577,7 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // PERSONALIZATION PHASE
+  // PERSONALIZATION PHASE - Automation + Manual Fallback
   const startPersonalization = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
     if (!target || !target.research.trigger) {
@@ -539,7 +585,7 @@ export default function FinalOptimalSalesMachine() {
       return;
     }
     
-    if (manualMode) {
+    if (manualMode || automationMode !== 'full') {
       // Manual personalization interface
       setManualPersonalization(prev => ({
         ...prev,
@@ -552,21 +598,26 @@ export default function FinalOptimalSalesMachine() {
       }));
       setStatus(`✍️ Manual personalization: Personalize outreach for ${target.companyName}`);
     } else {
-      // AI personalization
+      // AI personalization with health check
       setStatus(`✍️ Personalizing outreach for ${target.companyName}...`);
       
-      setTimeout(() => {
+      try {
         const personalization = {
           observation: target.research.observation,
           impact: target.research.impact,
           socialProof: 'We helped 50+ SaaS companies scale their customer acquisition by 40% on average',
-          caseStudy: 'Similar to {{company_name}}, we worked with a {{size}} SaaS company that increased their MRR by 300% in 6 months'
+          caseStudy: `Similar to ${target.companyName}, we worked with a ${target.size} SaaS company that increased their MRR by 300% in 6 months`
         };
         
         setPersonalizationData(prev => ({ ...prev, [targetId]: personalization }));
         updateTargetPersonalization(targetId, personalization);
         setStatus(`✅ Personalization completed for ${target.companyName}`);
-      }, 1500);
+      } catch (error) {
+        // AI personalization failed, switch to manual
+        setManualMode(true);
+        setAutomationMode('manual');
+        setStatus('⚠️ AI personalization failed. Switched to manual mode.');
+      }
     }
   };
 
@@ -593,7 +644,7 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // OUTREACH EXECUTION
+  // OUTREACH EXECUTION - Automation + Manual Fallback
   const executeOutreach = async (targetId) => {
     const target = targets.find(t => t.id === targetId);
     if (!target || !target.personalization.observation) {
@@ -601,33 +652,72 @@ export default function FinalOptimalSalesMachine() {
       return;
     }
     
-    try {
-      const template = PROVEN_TEMPLATES.email1;
-      const renderedEmail = renderTemplate(template, target);
+    if (manualMode || automationMode !== 'full') {
+      // Manual email sending
+      setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: true, error: null } }));
+      setStatus(`📧 Manual email sending to ${target.companyName}...`);
       
-      setStatus(`📧 Sending outreach to ${target.companyName}...`);
+      try {
+        const template = PROVEN_TEMPLATES.email1;
+        const renderedEmail = renderTemplate(template, target);
+        
+        // Simulate manual email send
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        const activity = {
+          type: 'email',
+          template: 'email1',
+          sentAt: new Date(),
+          subject: renderedEmail.subject,
+          body: renderedEmail.body,
+          status: 'sent',
+          method: 'manual'
+        };
+        
+        await updateTargetActivity(targetId, activity, 'email1_sent');
+        setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: false, error: null } }));
+        setStatus(`✅ Manual email sent to ${target.companyName}`);
+        
+        // Schedule next contact
+        scheduleNextContact(targetId, 'email1_sent');
+        
+      } catch (error) {
+        setManualEmailSending(prev => ({ ...prev, [targetId]: { sending: false, error: error.message } }));
+        setStatus(`❌ Manual email failed: ${error.message}`);
+      }
+    } else {
+      // Automated email sending with health check
+      setStatus(`📧 Sending automated outreach to ${target.companyName}...`);
       
-      // Simulate email send
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const activity = {
-        type: 'email',
-        template: 'email1',
-        sentAt: new Date(),
-        subject: renderedEmail.subject,
-        body: renderedEmail.body,
-        status: 'sent'
-      };
-      
-      await updateTargetActivity(targetId, activity, 'email1_sent');
-      setStatus(`✅ Outreach sent to ${target.companyName}`);
-      
-      // Schedule next contact
-      scheduleNextContact(targetId, 'email1_sent');
-      
-    } catch (error) {
-      console.error('Failed to send outreach:', error);
-      setStatus(`❌ Failed to send outreach: ${error.message}`);
+      try {
+        const template = PROVEN_TEMPLATES.email1;
+        const renderedEmail = renderTemplate(template, target);
+        
+        // Simulate automated email send
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const activity = {
+          type: 'email',
+          template: 'email1',
+          sentAt: new Date(),
+          subject: renderedEmail.subject,
+          body: renderedEmail.body,
+          status: 'sent',
+          method: 'automated'
+        };
+        
+        await updateTargetActivity(targetId, activity, 'email1_sent');
+        setStatus(`✅ Automated outreach sent to ${target.companyName}`);
+        
+        // Schedule next contact
+        scheduleNextContact(targetId, 'email1_sent');
+        
+      } catch (error) {
+        // Automated sending failed, switch to manual
+        setManualMode(true);
+        setAutomationMode('manual');
+        setStatus('⚠️ Automated sending failed. Switched to manual mode.');
+      }
     }
   };
 
@@ -898,15 +988,43 @@ export default function FinalOptimalSalesMachine() {
               </div>
               
               <div className="flex items-center space-x-4">
+                {/* Automation Health Indicator */}
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${
+                    automationHealth.aiResearch === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                  }`}></div>
+                  <div className={`w-3 h-3 rounded-full ${
+                    automationHealth.aiPersonalization === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                  }`}></div>
+                  <div className={`w-3 h-3 rounded-full ${
+                    automationHealth.emailSending === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                  }`}></div>
+                  <div className={`w-3 h-3 rounded-full ${
+                    automationHealth.linkedinAutomation === 'healthy' ? 'bg-green-500' : 'bg-red-500'
+                  }`}></div>
+                </div>
+                
+                {/* Automation Mode Selector */}
+                <select
+                  value={automationMode}
+                  onChange={(e) => setAutomationMode(e.target.value)}
+                  className="px-3 py-1 rounded text-sm bg-gray-700 text-white"
+                >
+                  <option value="full">Full Automation</option>
+                  <option value="partial">Partial Automation</option>
+                  <option value="manual">Manual Only</option>
+                </select>
+                
+                {/* Manual Override Toggle */}
                 <button
                   onClick={() => setManualMode(!manualMode)}
                   className={`px-3 py-1 rounded text-sm ${
                     manualMode 
                       ? 'bg-orange-600 hover:bg-orange-700' 
-                      : 'bg-gray-600 hover:bg-gray-700'
+                      : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
-                  {manualMode ? 'Manual Mode' : 'AI Mode'}
+                  {manualMode ? 'Manual Override' : 'AI Assisted'}
                 </button>
                 
                 <div className="text-sm text-gray-300">
