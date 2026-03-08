@@ -495,6 +495,9 @@ export default function StrategicSalesSystem() {
   const [campaignStatus, setCampaignStatus] = useState('idle');
   const [dailyStats, setDailyStats] = useState({});
   
+  const biInstance = businessIntelligence[0]; // Get the actual instance from state array
+  const cmInstance = campaignManager[0]; // Get the actual campaign manager instance
+  
   // Notification system
   const addNotification = useCallback((message, type = 'info') => {
     const id = Date.now();
@@ -740,7 +743,7 @@ export default function StrategicSalesSystem() {
         try {
           // Send Email 1
           const template = CONTROLLED_TEMPLATES.email1;
-          await campaignManager.sendEmail(
+          await cmInstance.sendEmail(
             target, 
             template, 
             { senderName: user.displayName || 'Dulran Samarasinghe' }
@@ -760,21 +763,21 @@ export default function StrategicSalesSystem() {
           
           // Handle bounce
           if (error.message.includes('bounce')) {
-            campaignManager.recordBounce();
+            cmInstance.recordBounce();
             await updateTargetStatus(target.id, 'bounced', 'Email bounced');
           }
         }
       }
       
       // Update campaign stats
-      setDailyStats(campaignManager.getDailyStats());
-      businessIntelligence.current.updateKPIs(sentCount, 0, 0, errorCount, 0);
+      setDailyStats(cmInstance.getDailyStats());
+      biInstance.updateKPIs(sentCount, 0, 0, errorCount, 0);
       
       // Update campaign in Firestore
       await updateDoc(campaignRef, {
         status: 'completed',
-        'stats.sent': campaign.stats.sent + sentCount,
-        'stats.bounces': campaign.stats.bounces + errorCount,
+        'stats.sent': cmInstance.stats.sent + sentCount,
+        'stats.bounces': cmInstance.stats.bounces + errorCount,
         lastExecuted: serverTimestamp()
       });
       
@@ -864,11 +867,11 @@ export default function StrategicSalesSystem() {
   // Update daily stats
   useEffect(() => {
     const interval = setInterval(() => {
-      setDailyStats(campaignManager.getDailyStats());
+      setDailyStats(cmInstance.getDailyStats());
     }, 30000); // Update every 30 seconds
     
     return () => clearInterval(interval);
-  }, [campaignManager]);
+  }, [cmInstance]);
   
   // Loading state
   if (loading) {
@@ -907,7 +910,7 @@ export default function StrategicSalesSystem() {
     );
   }
   
-  const kpiData = businessIntelligence.current.getKPIs();
+  const kpiData = biInstance.getKPIs();
   
   return (
     <>
@@ -1232,7 +1235,7 @@ export default function StrategicSalesSystem() {
                 <div>
                   <h3 className="text-lg font-semibold text-white mb-3">🤖 AI Insights & Recommendations</h3>
                   <div className="space-y-3">
-                    {businessIntelligence.current.getInsights().map((insight, index) => (
+                    {biInstance.getInsights().map((insight, index) => (
                       <div key={index} className={`p-4 rounded-lg border-l-4 ${
                         insight.type === 'success' ? 'bg-green-900/20 border-green-600' :
                         insight.type === 'warning' ? 'bg-yellow-900/20 border-yellow-600' :
