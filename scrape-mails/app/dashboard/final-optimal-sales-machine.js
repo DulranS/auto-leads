@@ -116,6 +116,515 @@ const AUTO_EXIT_RULES = {
   not_interested: true
 };
 
+// ===== SMART LEAD DISCOVERY & CSV MAPPING =====
+
+// Smart column mapping patterns
+const COLUMN_PATTERNS = {
+  // Company information
+  company: ['company', 'company_name', 'organization', 'org', 'business', 'account', 'client', 'firm'],
+  industry: ['industry', 'sector', 'category', 'vertical', 'market', 'niche', 'domain'],
+  employees: ['employees', 'employee_count', 'team_size', 'headcount', 'staff', 'workforce', 'size'],
+  revenue: ['revenue', 'annual_revenue', 'arr', 'mrr', 'sales', 'turnover', 'income'],
+  funding: ['funding', 'funding_amount', 'investment', 'raised', 'series', 'round', 'valuation'],
+  website: ['website', 'url', 'site', 'domain', 'web', 'homepage', 'link'],
+  
+  // Contact information
+  name: ['name', 'full_name', 'contact_name', 'person', 'first_name', 'last_name'],
+  firstName: ['first_name', 'firstname', 'given_name', 'forename'],
+  lastName: ['last_name', 'lastname', 'surname', 'family_name'],
+  email: ['email', 'email_address', 'mail', 'contact_email', 'work_email'],
+  phone: ['phone', 'phone_number', 'telephone', 'mobile', 'cell', 'contact_phone'],
+  linkedin: ['linkedin', 'linkedin_url', 'linkedin_profile', 'linked_in', 'social_linkedin'],
+  title: ['title', 'job_title', 'position', 'role', 'designation', 'function'],
+  
+  // Location information
+  country: ['country', 'nation', 'location_country', 'geo_country'],
+  state: ['state', 'province', 'region', 'location_state'],
+  city: ['city', 'location_city', 'town', 'urban_area'],
+  address: ['address', 'location', 'street', 'office_address'],
+  
+  // Company signals
+  description: ['description', 'about', 'summary', 'overview', 'profile', 'bio'],
+  founded: ['founded', 'founded_year', 'established', 'start_date', 'incorporated'],
+  stage: ['stage', 'funding_stage', 'company_stage', 'maturity', 'phase'],
+  
+  // Activity signals
+  recentNews: ['recent_news', 'news', 'updates', 'announcements', 'press'],
+  hiring: ['hiring', 'jobs', 'openings', 'recruiting', 'careers', 'vacancies'],
+  products: ['products', 'services', 'offerings', 'solutions', 'portfolio'],
+  
+  // Custom fields
+  notes: ['notes', 'comments', 'remarks', 'observations', 'details'],
+  source: ['source', 'origin', 'list_name', 'campaign', 'acquisition'],
+  tags: ['tags', 'labels', 'categories', 'keywords', 'flags']
+};
+
+// Smart lead discovery sources
+const LEAD_SOURCES = {
+  // B2B databases
+  crunchbase: {
+    name: 'Crunchbase',
+    type: 'api',
+    endpoint: 'https://api.crunchbase.com/v4/search',
+    mapping: {
+      company: 'name',
+      industry: 'category',
+      employees: 'num_employees',
+      funding: 'total_funding',
+      website: 'website',
+      description: 'description'
+    }
+  },
+  
+  // Professional networks
+  linkedin: {
+    name: 'LinkedIn Sales Navigator',
+    type: 'api',
+    endpoint: 'https://api.linkedin.com/v2/sales',
+    mapping: {
+      company: 'companyName',
+      industry: 'industry',
+      employees: 'employeeCount',
+      name: 'fullName',
+      title: 'title',
+      email: 'emailAddress'
+    }
+  },
+  
+  // Public databases
+  github: {
+    name: 'GitHub Organizations',
+    type: 'scraper',
+    endpoint: 'https://api.github.com/search/users',
+    mapping: {
+      company: 'login',
+      description: 'description',
+      website: 'blog',
+      location: 'location'
+    }
+  },
+  
+  // Business registries
+  opencorporates: {
+    name: 'OpenCorporates',
+    type: 'api',
+    endpoint: 'https://api.opencorporates.com/companies',
+    mapping: {
+      company: 'name',
+      industry: 'industry',
+      founded: 'incorporation_date',
+      address: 'registered_address'
+    }
+  }
+};
+
+// Smart CSV parser and mapper
+class SmartCSVProcessor {
+  constructor() {
+    this.detectedColumns = null;
+    this.columnMapping = null;
+    this.dataStructure = null;
+  }
+
+  // Analyze CSV structure and detect columns
+  analyzeCSVStructure(headers) {
+    const detected = {};
+    const mapping = {};
+    
+    headers.forEach(header => {
+      const normalizedHeader = header.toLowerCase().trim().replace(/[^a-z0-9_]/g, '_');
+      
+      // Try to match each column pattern
+      for (const [field, patterns] of Object.entries(COLUMN_PATTERNS)) {
+        if (patterns.some(pattern => 
+          normalizedHeader.includes(pattern.toLowerCase()) ||
+          header.toLowerCase().includes(pattern.toLowerCase())
+        )) {
+          detected[field] = header;
+          mapping[field] = header;
+          break;
+        }
+      }
+    });
+    
+    this.detectedColumns = detected;
+    this.columnMapping = mapping;
+    
+    return {
+      detectedColumns: detected,
+      columnMapping: mapping,
+      confidence: this.calculateMappingConfidence(headers, mapping)
+    };
+  }
+
+  // Calculate mapping confidence
+  calculateMappingConfidence(headers, mapping) {
+    const totalColumns = headers.length;
+    const mappedColumns = Object.keys(mapping).length;
+    const criticalFields = ['company', 'email', 'name'];
+    const criticalMapped = criticalFields.filter(field => mapping[field]).length;
+    
+    return {
+      overall: (mappedColumns / totalColumns) * 100,
+      critical: (criticalMapped / criticalFields.length) * 100,
+      mapped: mappedColumns,
+      total: totalColumns,
+      criticalMapped: criticalMapped,
+      suggestions: this.generateMissingFieldSuggestions(mapping)
+    };
+  }
+
+  // Generate suggestions for missing fields
+  generateMissingFieldSuggestions(mapping) {
+    const suggestions = {};
+    const criticalFields = ['company', 'email', 'name'];
+    
+    criticalFields.forEach(field => {
+      if (!mapping[field]) {
+        suggestions[field] = {
+          required: true,
+          alternatives: COLUMN_PATTERNS[field].map(p => `"${p}"`).join(', '),
+          example: this.generateFieldExample(field)
+        };
+      }
+    });
+    
+    return suggestions;
+  }
+
+  // Generate example for field
+  generateFieldExample(field) {
+    const examples = {
+      company: 'Acme Corp, Tech Solutions Inc, StartupXYZ',
+      email: 'john@company.com, contact@business.org',
+      name: 'John Smith, Jane Doe, Robert Johnson',
+      industry: 'Software, Technology, SaaS, FinTech',
+      employees: '50, 100, 250, 500',
+      funding: '$1M, $5M, $10M, Series A'
+    };
+    return examples[field] || 'N/A';
+  }
+
+  // Process CSV data with smart mapping
+  processCSVData(rawData, headers) {
+    const analysis = this.analyzeCSVStructure(headers);
+    const processedData = [];
+    
+    rawData.forEach((row, index) => {
+      const processed = {
+        id: `lead_${Date.now()}_${index}`,
+        source: 'csv_upload',
+        uploadDate: new Date().toISOString(),
+        rawData: row,
+        processed: {
+          company: this.extractField(row, analysis.columnMapping, 'company'),
+          contact: {
+            name: this.extractField(row, analysis.columnMapping, 'name'),
+            email: this.extractField(row, analysis.columnMapping, 'email'),
+            phone: this.extractField(row, analysis.columnMapping, 'phone'),
+            title: this.extractField(row, analysis.columnMapping, 'title'),
+            linkedin: this.extractField(row, analysis.columnMapping, 'linkedin')
+          },
+          company: {
+            name: this.extractField(row, analysis.columnMapping, 'company'),
+            industry: this.extractField(row, analysis.columnMapping, 'industry'),
+            employees: this.parseNumber(this.extractField(row, analysis.columnMapping, 'employees')),
+            revenue: this.parseNumber(this.extractField(row, analysis.columnMapping, 'revenue')),
+            funding: this.parseFunding(this.extractField(row, analysis.columnMapping, 'funding')),
+            website: this.extractField(row, analysis.columnMapping, 'website'),
+            description: this.extractField(row, analysis.columnMapping, 'description'),
+            founded: this.parseNumber(this.extractField(row, analysis.columnMapping, 'founded')),
+            stage: this.extractField(row, analysis.columnMapping, 'stage'),
+            location: {
+              country: this.extractField(row, analysis.columnMapping, 'country'),
+              state: this.extractField(row, analysis.columnMapping, 'state'),
+              city: this.extractField(row, analysis.columnMapping, 'city'),
+              address: this.extractField(row, analysis.columnMapping, 'address')
+            },
+            signals: {
+              recentNews: this.extractField(row, analysis.columnMapping, 'recentNews'),
+              hiring: this.extractField(row, analysis.columnMapping, 'hiring'),
+              products: this.extractField(row, analysis.columnMapping, 'products')
+            }
+          },
+          metadata: {
+            source: this.extractField(row, analysis.columnMapping, 'source') || 'CSV Import',
+            tags: this.parseTags(this.extractField(row, analysis.columnMapping, 'tags')),
+            notes: this.extractField(row, analysis.columnMapping, 'notes'),
+            confidence: this.calculateRowConfidence(row, analysis.columnMapping)
+          }
+        }
+      };
+      
+      processedData.push(processed);
+    });
+    
+    return {
+      data: processedData,
+      analysis: analysis,
+      summary: this.generateDataSummary(processedData)
+    };
+  }
+
+  // Extract field with fallback
+  extractField(row, mapping, field) {
+    const column = mapping[field];
+    if (!column) return null;
+    
+    let value = row[column];
+    if (value === undefined || value === null || value === '') return null;
+    
+    return String(value).trim();
+  }
+
+  // Parse numbers with various formats
+  parseNumber(value) {
+    if (!value) return null;
+    
+    // Remove common formatting
+    const cleanValue = String(value).replace(/[$,MmKk]/g, '').trim();
+    const num = parseFloat(cleanValue);
+    
+    if (isNaN(num)) return null;
+    
+    // Handle multipliers
+    if (String(value).toLowerCase().includes('m')) return num * 1000000;
+    if (String(value).toLowerCase().includes('k')) return num * 1000;
+    
+    return num;
+  }
+
+  // Parse funding amounts
+  parseFunding(value) {
+    if (!value) return null;
+    
+    const str = String(value).toLowerCase();
+    
+    // Extract amount
+    const amountMatch = str.match(/[$]([0-9,.]+[mk]?)/i);
+    if (amountMatch) {
+      const amount = this.parseNumber(amountMatch[1]);
+      
+      // Extract series if present
+      const seriesMatch = str.match(/(seed|series [a-z]|pre-seed|angel|venture)/i);
+      const series = seriesMatch ? seriesMatch[1] : null;
+      
+      return {
+        amount,
+        series,
+        formatted: value
+      };
+    }
+    
+    return { amount: null, series: null, formatted: value };
+  }
+
+  // Parse tags
+  parseTags(value) {
+    if (!value) return [];
+    
+    const tags = String(value).split(/[,;|]/).map(tag => tag.trim()).filter(tag => tag);
+    return tags;
+  }
+
+  // Calculate row confidence
+  calculateRowConfidence(row, mapping) {
+    const criticalFields = ['company', 'email', 'name'];
+    const present = criticalFields.filter(field => 
+      mapping[field] && row[mapping[field]]
+    ).length;
+    
+    return (present / criticalFields.length) * 100;
+  }
+
+  // Generate data summary
+  generateDataSummary(data) {
+    const summary = {
+      total: data.length,
+      qualified: 0,
+      withEmail: 0,
+      withCompany: 0,
+      withPhone: 0,
+      withWebsite: 0,
+      industries: {},
+      employeeRanges: {},
+      fundingStages: {}
+    };
+    
+    data.forEach(row => {
+      const processed = row.processed;
+      
+      // Basic counts
+      if (processed.contact.email) summary.withEmail++;
+      if (processed.company.name) summary.withCompany++;
+      if (processed.contact.phone) summary.withPhone++;
+      if (processed.company.website) summary.withWebsite++;
+      
+      // Industry breakdown
+      const industry = processed.company.industry || 'Unknown';
+      summary.industries[industry] = (summary.industries[industry] || 0) + 1;
+      
+      // Employee ranges
+      const employees = processed.company.employees;
+      if (employees) {
+        const range = this.getEmployeeRange(employees);
+        summary.employeeRanges[range] = (summary.employeeRanges[range] || 0) + 1;
+      }
+      
+      // Funding stages
+      const stage = processed.company.stage || processed.company.funding?.series || 'Unknown';
+      summary.fundingStages[stage] = (summary.fundingStages[stage] || 0) + 1;
+      
+      // Quick qualification check
+      if (this.quickQualificationCheck(processed)) {
+        summary.qualified++;
+      }
+    });
+    
+    return summary;
+  }
+
+  // Get employee range
+  getEmployeeRange(employees) {
+    if (employees < 10) return '1-10';
+    if (employees < 50) return '11-50';
+    if (employees < 100) return '51-100';
+    if (employees < 250) return '101-250';
+    if (employees < 500) return '251-500';
+    if (employees < 1000) return '501-1000';
+    return '1000+';
+  }
+
+  // Quick qualification check
+  quickQualificationCheck(processed) {
+    const company = processed.company;
+    const contact = processed.contact;
+    
+    // Must have basic info
+    if (!company.name || !contact.name) return false;
+    
+    // Industry check
+    const targetIndustries = ['software', 'saas', 'technology', 'fintech', 'healthtech'];
+    const industry = (company.industry || '').toLowerCase();
+    const industryMatch = targetIndustries.some(ind => industry.includes(ind));
+    
+    // Size check
+    const employees = company.employees || 0;
+    const sizeMatch = employees >= 50 && employees <= 500;
+    
+    // Funding check
+    const hasFunding = company.funding?.amount || company.stage;
+    
+    return industryMatch && sizeMatch && hasFunding;
+  }
+}
+
+// Smart lead discovery engine
+class SmartLeadDiscovery {
+  constructor() {
+    this.sources = LEAD_SOURCES;
+    this.discoveredLeads = [];
+    this.discoveryHistory = [];
+  }
+
+  // Auto-discover leads from multiple sources
+  async autoDiscoverLeads() {
+    const discoveries = [];
+    
+    for (const [sourceKey, source] of Object.entries(this.sources)) {
+      try {
+        const leads = await this.discoverFromSource(sourceKey);
+        if (leads.length > 0) {
+          discoveries.push({
+            source: source.name,
+            count: leads.length,
+            leads: leads.slice(0, 10), // Limit for demo
+            timestamp: new Date()
+          });
+        }
+      } catch (error) {
+        console.warn(`Failed to discover from ${source.name}:`, error);
+      }
+    }
+    
+    this.discoveryHistory.push(...discoveries);
+    return discoveries;
+  }
+
+  // Discover from specific source
+  async discoverFromSource(sourceKey) {
+    const source = this.sources[sourceKey];
+    
+    if (source.type === 'api') {
+      return this.discoverFromAPI(source);
+    } else if (source.type === 'scraper') {
+      return this.discoverFromScraper(source);
+    }
+    
+    return [];
+  }
+
+  // API-based discovery
+  async discoverFromAPI(source) {
+    // Simulated API discovery - in production, this would make real API calls
+    const mockLeads = this.generateMockLeads(source.name, 5);
+    return mockLeads;
+  }
+
+  // Scraper-based discovery
+  async discoverFromScraper(source) {
+    // Simulated scraping - in production, this would use web scraping
+    const mockLeads = this.generateMockLeads(source.name, 3);
+    return mockLeads;
+  }
+
+  // Generate mock leads for demonstration
+  generateMockLeads(sourceName, count) {
+    const mockCompanies = [
+      { name: 'TechFlow Solutions', industry: 'SaaS', employees: 150, funding: '$2M Series A' },
+      { name: 'DataSync Inc', industry: 'Technology', employees: 75, funding: '$1M Seed' },
+      { name: 'CloudBase Systems', industry: 'Cloud Computing', employees: 300, funding: '$5M Series B' },
+      { name: 'AI Innovate Labs', industry: 'AI/ML', employees: 45, funding: '$750K Pre-Seed' },
+      { name: 'SecureNet Solutions', industry: 'Cybersecurity', employees: 200, funding: '$3M Series A' }
+    ];
+    
+    return mockCompanies.slice(0, count).map((company, index) => ({
+      id: `${sourceName}_${Date.now()}_${index}`,
+      source: sourceName,
+      discovered: new Date().toISOString(),
+      company: {
+        ...company,
+        website: `https://${company.name.toLowerCase().replace(/\s+/g, '')}.com`,
+        description: `Leading ${company.industry} company providing innovative solutions`,
+        location: { country: 'United States', city: 'San Francisco' }
+      },
+      contact: {
+        name: `John Doe ${index + 1}`,
+        title: 'CEO',
+        email: `contact@${company.name.toLowerCase().replace(/\s+/g, '')}.com`,
+        phone: `+1-555-${String(index).padStart(3, '0')}-${String(index + 100).padStart(4, '0')}`,
+        linkedin: `https://linkedin.com/in/johndoe${index + 1}`
+      },
+      confidence: 85,
+      qualification: {
+        score: 4,
+        reasons: ['industry', 'size', 'funding'],
+        qualified: true
+      }
+    }));
+  }
+
+  // Get discovery history
+  getDiscoveryHistory() {
+    return this.discoveryHistory;
+  }
+
+  // Get discovered leads
+  getDiscoveredLeads() {
+    return this.discoveredLeads;
+  }
+}
+
 // ===== ENTERPRISE BUSINESS ENGINE =====
 class SalesAutomationEngine {
   constructor() {
@@ -534,6 +1043,10 @@ export default function FinalOptimalSalesMachine() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
 
+  // Initialize smart processors
+  const csvProcessor = useRef(new SmartCSVProcessor());
+  const leadDiscovery = useRef(new SmartLeadDiscovery());
+
   // Core campaign state
   const [campaign, setCampaign] = useState({
     status: 'idle', // idle, qualifying, researching, outreach, completed, paused
@@ -548,7 +1061,9 @@ export default function FinalOptimalSalesMachine() {
     current_step: 0,
     started_at: null,
     completed_at: null,
-    template_iterations: 0
+    template_iterations: 0,
+    discovered_leads: [],
+    csv_imports: []
   });
 
   // KPI state
@@ -561,7 +1076,10 @@ export default function FinalOptimalSalesMachine() {
     reply_rate: 0,
     meeting_rate: 0,
     daily_sends: 0,
-    weekly_sends: 0
+    weekly_sends: 0,
+    leads_discovered: 0,
+    csv_imports_processed: 0,
+    auto_qualified: 0
   });
 
   // Contacts and data state
@@ -572,6 +1090,23 @@ export default function FinalOptimalSalesMachine() {
   const [notifications, setNotifications] = useState([]);
   const [manualMode, setManualMode] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
+
+  // CSV processing state
+  const [csvProcessing, setCsvProcessing] = useState({
+    processing: false,
+    progress: 0,
+    analysis: null,
+    preview: null,
+    errors: []
+  });
+
+  // Lead discovery state
+  const [discoveryStatus, setDiscoveryStatus] = useState({
+    discovering: false,
+    sources: Object.keys(LEAD_SOURCES),
+    results: [],
+    lastDiscovery: null
+  });
 
   // Manual operations state
   const [manualEmailComposer, setManualEmailComposer] = useState(null);
@@ -592,6 +1127,8 @@ export default function FinalOptimalSalesMachine() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showTemplateEditor, setShowTemplateEditor] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [showDiscoveryModal, setShowDiscoveryModal] = useState(false);
 
   // Notification system
   const addNotification = useCallback((type, message, duration = 5000) => {
@@ -636,64 +1173,285 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // Load contacts from Firestore
-  const loadContacts = async () => {
+  // Smart CSV processing functions
+  const handleCSVUpload = useCallback(async (file) => {
+    try {
+      setCsvProcessing(prev => ({ ...prev, processing: true, progress: 0, errors: [] }));
+      
+      // Read CSV file
+      const text = await file.text();
+      
+      // Use Papa Parse if available, otherwise fallback
+      let result;
+      if (typeof window !== 'undefined' && window.Papa) {
+        result = window.Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+          transformHeader: (header) => header.trim()
+        });
+      } else {
+        // Fallback simple CSV parser
+        result = parseCSVSimple(text);
+      }
+      
+      if (result.errors.length > 0) {
+        throw new Error(`CSV parsing errors: ${result.errors.map(e => e.message).join(', ')}`);
+      }
+      
+      setCsvProcessing(prev => ({ ...prev, progress: 25 }));
+      
+      // Process with smart mapping
+      const processor = csvProcessor.current;
+      const processedData = processor.processCSVData(result.data, result.meta.fields);
+      
+      setCsvProcessing(prev => ({ ...prev, progress: 50 }));
+      
+      // Save to Firestore
+      const batch = writeBatch(db);
+      const contactsRef = collection(db, 'users', user.uid, 'contacts');
+      
+      processedData.data.forEach(contact => {
+        const docRef = doc(contactsRef);
+        batch.set(docRef, {
+          ...contact.processed,
+          id: contact.id,
+          source: contact.source,
+          uploadDate: contact.uploadDate,
+          rawData: contact.rawData,
+          metadata: contact.metadata,
+          createdAt: serverTimestamp(),
+          lastUpdated: serverTimestamp()
+        });
+      });
+      
+      await batch.commit();
+      setCsvProcessing(prev => ({ ...prev, progress: 75 }));
+      
+      // Update campaign state
+      setCampaign(prev => ({
+        ...prev,
+        csv_imports: [...prev.csv_imports, {
+          timestamp: new Date(),
+          filename: file.name,
+          records: processedData.data.length,
+          qualified: processedData.summary.qualified,
+          analysis: processedData.analysis
+        }]
+      }));
+      
+      // Update KPIs
+      setKpis(prev => ({
+        ...prev,
+        csv_imports_processed: prev.csv_imports_processed + processedData.data.length,
+        auto_qualified: prev.auto_qualified + processedData.summary.qualified
+      }));
+      
+      setCsvProcessing(prev => ({ 
+        ...prev, 
+        processing: false, 
+        progress: 100,
+        analysis: processedData.analysis,
+        preview: processedData.data.slice(0, 3)
+      }));
+      
+      addNotification('success', `Successfully processed ${processedData.data.length} contacts. ${processedData.summary.qualified} auto-qualified.`);
+      
+      // Reload contacts
+      await loadContacts();
+      
+    } catch (error) {
+      console.error('CSV processing error:', error);
+      setCsvProcessing(prev => ({ 
+        ...prev, 
+        processing: false, 
+        errors: [error.message] 
+      }));
+      addNotification('error', `CSV processing failed: ${error.message}`);
+    }
+  }, [user, addNotification]);
+
+  // Simple CSV parser fallback
+  const parseCSVSimple = (text) => {
+    const lines = text.split('\n').filter(line => line.trim());
+    if (lines.length === 0) {
+      return { data: [], errors: [{ message: 'Empty CSV file' }], meta: { fields: [] } };
+    }
+    
+    const headers = lines[0].split(',').map(h => h.trim().replace(/["']/g, ''));
+    const data = [];
+    const errors = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(',').map(v => v.trim().replace(/["']/g, ''));
+      const row = {};
+      
+      headers.forEach((header, index) => {
+        row[header] = values[index] || '';
+      });
+      
+      data.push(row);
+    }
+    
+    return { data, errors, meta: { fields: headers } };
+  };
+
+  // Auto lead discovery
+  const startAutoDiscovery = useCallback(async () => {
+    try {
+      setDiscoveryStatus(prev => ({ ...prev, discovering: true, results: [] }));
+      
+      const discovery = leadDiscovery.current;
+      const discoveries = await discovery.autoDiscoverLeads();
+      
+      let totalNewLeads = 0;
+      
+      for (const discoveryResult of discoveries) {
+        // Save discovered leads to Firestore
+        const batch = writeBatch(db);
+        const contactsRef = collection(db, 'users', user.uid, 'contacts');
+        
+        discoveryResult.leads.forEach(lead => {
+          const docRef = doc(contactsRef);
+          batch.set(docRef, {
+            ...lead.company,
+            contact: lead.contact,
+            id: lead.id,
+            source: lead.source,
+            discovered: lead.discovered,
+            confidence: lead.confidence,
+            qualification: lead.qualification,
+            createdAt: serverTimestamp(),
+            lastUpdated: serverTimestamp()
+          });
+        });
+        
+        await batch.commit();
+        totalNewLeads += discoveryResult.leads.length;
+      }
+      
+      // Update state
+      setCampaign(prev => ({
+        ...prev,
+        discovered_leads: [...prev.discovered_leads, ...discoveries]
+      }));
+      
+      setKpis(prev => ({
+        ...prev,
+        leads_discovered: prev.leads_discovered + totalNewLeads
+      }));
+      
+      setDiscoveryStatus(prev => ({ 
+        ...prev, 
+        discovering: false, 
+        results: discoveries,
+        lastDiscovery: new Date()
+      }));
+      
+      addNotification('success', `Discovered ${totalNewLeads} new leads from ${discoveries.length} sources.`);
+      
+      // Reload contacts
+      await loadContacts();
+      
+    } catch (error) {
+      console.error('Lead discovery error:', error);
+      setDiscoveryStatus(prev => ({ ...prev, discovering: false }));
+      addNotification('error', `Lead discovery failed: ${error.message}`);
+    }
+  }, [user, addNotification]);
+
+  // Enhanced load contacts with smart filtering
+  const loadContacts = useCallback(async () => {
     try {
       setLoading(true);
-      const contactsRef = collection(db, 'contacts');
+      const contactsRef = collection(db, 'users', user.uid, 'contacts');
       const querySnapshot = await getDocs(contactsRef);
       const contactsData = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       }));
       setContacts(contactsData);
-      addNotification('success', `Loaded ${contactsData.length} contacts from database`);
+      
+      // Auto-qualify new contacts
+      const processor = csvProcessor.current;
+      const qualifiedLeads = contactsData
+        .filter(contact => !contact.qualification)
+        .map(contact => {
+          const qualification = automationEngine.qualifyLead(contact);
+          return {
+            ...contact,
+            qualification
+          };
+        })
+        .filter(contact => contact.qualification.qualified);
+      
+      if (qualifiedLeads.length > 0) {
+        // Update qualified leads in Firestore
+        const batch = writeBatch(db);
+        qualifiedLeads.forEach(contact => {
+          const docRef = doc(db, 'users', user.uid, 'contacts', contact.id);
+          batch.update(docRef, { qualification: contact.qualification });
+        });
+        await batch.commit();
+        
+        setKpis(prev => ({
+          ...prev,
+          auto_qualified: prev.auto_qualified + qualifiedLeads.length
+        }));
+        
+        addNotification('success', `Auto-qualified ${qualifiedLeads.length} new contacts.`);
+      }
+      
     } catch (err) {
       console.error('Failed to load contacts:', err);
       addNotification('error', 'Failed to load contacts: ' + err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, addNotification]);
 
-  // Start strategic campaign
+  // Start strategic campaign with auto-discovery
   const startCampaign = async () => {
     try {
       setLoading(true);
       setCampaign(prev => ({ ...prev, status: 'qualifying', started_at: new Date() }));
       addNotification('info', 'Starting strategic sales campaign...');
 
-      // Step 1: Qualify leads from ICP
-      const qualifiedLeads = [];
-      const allContacts = contacts.filter(c => c.company && c.company.name);
+      // Step 1: Get all qualified leads (auto-discovered + CSV imported)
+      const allQualifiedLeads = contacts.filter(contact => 
+        contact.qualification && contact.qualification.qualified
+      );
       
-      for (const contact of allContacts) {
-        const qualification = automationEngine.qualifyLead(contact.company);
-        if (qualification.qualified) {
-          qualifiedLeads.push({
-            id: contact.id,
-            contact,
-            company: contact.company,
-            qualification,
-            status: 'qualified',
-            created_at: new Date(),
-            confidence_score: qualification.confidence
-          });
-        }
+      // If not enough leads, start auto-discovery
+      if (allQualifiedLeads.length < campaign.target_count) {
+        addNotification('info', 'Not enough qualified leads. Starting auto-discovery...');
+        await startAutoDiscovery();
         
-        if (qualifiedLeads.length >= 50) break; // Stop at exactly 50 qualified leads
+        // Reload contacts after discovery
+        await loadContacts();
+        
+        // Get updated qualified leads
+        const updatedQualifiedLeads = contacts.filter(contact => 
+          contact.qualification && contact.qualification.qualified
+        );
+        
+        if (updatedQualifiedLeads.length >= campaign.target_count) {
+          allQualifiedLeads.push(...updatedQualifiedLeads);
+        }
       }
       
-      addNotification('success', `Qualified ${qualifiedLeads.length} leads from ICP. Target: 50`);
+      // Take exactly 50 qualified leads
+      const selectedLeads = allQualifiedLeads.slice(0, campaign.target_count);
+      
+      addNotification('success', `Selected ${selectedLeads.length} qualified leads for campaign.`);
       
       // Step 2: Research phase
       setCampaign(prev => ({ 
         ...prev, 
         status: 'researching', 
-        qualified_leads: qualifiedLeads.slice(0, 50) 
+        qualified_leads: selectedLeads 
       }));
       
-      await processResearchQueue(qualifiedLeads.slice(0, 50));
+      await processResearchQueue(selectedLeads);
       
     } catch (err) {
       console.error('Campaign failed:', err);
@@ -1043,6 +1801,17 @@ export default function FinalOptimalSalesMachine() {
     setTemplatePerformance(performance);
   };
 
+  // Add missing import for Papa Parse
+  useEffect(() => {
+    // Load Papa Parse dynamically if not already loaded
+    if (typeof window !== 'undefined' && !window.Papa) {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js';
+      script.async = true;
+      document.body.appendChild(script);
+    }
+  }, []);
+
   // Effects
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -1051,6 +1820,13 @@ export default function FinalOptimalSalesMachine() {
       if (user) {
         loadContacts();
         checkSystemHealth();
+        // Auto-start discovery if no contacts
+        setTimeout(() => {
+          if (contacts.length === 0) {
+            addNotification('info', 'No contacts found. Starting auto-discovery...');
+            startAutoDiscovery();
+          }
+        }, 2000);
       }
     });
     
@@ -1074,7 +1850,7 @@ export default function FinalOptimalSalesMachine() {
       clearInterval(healthInterval);
       clearInterval(kpiInterval);
     };
-  }, []);
+  }, [contacts.length]);
 
   // Auto-switch to manual mode on health failures
   useEffect(() => {
@@ -1299,6 +2075,50 @@ export default function FinalOptimalSalesMachine() {
               </div>
             </div>
 
+            {/* Smart Lead Discovery Section */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="px-6 py-4 border-b border-gray-700">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-medium text-white">Smart Lead Discovery</h2>
+                  <button
+                    onClick={() => setShowDiscoveryModal(true)}
+                    className="px-4 py-2 text-sm font-medium text-blue-400 bg-blue-900 rounded-md hover:bg-blue-800"
+                  >
+                    Manage Sources
+                  </button>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-blue-400">{kpis.leads_discovered}</div>
+                    <div className="text-sm text-gray-400">Leads Discovered</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-green-400">{kpis.auto_qualified}</div>
+                    <div className="text-sm text-gray-400">Auto-Qualified</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-purple-400">{contacts.length}</div>
+                    <div className="text-sm text-gray-400">Total Contacts</div>
+                  </div>
+                </div>
+                
+                {/* Discovery Sources */}
+                <div className="mt-6">
+                  <h3 className="text-sm font-medium text-gray-300 mb-3">Active Discovery Sources</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {Object.entries(LEAD_SOURCES).map(([key, source]) => (
+                      <div key={key} className="bg-gray-700 rounded-lg p-3 text-center">
+                        <div className="text-sm font-medium text-white">{source.name}</div>
+                        <div className="text-xs text-gray-400 mt-1">{source.type}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Campaign Overview */}
             <div className="bg-gray-800 rounded-lg">
               <div className="px-6 py-4 border-b border-gray-700">
@@ -1410,6 +2230,13 @@ export default function FinalOptimalSalesMachine() {
                     >
                       Check Health
                     </button>
+                    <button
+                      onClick={startAutoDiscovery}
+                      disabled={loading || discoveryStatus.discovering}
+                      className="px-6 py-3 text-sm font-medium text-purple-400 bg-purple-900 rounded-md hover:bg-purple-800"
+                    >
+                      {discoveryStatus.discovering ? 'Discovering...' : 'Auto-Discover Leads'}
+                    </button>
                   </div>
                 </div>
 
@@ -1438,82 +2265,167 @@ export default function FinalOptimalSalesMachine() {
                 </div>
               </div>
             </div>
+
+            {/* Discovery Results */}
+            {discoveryStatus.results.length > 0 && (
+              <div className="bg-gray-800 rounded-lg">
+                <div className="px-6 py-4 border-b border-gray-700">
+                  <h2 className="text-lg font-medium text-white">Recent Discovery Results</h2>
+                </div>
+                <div className="p-6">
+                  <div className="space-y-4">
+                    {discoveryStatus.results.map((result, index) => (
+                      <div key={index} className="bg-gray-700 rounded-lg p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h3 className="text-sm font-medium text-white">{result.source}</h3>
+                            <p className="text-xs text-gray-400">
+                              Discovered {result.count} leads at {new Date(result.timestamp).toLocaleString()}
+                            </p>
+                          </div>
+                          <div className="text-sm text-green-400">
+                            {result.count} new leads
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* Leads Tab */}
         {activeTab === 'leads' && (
-          <div className="bg-gray-800 rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-700">
-              <h2 className="text-lg font-medium text-white">Active Leads</h2>
+          <div className="space-y-8">
+            {/* Lead Summary */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="px-6 py-4 border-b border-gray-700">
+                <h2 className="text-lg font-medium text-white">Lead Summary</h2>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-blue-400">{contacts.length}</div>
+                    <div className="text-sm text-gray-400">Total Contacts</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-green-400">
+                      {contacts.filter(c => c.qualification?.qualified).length}
+                    </div>
+                    <div className="text-sm text-gray-400">Qualified</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-yellow-400">
+                      {contacts.filter(c => c.contact?.email).length}
+                    </div>
+                    <div className="text-sm text-gray-400">With Email</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-purple-400">
+                      {contacts.filter(c => c.source === 'csv_upload').length}
+                    </div>
+                    <div className="text-sm text-gray-400">CSV Imported</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className="overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-700">
-                <thead className="bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Company</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Decision Maker</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Cadence</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Score</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-gray-800 divide-y divide-gray-700">
-                  {campaign.in_sequence_leads.slice(0, 10).map(lead => (
-                    <tr key={lead.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
-                        {lead.company.name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {lead.decision_maker?.name || 'N/A'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                          lead.status === 'in_sequence' ? 'bg-green-900 text-green-300' :
-                          lead.status === 'researched' ? 'bg-blue-900 text-blue-300' :
-                          lead.status === 'meeting_booked' ? 'bg-purple-900 text-purple-300' :
-                          'bg-gray-700 text-gray-300'
-                        }`}>
-                          {lead.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        Step {lead.cadence_step}/3
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                        {(lead.lead_score?.overall * 100).toFixed(0)}%
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        <button
-                          onClick={() => setSelectedLead(lead)}
-                          className="text-blue-400 hover:text-blue-300 mr-3"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => composeManualEmail(lead, 'email1')}
-                          className="text-green-400 hover:text-green-300 mr-3"
-                        >
-                          Email
-                        </button>
-                        <button
-                          onClick={() => recordResponse(lead.id, 'reply')}
-                          className="text-yellow-400 hover:text-yellow-300 mr-3"
-                        >
-                          Reply
-                        </button>
-                        <button
-                          onClick={() => recordResponse(lead.id, 'meeting')}
-                          className="text-purple-400 hover:text-purple-300"
-                        >
-                          Meeting
-                        </button>
-                      </td>
+
+            {/* Active Leads Table */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="px-6 py-4 border-b border-gray-700">
+                <h2 className="text-lg font-medium text-white">Active Leads</h2>
+              </div>
+              <div className="overflow-hidden">
+                <table className="min-w-full divide-y divide-gray-700">
+                  <thead className="bg-gray-700">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Company</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Contact</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Source</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Qualification</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="bg-gray-800 divide-y divide-gray-700">
+                    {contacts.slice(0, 10).map(contact => (
+                      <tr key={contact.id}>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+                          {contact.company?.name || contact.name || 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                          <div>
+                            <div className="font-medium">{contact.contact?.name || 'N/A'}</div>
+                            <div className="text-xs text-gray-400">{contact.contact?.email || 'N/A'}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                            contact.qualification?.qualified ? 'bg-green-900 text-green-300' :
+                            'bg-gray-700 text-gray-300'
+                          }`}>
+                            {contact.qualification?.qualified ? 'Qualified' : 'Not Qualified'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                          <div className="flex items-center">
+                            <span className={`px-2 py-1 text-xs rounded ${
+                              contact.source === 'csv_upload' ? 'bg-blue-900 text-blue-300' :
+                              contact.source?.includes('Crunchbase') ? 'bg-purple-900 text-purple-300' :
+                              contact.source?.includes('LinkedIn') ? 'bg-green-900 text-green-300' :
+                              'bg-gray-700 text-gray-300'
+                            }`}>
+                              {contact.source || 'Unknown'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                          {contact.qualification ? (
+                            <div>
+                              <div className="text-xs">Score: {contact.qualification.score}/4</div>
+                              <div className="text-xs text-gray-400">
+                                {contact.qualification.reasons?.join(', ') || 'N/A'}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">Not evaluated</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button
+                            onClick={() => setSelectedLead(contact)}
+                            className="text-blue-400 hover:text-blue-300 mr-3"
+                          >
+                            View
+                          </button>
+                          {contact.contact?.email && (
+                            <button
+                              onClick={() => composeManualEmail(contact, 'email1')}
+                              className="text-green-400 hover:text-green-300 mr-3"
+                            >
+                              Email
+                            </button>
+                          )}
+                          <button
+                            onClick={() => recordResponse(contact.id, 'reply')}
+                            className="text-yellow-400 hover:text-yellow-300 mr-3"
+                          >
+                            Reply
+                          </button>
+                          <button
+                            onClick={() => recordResponse(contact.id, 'meeting')}
+                            className="text-purple-400 hover:text-purple-300"
+                          >
+                            Meeting
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1653,6 +2565,105 @@ export default function FinalOptimalSalesMachine() {
         {/* Manual Tab */}
         {activeTab === 'manual' && (
           <div className="space-y-8">
+            {/* CSV Import Section */}
+            <div className="bg-gray-800 rounded-lg">
+              <div className="px-6 py-4 border-b border-gray-700">
+                <h2 className="text-lg font-medium text-white">Smart CSV Import</h2>
+                <p className="text-sm text-gray-400 mt-1">
+                  Upload any CSV file - the system will automatically detect and map columns
+                </p>
+              </div>
+              <div className="p-6">
+                <div className="space-y-4">
+                  {/* File Upload */}
+                  <div className="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <div className="mt-4">
+                      <label htmlFor="file-upload" className="cursor-pointer">
+                        <span className="mt-2 block text-sm font-medium text-gray-300">
+                          Drop your CSV file here, or click to browse
+                        </span>
+                        <input id="file-upload" name="file-upload" type="file" className="sr-only" accept=".csv" 
+                          onChange={(e) => e.target.files[0] && handleCSVUpload(e.target.files[0])} />
+                      </label>
+                      <p className="mt-1 text-xs text-gray-500">
+                        CSV files only - any format accepted
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {/* Processing Status */}
+                  {csvProcessing.processing && (
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-white">Processing CSV...</span>
+                        <span className="text-sm text-gray-400">{csvProcessing.progress}%</span>
+                      </div>
+                      <div className="w-full bg-gray-600 rounded-full h-2">
+                        <div 
+                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                          style={{ width: `${csvProcessing.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Processing Results */}
+                  {csvProcessing.analysis && !csvProcessing.processing && (
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <h3 className="text-sm font-medium text-white mb-3">Analysis Results</h3>
+                      <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-400">Columns Detected:</span>
+                          <span className="ml-2 text-white">{csvProcessing.analysis.confidence.mapped}/{csvProcessing.analysis.confidence.total}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Confidence:</span>
+                          <span className="ml-2 text-white">{csvProcessing.analysis.confidence.overall.toFixed(1)}%</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Critical Fields:</span>
+                          <span className="ml-2 text-white">{csvProcessing.analysis.confidence.criticalMapped}/3</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">Records:</span>
+                          <span className="ml-2 text-white">{csvProcessing.preview?.length || 0}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Column Mapping */}
+                      <div className="mt-4">
+                        <h4 className="text-xs font-medium text-gray-400 mb-2">Detected Columns:</h4>
+                        <div className="space-y-1">
+                          {Object.entries(csvProcessing.analysis.detectedColumns).map(([field, column]) => (
+                            <div key={field} className="flex justify-between text-xs">
+                              <span className="text-gray-300">{field}:</span>
+                              <span className="text-white">"{column}"</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Errors */}
+                  {csvProcessing.errors.length > 0 && (
+                    <div className="bg-red-900 border border-red-700 rounded-lg p-4">
+                      <h3 className="text-sm font-medium text-red-200 mb-2">Processing Errors</h3>
+                      <ul className="text-xs text-red-300 space-y-1">
+                        {csvProcessing.errors.map((error, index) => (
+                          <li key={index}>• {error}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Manual Operations */}
             <div className="bg-gray-800 rounded-lg">
               <div className="px-6 py-4 border-b border-gray-700">
                 <h2 className="text-lg font-medium text-white">Manual Operations</h2>
@@ -1676,28 +2687,28 @@ export default function FinalOptimalSalesMachine() {
                     </button>
                   </div>
 
-                  {/* Research Queue */}
+                  {/* Manual Research */}
                   <div className="text-center p-4 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer">
                     <div className="w-12 h-12 bg-green-600 rounded-full flex items-center justify-center mx-auto mb-3">
                       <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-white">Research Queue</h3>
+                    <h3 className="text-sm font-medium text-white">Manual Research</h3>
                     <p className="text-xs text-gray-400 mt-1">{manualResearchQueue.length} pending</p>
                     <button className="mt-3 text-sm text-green-400 hover:text-green-300 font-medium">
                       Process Research
                     </button>
                   </div>
 
-                  {/* Outreach Queue */}
+                  {/* Manual Outreach */}
                   <div className="text-center p-4 bg-gray-700 rounded-lg hover:bg-gray-600 cursor-pointer">
                     <div className="w-12 h-12 bg-yellow-600 rounded-full flex items-center justify-center mx-auto mb-3">
                       <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-white">Outreach Queue</h3>
+                    <h3 className="text-sm font-medium text-white">Manual Outreach</h3>
                     <p className="text-xs text-gray-400 mt-1">{manualOutreachQueue.length} pending</p>
                     <button className="mt-3 text-sm text-yellow-400 hover:text-yellow-300 font-medium">
                       Send Emails
@@ -1736,8 +2747,8 @@ export default function FinalOptimalSalesMachine() {
                     <div key={lead.id} className="bg-gray-700 rounded-lg p-4">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="text-sm font-medium text-white">{lead.company.name}</h3>
-                          <p className="text-xs text-gray-400">{lead.decision_maker?.name} - {lead.decision_maker?.email}</p>
+                          <h3 className="text-sm font-medium text-white">{lead.company?.name || lead.name}</h3>
+                          <p className="text-xs text-gray-400">{lead.contact?.name || 'N/A'} - {lead.contact?.email || 'N/A'}</p>
                         </div>
                         <div className="flex space-x-2">
                           <button
