@@ -21,470 +21,24 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// ✅ HEALTH CHECK & TOKEN MANAGEMENT SYSTEM
-const HealthMonitor = {
-  lastHealthCheck: null,
-  isHealthy: true,
-  failures: [],
-  
-  // Check Google token validity
-  async checkGoogleToken() {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        throw new Error('No authenticated user');
-      }
-      
-      // Force token refresh to check validity
-      const token = await user.getIdToken(true);
-      if (!token) {
-        throw new Error('Failed to get token');
-      }
-      
-      return { valid: true, token, user: user.email };
-    } catch (error) {
-      console.error('Google token check failed:', error);
-      return { valid: false, error: error.message };
-    }
-  },
-
-  // Comprehensive health check
-  async runHealthCheck() {
-    const checks = {
-      timestamp: new Date(),
-      googleToken: null,
-      firestore: null,
-      overall: null
-    };
-
-    // Check Google token
-    const tokenCheck = await this.checkGoogleToken();
-    checks.googleToken = {
-      status: tokenCheck.valid ? 'healthy' : 'failed',
-      error: tokenCheck.error,
-      lastChecked: new Date()
-    };
-
-    // Check Firestore connectivity
-    try {
-      const testDoc = doc(db, 'health', 'check');
-      await setDoc(testDoc, { timestamp: serverTimestamp() });
-      checks.firestore = { status: 'healthy', lastChecked: new Date() };
-    } catch (error) {
-      checks.firestore = { status: 'failed', error: error.message, lastChecked: new Date() };
-    }
-
-    // Overall health
-    checks.overall = {
-      status: (checks.googleToken.status === 'healthy' && checks.firestore.status === 'healthy') ? 'healthy' : 'failed',
-      critical: checks.googleToken.status === 'failed'
-    };
-
-    this.lastHealthCheck = checks;
-    this.isHealthy = checks.overall.status === 'healthy';
-
-    if (!this.isHealthy) {
-      this.failures.push({
-        timestamp: new Date(),
-        type: checks.googleToken.status === 'failed' ? 'googleToken' : 'firestore',
-        error: checks.googleToken.error || checks.firestore.error
-      });
-    }
-
-    return checks;
-  },
-
-  // Get recent failures
-  getRecentFailures(count = 5) {
-    return this.failures.slice(-count);
-  },
-
-  // Clear failures
-  clearFailures() {
-    this.failures = [];
-  }
+// ===== STRATEGIC ICP DEFINITION =====
+const ICP_DEFINITION = {
+  industry: 'B2B SaaS & Technology Companies',
+  size: '50-500 employees (Series A-C)',
+  geo: 'North America & UK',
+  pain: 'Scaling customer acquisition efficiently',
+  trigger: 'Recent funding round or product launch',
+  description: 'High-growth tech companies that just raised funding and need to scale acquisition'
 };
 
-// ✅ AUTOMATION ENGINE CONFIGURATION (Legacy support)
-const AUTOMATION_CONFIG = {
-  enabled: true,
-  fallbackMode: 'manual',
-  automationInterval: 60000, // 1 minute
-  batchProcessingSize: 50,
-  emailRateLimit: 40,
-  smsRateLimit: 50,
-  callRateLimit: 25,
-  retryAttempts: 3,
-  retryDelay: 300000, // 5 minutes
-  maxFailedTasks: 100
-};
-
-// ✅ STRATEGIC SALES METHODOLOGY - Battle-Tested B2B Sales
-const SALES_STRATEGY = {
-  // Tight ICP Definition
-  icp: {
-    industry: 'SaaS & Technology Companies',
-    size: '50-500 employees (Series A-C)',
-    geo: 'North America & UK',
-    pain: 'Scaling customer acquisition efficiently',
-    trigger: 'Recent funding round or product launch'
-  },
-  
-  // Strategic Cadence (Multi-touch without spamming)
-  cadence: {
-    day0: { action: 'email', template: 'intro', linkedin: true },
-    day3: { action: 'email', template: 'social_proof' },
-    day5: { action: 'linkedin', template: 'message', condition: 'connected' },
-    day7: { action: 'email', template: 'breakup' }
-  },
-  
-  // Send Safety Rules (Protect deliverability)
-  safety: {
-    maxEmailsPerDay: 40,
-    maxEmailsPerInbox: 30,
-    bounceThreshold: 0.05,
-    unsubscribeThreshold: 0.01,
-    stopOnBounce: true,
-    timezoneRequired: true
-  },
-  
-  // Auto-Exit Rules (Prevent embarrassing outreach)
-  autoExit: {
-    replied: true,
-    booked: true,
-    bounced: true,
-    unsubscribed: true
-  },
-  
-  // Templates (Under 120 words - proven to convert)
-  templates: {
-    intro: {
-      subject: 'Quick question about {{company}}',
-      body: `Hi {{name}},
-
-Saw {{company}} just raised {{funding_amount}} - congrats! 
-
-I help B2B SaaS companies like yours scale customer acquisition without increasing ad spend. We typically see 2-3x improvement in lead-to-customer conversion.
-
-Worth a 10-min chat to see if this applies to your current growth stage?
-
-Best,
-{{sender_name}}
-
-P.S. Here's my calendar: {{booking_link}}`
-    },
-    
-    social_proof: {
-      subject: 'Re: {{company}} growth',
-      body: `Hi {{name}},
-
-Quick follow-up. We helped {{similar_company}} (similar stage) go from {{metric_before}} to {{metric_after}} in 90 days using our acquisition framework.
-
-Their VP of Sales said: "{{testimonial}}"
-
-If you're interested in similar results, I have some ideas specific to {{company}}'s current positioning.
-
-Available for 10 mins: {{booking_link}}
-
-Best,
-{{sender_name}}`
-    },
-    
-    breakup: {
-      subject: 'Closing the loop',
-      body: `Hi {{name}},
-
-I'll stop reaching out after this - but wanted to share one final thought:
-
-{{personalized_insight}}
-
-If timing changes and you want to explore customer acquisition scaling, my calendar is always open: {{booking_link}}
-
-Wishing you continued success with {{company}}!
-
-Best,
-{{sender_name}}`
-    }
-  },
-  
-  // Nurture Sequence
-  nurture: {
-    delayDays: [30, 60],
-    template: 're_engagement',
-    condition: 'no_response'
-  }
-};
-
-// ✅ SALES WORKFLOW ENGINE - Works even when automation fails
-const SalesWorkflowEngine = {
-  // Lead qualification based on ICP
-  qualifyLead: (company) => {
-    const qualifications = {
-      industry: company.industry?.toLowerCase().includes('software') || 
-                company.industry?.toLowerCase().includes('saas') ||
-                company.description?.toLowerCase().includes('software'),
-      size: company.employees >= 50 && company.employees <= 500,
-      funding: company.recent_funding || company.funding_stage,
-      trigger: company.recent_news || company.product_launch
-    };
-    
-    const score = Object.values(qualifications).filter(Boolean).length;
-    return {
-      qualified: score >= 3,
-      score,
-      reasons: Object.entries(qualifications)
-        .filter(([key, value]) => value)
-        .map(([key]) => key)
-    };
-  },
-
-  // 2-minute research extractor
-  extractResearch: async (company) => {
-    const research = {
-      headline: `${company.name} - ${company.industry || 'Technology'}`,
-      trigger: null,
-      decision_makers: []
-    };
-
-    // Look for funding triggers
-    if (company.recent_funding) {
-      research.trigger = `Raised ${company.recent_funding} in ${company.funding_date}`;
-    } else if (company.product_launch) {
-      research.trigger = `Launched ${company.product_launch} in ${company.launch_date}`;
-    } else if (company.recent_hiring) {
-      research.trigger = `Hiring for ${company.recent_hiring} positions`;
-    }
-
-    // Extract decision makers
-    if (company.executives) {
-      research.decision_makers = company.executives
-        .filter(exec => ['CEO', 'CTO', 'VP Sales', 'Head of Growth'].includes(exec.role))
-        .slice(0, 2)
-        .map(exec => ({
-          name: exec.name,
-          role: exec.role,
-          linkedin: exec.linkedin,
-          email: exec.email
-        }));
-    }
-
-    return research;
-  },
-
-  // Email verification
-  verifyEmail: (email) => {
-    const checks = {
-      format: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
-      risky_domain: ['gmail.com', 'yahoo.com', 'hotmail.com'].includes(email.split('@')[1]),
-      mx_record: null // Would check MX records in real implementation
-    };
-    
-    return {
-      valid: checks.format && !checks.risky_domain,
-      risk: checks.risky_domain ? 'high' : 'low',
-      checks
-    };
-  },
-
-  // Personalization generator (2 bullets: 1 observation, 1 impact)
-  generatePersonalization: (company, research) => {
-    const observations = [];
-    const impacts = [];
-
-    if (research.trigger) {
-      observations.push(`${research.trigger}`);
-      impacts.push(`Scaling acquisition is likely a priority right now`);
-    }
-
-    if (company.employees > 200) {
-      observations.push(`Team of ${company.employees}+ people`);
-      impacts.push(`Need efficient acquisition systems to support growth`);
-    }
-
-    if (company.industry?.includes('SaaS')) {
-      observations.push(`B2B SaaS business model`);
-      impacts.push(`Customer acquisition cost optimization is critical`);
-    }
-
-    return {
-      observation: observations[0] || 'Growing technology company',
-      impact: impacts[0] || 'Efficient scaling essential for continued growth'
-    };
-  },
-
-  // Cadence execution
-  executeCadenceStep: async (lead, step, manualMode = false) => {
-    const template = SALES_STRATEGY.templates[step.template];
-    const personalization = SalesWorkflowEngine.generatePersonalization(lead.company, lead.research);
-    
-    const emailContent = template.body
-      .replace(/{{name}}/g, lead.decision_maker.name)
-      .replace(/{{company}}/g, lead.company.name)
-      .replace(/{{funding_amount}}/g, lead.company.recent_funding || 'recent funding')
-      .replace(/{{similar_company}}/g, 'similar B2B SaaS company')
-      .replace(/{{metric_before}}/g, '50 leads/month')
-      .replace(/{{metric_after}}/g, '150 leads/month')
-      .replace(/{{testimonial}}/g, 'This transformed our entire customer acquisition strategy')
-      .replace(/{{personalized_insight}}/g, `${personalization.observation}. ${personalization.impact}.`)
-      .replace(/{{sender_name}}/g, 'Dulran Samarasinghe')
-      .replace(/{{booking_link}}/g, 'https://cal.com/syndicate-solutions/10min');
-
-    return {
-      content: emailContent,
-      subject: template.subject.replace(/{{company}}/g, lead.company.name),
-      personalization,
-      delivery_method: manualMode ? 'manual' : 'automated',
-      word_count: emailContent.split(' ').length
-    };
-  },
-
-  // Safety checker
-  checkSendSafety: async (emailCount, bounceRate, unsubscribeRate) => {
-    const checks = {
-      daily_limit: emailCount < SALES_STRATEGY.safety.maxEmailsPerDay,
-      bounce_rate: bounceRate < SALES_STRATEGY.safety.bounceThreshold,
-      unsubscribe_rate: unsubscribeRate < SALES_STRATEGY.safety.unsubscribeThreshold
-    };
-
-    return {
-      safe: Object.values(checks).every(Boolean),
-      checks,
-      warnings: Object.entries(checks)
-        .filter(([key, value]) => !value)
-        .map(([key]) => key)
-    };
-  }
-};
-
-// ✅ MANUAL WORKFLOW SYSTEM - Complete manual override when automation fails
-const ManualSalesWorkflow = {
-  // Manual lead qualification
-  manuallyQualifyLead: (company) => {
-    const qualification = SalesWorkflowEngine.qualifyLead(company);
-    return {
-      ...qualification,
-      manual_review: true,
-      reviewer_notes: `Manual qualification completed on ${new Date().toLocaleString()}`
-    };
-  },
-
-  // Manual research assistant
-  manuallyResearchCompany: async (companyName) => {
-    return {
-      headline: `${companyName} - Manual Research Required`,
-      trigger: 'Manual investigation needed',
-      research_steps: [
-        '1. Check recent funding announcements',
-        '2. Look for product launches or expansions',
-        '3. Identify key decision makers on LinkedIn',
-        '4. Verify email formats and deliverability',
-        '5. Research recent company news or triggers'
-      ],
-      estimated_time: '2 minutes',
-      status: 'ready_for_manual_research'
-    };
-  },
-
-  // Manual email composer with templates
-  manuallyComposeEmail: (lead, templateType, personalization) => {
-    const template = SALES_STRATEGY.templates[templateType];
-    const emailContent = template.body
-      .replace(/{{name}}/g, lead.decision_maker.name)
-      .replace(/{{company}}/g, lead.company.name)
-      .replace(/{{personalized_insight}}/g, personalization)
-      .replace(/{{sender_name}}/g, 'Dulran Samarasinghe')
-      .replace(/{{booking_link}}/g, 'https://cal.com/syndicate-solutions/10min');
-
-    return {
-      to: lead.decision_maker.email,
-      subject: template.subject.replace(/{{company}}/g, lead.company.name),
-      body: emailContent,
-      word_count: emailContent.split(' ').length,
-      template_used: templateType,
-      composed_at: new Date().toISOString(),
-      manual_composition: true
-    };
-  },
-
-  // Manual cadence tracker
-  manuallyTrackCadence: (leadId) => {
-    return {
-      lead_id: leadId,
-      current_step: 'manual_tracking',
-      completed_steps: [],
-      next_actions: [
-        'Send intro email',
-        'Connect on LinkedIn',
-        'Send social proof email',
-        'Send LinkedIn message (if connected)',
-        'Send breakup email'
-      ],
-      manual_tracking: true,
-      last_updated: new Date().toISOString()
-    };
-  },
-
-  // Manual KPI tracking
-  manuallyTrackKPI: () => {
-    return {
-      tracking_period: 'Last 7 days',
-      manual_entry_required: true,
-      metrics: {
-        emails_sent: 'Enter manually',
-        replies_received: 'Enter manually',
-        meetings_booked: 'Enter manually',
-        bounce_rate: 'Calculate manually',
-        unsubscribe_rate: 'Calculate manually'
-      },
-      recommendations: [
-        'Keep bounce rate below 5%',
-        'Keep unsubscribe rate below 1%',
-        'Aim for 15%+ reply rate',
-        'Target 5%+ meeting rate'
-      ]
-    };
-  }
-};
-
-// ✅ CONTACT STATUS DEFINITIONS (Business-Driven Workflow)
-const CONTACT_STATUSES = [
-  { id: 'new', label: '🆕 New Lead', color: 'gray', description: 'Never contacted' },
-  { id: 'contacted', label: '📞 Contacted', color: 'blue', description: 'Initial outreach sent' },
-  { id: 'engaged', label: '💬 Engaged', color: 'indigo', description: 'Opened/clicked but no reply' },
-  { id: 'replied', label: '✅ Replied', color: 'green', description: 'Responded to outreach' },
-  { id: 'demo_scheduled', label: '📅 Demo Scheduled', color: 'purple', description: 'Meeting booked' },
-  { id: 'proposal_sent', label: '📄 Proposal Sent', color: 'orange', description: 'Quote delivered' },
-  { id: 'negotiation', label: '🤝 Negotiation', color: 'yellow', description: 'Discussing terms' },
-  { id: 'closed_won', label: '💰 Closed Won', color: 'emerald', description: 'Deal secured!' },
-  { id: 'not_interested', label: '❌ Not Interested', color: 'red', description: 'Declined service' },
-  { id: 'do_not_contact', label: '🚫 Do Not Contact', color: 'rose', description: 'Requested no contact' },
-  { id: 'unresponsive', label: '⏳ Unresponsive', color: 'orange', description: 'No response after 3 attempts' },
-  { id: 'archived', label: '🗄️ Archived', color: 'gray', description: 'Inactive >30 days' }
-];
-
-// ✅ STATUS TRANSITION RULES (Prevent invalid state changes)
-const STATUS_TRANSITIONS = {
-  'new': ['contacted', 'do_not_contact'],
-  'contacted': ['engaged', 'replied', 'unresponsive', 'not_interested'],
-  'engaged': ['replied', 'unresponsive', 'not_interested'],
-  'replied': ['demo_scheduled', 'proposal_sent', 'negotiation', 'closed_won', 'not_interested'],
-  'demo_scheduled': ['proposal_sent', 'negotiation', 'closed_won', 'not_interested'],
-  'proposal_sent': ['negotiation', 'closed_won', 'not_interested'],
-  'negotiation': ['closed_won', 'not_interested'],
-  'closed_won': [],
-  'not_interested': ['archived'],
-  'do_not_contact': ['archived'],
-  'unresponsive': ['archived', 're_engage'],
-  'archived': ['re_engage']
-};
-
-// ✅ EMAIL TEMPLATES
-const EMAIL_TEMPLATES = {
-  initial: {
+// ===== CONTROLLED TEMPLATE SYSTEM =====
+const SALES_TEMPLATES = {
+  email1: {
+    name: 'Intro - Quick Question',
     subject: 'Quick question about {{company}}',
     body: `Hi {{name}},
 
-Saw {{company}} just raised {{funding_amount}} - congrats! 
+Saw {{company}} just raised {{funding_amount}} - congras!
 
 I help B2B SaaS companies like yours scale customer acquisition without increasing ad spend. We typically see 2-3x improvement in lead-to-customer conversion.
 
@@ -493,9 +47,12 @@ Worth a 10-min chat to see if this applies to your current growth stage?
 Best,
 {{sender_name}}
 
-P.S. Here's my calendar: {{booking_link}}`
+P.S. Here's my calendar: {{booking_link}} (10-min slots available)`,
+    word_count: 89
   },
-  followup: {
+  
+  email2: {
+    name: 'Social Proof - Follow-up',
     subject: 'Re: {{company}} growth',
     body: `Hi {{name}},
 
@@ -508,9 +65,12 @@ If you're interested in similar results, I have some ideas specific to {{company
 Available for 10 mins: {{booking_link}}
 
 Best,
-{{sender_name}}`
+{{sender_name}}`,
+    word_count: 95
   },
+  
   breakup: {
+    name: 'Break-up - Closing the loop',
     subject: 'Closing the loop',
     body: `Hi {{name}},
 
@@ -523,117 +83,298 @@ If timing changes and you want to explore customer acquisition scaling, my calen
 Wishing you continued success with {{company}}!
 
 Best,
-{{sender_name}}`
+{{sender_name}}`,
+    word_count: 82
   }
 };
 
-// ✅ UTILITY FUNCTIONS
-function formatForDialing(raw) {
-  if (!raw || raw === 'N/A') return null;
-  let cleaned = raw.toString().replace(/\D/g, '');
-  if (cleaned.startsWith('0') && cleaned.length >= 9) {
-    cleaned = '94' + cleaned.slice(1);
+// ===== CADENCE CONFIGURATION =====
+const CADENCE_RULES = {
+  day0: { action: 'email', template: 'email1', linkedin: true },
+  day3: { action: 'email', template: 'email2' },
+  day5: { action: 'linkedin', template: 'message', condition: 'connected' },
+  day7: { action: 'email', template: 'breakup' }
+};
+
+// ===== SAFETY & COMPLIANCE RULES =====
+const SAFETY_RULES = {
+  maxEmailsPerDay: 40,
+  maxEmailsPerInbox: 30,
+  bounceThreshold: 0.05,
+  unsubscribeThreshold: 0.01,
+  stopOnBounce: true,
+  timezoneRequired: true,
+  minTimeBetweenSends: 60000 // 1 minute between sends
+};
+
+// ===== AUTO-EXIT RULES =====
+const AUTO_EXIT_RULES = {
+  replied: true,
+  booked: true,
+  bounced: true,
+  unsubscribed: true,
+  not_interested: true
+};
+
+// ===== CORE BUSINESS ENGINE =====
+class SalesAutomationEngine {
+  constructor() {
+    this.isHealthy = true;
+    this.lastHealthCheck = null;
+    this.failures = [];
+    this.dailySendCount = 0;
+    this.lastResetDate = new Date().toDateString();
   }
-  return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
+
+  // Lead qualification based on ICP
+  qualifyLead(company) {
+    const qualifications = {
+      industry: this.checkIndustry(company),
+      size: this.checkSize(company),
+      funding: this.checkFunding(company),
+      trigger: this.checkTrigger(company)
+    };
+    
+    const score = Object.values(qualifications).filter(Boolean).length;
+    return {
+      qualified: score >= 3,
+      score,
+      reasons: Object.entries(qualifications)
+        .filter(([key, value]) => value)
+        .map(([key]) => key),
+      details: qualifications
+    };
+  }
+
+  checkIndustry(company) {
+    const targetIndustries = ['software', 'saas', 'technology', 'fintech', 'healthtech'];
+    const industry = (company.industry || company.description || '').toLowerCase();
+    return targetIndustries.some(ind => industry.includes(ind));
+  }
+
+  checkSize(company) {
+    const employees = company.employees || company.size || 0;
+    return employees >= 50 && employees <= 500;
+  }
+
+  checkFunding(company) {
+    return !!(company.recent_funding || company.funding_stage || company.funding_amount);
+  }
+
+  checkTrigger(company) {
+    return !!(company.recent_news || company.product_launch || company.hiring_spree);
+  }
+
+  // 2-minute research extractor
+  async extractResearch(company) {
+    const research = {
+      headline: `${company.name} - ${company.industry || 'Technology'}`,
+      trigger: null,
+      decision_makers: [],
+      personalization: null,
+      confidence_score: 0
+    };
+
+    // Extract trigger
+    if (company.recent_funding) {
+      research.trigger = `Raised ${company.recent_funding} in ${company.funding_date || 'recent round'}`;
+      research.confidence_score += 0.4;
+    } else if (company.product_launch) {
+      research.trigger = `Launched ${company.product_launch} in ${company.launch_date || 'recently'}`;
+      research.confidence_score += 0.3;
+    } else if (company.recent_hiring) {
+      research.trigger = `Hiring for ${company.recent_hiring} positions`;
+      research.confidence_score += 0.2;
+    }
+
+    // Extract decision makers
+    if (company.executives || company.employees) {
+      const executives = company.executives || [];
+      research.decision_makers = executives
+        .filter(exec => ['CEO', 'CTO', 'VP Sales', 'Head of Growth', 'CRO'].includes(exec.role))
+        .slice(0, 2)
+        .map(exec => ({
+          name: exec.name,
+          role: exec.role,
+          email: exec.email,
+          linkedin: exec.linkedin,
+          verified: false
+        }));
+      
+      if (research.decision_makers.length > 0) {
+        research.confidence_score += 0.3;
+      }
+    }
+
+    // Generate personalization
+    research.personalization = this.generatePersonalization(company, research);
+    
+    return research;
+  }
+
+  generatePersonalization(company, research) {
+    const observations = [];
+    const impacts = [];
+
+    if (research.trigger) {
+      observations.push(research.trigger);
+      impacts.push('Scaling acquisition is likely a priority right now');
+    }
+
+    if (company.employees > 200) {
+      observations.push(`Team of ${company.employees}+ people`);
+      impacts.push('Need efficient acquisition systems to support growth');
+    }
+
+    if (company.industry?.includes('SaaS')) {
+      observations.push('B2B SaaS business model');
+      impacts.push('Customer acquisition cost optimization is critical');
+    }
+
+    return {
+      observation: observations[0] || 'Growing technology company',
+      impact: impacts[0] || 'Efficient scaling essential for continued growth',
+      confidence: observations.length > 0 ? 0.8 : 0.5
+    };
+  }
+
+  // Email verification
+  async verifyEmail(email) {
+    if (!email) return { valid: false, reason: 'No email provided' };
+    
+    const checks = {
+      format: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+      risky_domain: ['gmail.com', 'yahoo.com', 'hotmail.com'].includes(email.split('@')[1]),
+      mx_record: null // Would check MX records in real implementation
+    };
+    
+    return {
+      valid: checks.format && !checks.risky_domain,
+      risk: checks.risky_domain ? 'high' : 'low',
+      checks,
+      recommendation: checks.risky_domain ? 'Use company domain if possible' : 'Email looks good'
+    };
+  }
+
+  // Template personalization
+  personalizeTemplate(template, lead) {
+    const { company, decision_maker, research } = lead;
+    
+    let personalized = {
+      ...template,
+      subject: template.subject.replace(/{{company}}/g, company.name),
+      body: template.body
+        .replace(/{{name}}/g, decision_maker.name)
+        .replace(/{{company}}/g, company.name)
+        .replace(/{{funding_amount}}/g, company.recent_funding || 'recent funding')
+        .replace(/{{similar_company}}/g, 'similar B2B SaaS company')
+        .replace(/{{metric_before}}/g, '50 leads/month')
+        .replace(/{{metric_after}}/g, '150 leads/month')
+        .replace(/{{testimonial}}/g, 'This transformed our entire customer acquisition strategy')
+        .replace(/{{personalized_insight}}/g, `${research.personalization.observation}. ${research.personalization.impact}.`)
+        .replace(/{{sender_name}}/g, 'Dulran Samarasinghe')
+        .replace(/{{booking_link}}/g, 'https://cal.com/syndicate-solutions/10min'),
+      personalization_score: research.personalization.confidence
+    };
+    
+    return personalized;
+  }
+
+  // Send safety check
+  async checkSendSafety() {
+    const today = new Date().toDateString();
+    if (this.lastResetDate !== today) {
+      this.dailySendCount = 0;
+      this.lastResetDate = today;
+    }
+
+    const checks = {
+      daily_limit: this.dailySendCount < SAFETY_RULES.maxEmailsPerDay,
+      healthy: this.isHealthy
+    };
+
+    return {
+      safe: Object.values(checks).every(Boolean),
+      checks,
+      daily_count: this.dailySendCount,
+      remaining: SAFETY_RULES.maxEmailsPerDay - this.dailySendCount
+    };
+  }
+
+  // Health check
+  async runHealthCheck() {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('No authenticated user');
+      }
+      
+      // Force token refresh
+      await user.getIdToken(true);
+      
+      this.isHealthy = true;
+      this.lastHealthCheck = new Date();
+      
+      return { status: 'healthy', timestamp: this.lastHealthCheck };
+    } catch (error) {
+      this.isHealthy = false;
+      this.failures.push({
+        timestamp: new Date(),
+        error: error.message,
+        type: 'googleToken'
+      });
+      
+      return { status: 'failed', error: error.message, timestamp: new Date() };
+    }
+  }
+
+  // Execute cadence step
+  async executeCadenceStep(lead, step, manualMode = false) {
+    const template = SALES_TEMPLATES[step.template];
+    if (!template) {
+      throw new Error(`Template ${step.template} not found`);
+    }
+
+    const personalizedTemplate = this.personalizeTemplate(template, lead);
+    
+    return {
+      lead_id: lead.id,
+      step: step,
+      template: personalizedTemplate,
+      delivery_method: manualMode ? 'manual' : 'automated',
+      scheduled_at: new Date(),
+      status: 'ready'
+    };
+  }
+
+  // Check auto-exit conditions
+  shouldExitSequence(lead) {
+    return AUTO_EXIT_RULES[lead.status] === true;
+  }
 }
 
-const extractTemplateVariables = (text) => {
-  if (!text) return [];
-  const matches = text.match(/\{\{\s*([^}]+?)\s*\}\}/g) || [];
-  return [...new Set(matches.map(m => m.replace(/\{\{\s*|\s*\}\}/g, '').trim()))];
-};
-
-// ✅ SYNC WITH API: Use the EXACT same validation rules
-const isValidEmail = (email) => {
-  if (!email || typeof email !== 'string') return false;
-  let cleaned = email.trim()
-    .toLowerCase()
-    .replace(/^["'`]+/, '')
-    .replace(/["'`]+$/, '')
-    .replace(/\s+/g, '')
-    .replace(/[<>]/g, '');
-  if (cleaned.length < 5) return false;
-  if (cleaned === 'undefined' || cleaned === 'null' || cleaned === 'na' || cleaned === 'n/a') return false;
-  if (cleaned.startsWith('[') || cleaned.includes('missing')) return false;
-  const atCount = (cleaned.match(/@/g) || []).length;
-  if (atCount !== 1) return false;
-  const parts = cleaned.split('@');
-  const [localPart, domainPart] = parts;
-  if (!localPart || localPart.length < 1) return false;
-  if (localPart.startsWith('.') || localPart.endsWith('.')) return false;
-  if (!domainPart || domainPart.length < 3) return false;
-  if (!domainPart.includes('.')) return false;
-  if (domainPart.startsWith('.') || domainPart.endsWith('.')) return false;
-  const domainBits = domainPart.split('.');
-  const tld = domainBits[domainBits.length - 1];
-  if (!tld || tld.length < 2 || tld.length > 6) return false;
-  if (!/^[a-z0-9-]+$/.test(tld)) return false;
-  if (tld.startsWith('-') || tld.endsWith('-')) return false;
-  return true;
-};
-
-const parseCsvRow = (str) => {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === '"' && !inQuotes) inQuotes = true;
-    else if (char === '"' && inQuotes) {
-      if (i + 1 < str.length && str[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else inQuotes = false;
-    } else if (char === ',' && !inQuotes) {
-      result.push(current); current = '';
-    } else current += char;
-  }
-  result.push(current);
-  return result.map(field => {
-    let cleaned = field.replace(/[\r\n]/g, '').trim();
-    if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
-      cleaned = cleaned.slice(1, -1).replace(/""/g, '"');
-    }
-    return cleaned;
-  });
-};
-
-const renderPreviewText = (text, recipient, mappings, sender) => {
-  if (!text) return '';
-  let result = text;
-  Object.entries(mappings).forEach(([varName, col]) => {
-    const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
-    if (varName === 'sender_name') {
-      result = result.replace(regex, sender || 'Team');
-    } else if (recipient && col && recipient[col] !== undefined) {
-      result = result.replace(regex, String(recipient[col]));
-    } else {
-      result = result.replace(regex, `[MISSING: ${varName}]`);
-    }
-  });
-  return result;
-};
-
-// ✅ EXPORT TEMPLATES FOR API USE
-export { EMAIL_TEMPLATES };
+// Initialize engine
+const automationEngine = new SalesAutomationEngine();
 
 export default function FinalOptimalSalesMachine() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
 
-  // ✅ SALES WORKFLOW STATE
-  const [salesPipeline, setSalesPipeline] = useState({
+  // Core state
+  const [campaign, setCampaign] = useState({
+    status: 'idle', // idle, qualifying, researching, outreach, completed, paused
+    target_count: 50,
     qualified_leads: [],
     research_queue: [],
     outreach_queue: [],
-    follow_up_queue: [],
-    nurture_queue: [],
-    completed: []
+    completed_leads: [],
+    failed_leads: [],
+    current_step: 0,
+    started_at: null,
+    completed_at: null
   });
-  
-  const [manualMode, setManualMode] = useState(false);
-  const [dailySendCount, setDailySendCount] = useState(0);
+
   const [kpis, setKpis] = useState({
     emails_sent: 0,
     replies: 0,
@@ -641,38 +382,32 @@ export default function FinalOptimalSalesMachine() {
     bounce_rate: 0,
     unsubscribe_rate: 0,
     reply_rate: 0,
-    meeting_rate: 0
+    meeting_rate: 0,
+    daily_sends: 0
   });
-  
-  const [selectedLead, setSelectedLead] = useState(null);
-  const [manualResearch, setManualResearch] = useState(null);
-  const [manualEmailComposer, setManualEmailComposer] = useState(null);
-  const [cadenceTracker, setCadenceTracker] = useState({});
 
-  // ✅ HEALTH & AUTOMATION STATE
-  const [automationStatus, setAutomationStatus] = useState({
-    enabled: true,
-    healthStatus: 'unknown',
-    lastHealthCheck: null,
-    criticalFailures: [],
-    manualMode: false
-  });
-  const [healthCheckInterval, setHealthCheckInterval] = useState(null);
-
-  // ✅ GENERAL STATE
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [csvFile, setCsvFile] = useState(null);
-  const [csvContent, setCsvContent] = useState('');
   const [notifications, setNotifications] = useState([]);
+  const [manualMode, setManualMode] = useState(false);
+  const [selectedLead, setSelectedLead] = useState(null);
 
-  // ✅ REFS
-  const processingQueueRef = useRef([]);
+  // Manual operations state
+  const [manualEmailComposer, setManualEmailComposer] = useState(null);
+  const [manualResearchQueue, setManualResearchQueue] = useState([]);
+  const [manualOutreachQueue, setManualOutreachQueue] = useState([]);
 
-  // ✅ NOTIFICATION SYSTEM
-  const addNotification = (type, message) => {
+  // Health monitoring
+  const [systemHealth, setSystemHealth] = useState({
+    status: 'unknown',
+    last_check: null,
+    failures: []
+  });
+
+  // Notification system
+  const addNotification = useCallback((type, message) => {
     const notification = {
       id: Date.now(),
       type,
@@ -681,19 +416,16 @@ export default function FinalOptimalSalesMachine() {
     };
     setNotifications(prev => [notification, ...prev].slice(0, 10));
     
-    if (type === 'error') {
-      setError(message);
-    } else if (type === 'success') {
-      setSuccess(message);
-    }
+    if (type === 'error') setError(message);
+    if (type === 'success') setSuccess(message);
     
     // Auto-remove after 5 seconds
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== notification.id));
     }, 5000);
-  };
+  }, []);
 
-  // ✅ AUTH HANDLERS
+  // Auth handlers
   const handleGoogleSignIn = async () => {
     try {
       const provider = new GoogleAuthProvider();
@@ -717,108 +449,7 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // ✅ HEALTH MONITORING & AUTOMATION CONTROL
-  const performHealthCheck = useCallback(async () => {
-    try {
-      const healthResults = await HealthMonitor.runHealthCheck();
-      
-      setAutomationStatus(prev => ({
-        ...prev,
-        healthStatus: healthResults.overall.status,
-        lastHealthCheck: healthResults.timestamp,
-        criticalFailures: HealthMonitor.getRecentFailures(),
-        manualMode: healthResults.overall.critical || prev.manualMode
-      }));
-
-      // If critical failure, switch to manual mode
-      if (healthResults.overall.critical) {
-        setManualMode(true);
-        addNotification('error', `Critical failure detected: ${healthResults.googleToken.error}. System switched to manual mode for safety.`);
-      }
-
-      return healthResults;
-    } catch (error) {
-      console.error('Health check failed:', error);
-      addNotification('error', 'Health check system failure');
-      return null;
-    }
-  }, []);
-
-  // Start health monitoring
-  const startHealthMonitoring = useCallback(() => {
-    // Clear existing interval
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
-    }
-
-    // Run initial health check
-    performHealthCheck();
-
-    // Set up recurring health checks (every 2 minutes)
-    const interval = setInterval(performHealthCheck, 120000);
-    setHealthCheckInterval(interval);
-  }, [healthCheckInterval, performHealthCheck]);
-
-  // Stop health monitoring
-  const stopHealthMonitoring = useCallback(() => {
-    if (healthCheckInterval) {
-      clearInterval(healthCheckInterval);
-      setHealthCheckInterval(null);
-    }
-  }, [healthCheckInterval]);
-
-  // Manual re-enable automation
-  const reenableAutomation = async () => {
-    try {
-      setLoading(true);
-      addNotification('info', 'Attempting to re-enable automation...');
-      
-      // Force fresh authentication
-      const healthResults = await performHealthCheck();
-      
-      if (healthResults && healthResults.overall.status === 'healthy') {
-        setManualMode(false);
-        setAutomationStatus(prev => ({
-          ...prev,
-          enabled: true,
-          manualMode: false
-        }));
-        HealthMonitor.clearFailures();
-        addNotification('success', 'Automation re-enabled successfully!');
-      } else {
-        addNotification('error', 'Cannot re-enable automation: Health checks still failing');
-      }
-    } catch (error) {
-      console.error('Failed to re-enable automation:', error);
-      addNotification('error', 'Failed to re-enable automation: ' + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Manual token refresh
-  const refreshGoogleToken = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        addNotification('error', 'No authenticated user found');
-        return false;
-      }
-
-      await user.getIdToken(true);
-      addNotification('success', 'Google token refreshed successfully');
-      
-      // Re-run health check
-      await performHealthCheck();
-      return true;
-    } catch (error) {
-      console.error('Token refresh failed:', error);
-      addNotification('error', 'Token refresh failed: ' + error.message);
-      return false;
-    }
-  };
-
-  // ✅ LOAD CONTACTS
+  // Load contacts
   const loadContacts = async () => {
     try {
       setLoading(true);
@@ -838,549 +469,248 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // ✅ CSV IMPORT - ACTUALLY WORKING
-  const handleFileUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setCsvFile(file);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setCsvContent(e.target.result);
-        addNotification('info', `File "${file.name}" loaded successfully`);
-      };
-      reader.readAsText(file);
-    }
-  };
-
-  const processCSV = async () => {
-    if (!csvContent) {
-      addNotification('error', 'No CSV content to process');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const lines = csvContent.split('\n').filter(line => line.trim());
-      
-      if (lines.length < 2) {
-        addNotification('error', 'CSV file is empty or invalid');
-        return;
-      }
-
-      // Parse headers
-      const headers = parseCsvRow(lines[0]);
-      console.log('CSV Headers:', headers);
-      
-      const validContacts = [];
-      const invalidContacts = [];
-
-      // Process data rows
-      for (let i = 1; i < lines.length; i++) {
-        const values = parseCsvRow(lines[i]);
-        const row = {};
-        
-        // Map values to headers
-        headers.forEach((header, index) => {
-          row[header] = values[index] || '';
-        });
-
-        // Skip empty rows
-        if (!row.name && !row.email) continue;
-
-        // Validate required fields
-        if (!row.email || !row.name) {
-          invalidContacts.push({ row: i + 1, data: row, reason: 'Missing email or name' });
-          continue;
-        }
-
-        // Validate email format
-        if (!isValidEmail(row.email)) {
-          invalidContacts.push({ row: i + 1, data: row, reason: 'Invalid email format' });
-          continue;
-        }
-
-        // Add valid contact
-        validContacts.push({
-          ...row,
-          created_at: serverTimestamp(),
-          updated_at: serverTimestamp(),
-          status: 'new'
-        });
-      }
-
-      // Batch save to Firestore
-      const batchSize = 10;
-      let savedCount = 0;
-      
-      for (let i = 0; i < validContacts.length; i += batchSize) {
-        const batch = writeBatch(db);
-        const batchEnd = Math.min(i + batchSize, validContacts.length);
-        
-        for (let j = i; j < batchEnd; j++) {
-          const contactRef = doc(collection(db, 'contacts'));
-          batch.set(contactRef, validContacts[j]);
-        }
-        
-        await batch.commit();
-        savedCount += batchEnd - i;
-      }
-
-      await loadContacts();
-      addNotification('success', `Successfully imported ${savedCount} contacts. ${invalidContacts.length} invalid entries skipped.`);
-      
-      // Clear file input
-      setCsvFile(null);
-      setCsvContent('');
-      
-    } catch (err) {
-      console.error('CSV processing error:', err);
-      addNotification('error', 'Failed to process CSV file: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ✅ STRATEGIC SALES WORKFLOW FUNCTIONS
-  const startSalesCampaign = async () => {
+  // Start strategic campaign
+  const startCampaign = async () => {
     try {
       setLoading(true);
+      setCampaign(prev => ({ ...prev, status: 'qualifying', started_at: new Date() }));
       addNotification('info', 'Starting strategic sales campaign...');
-      
-      // Step 1: Load and qualify leads from ICP
+
+      // Step 1: Qualify leads from ICP
       const qualifiedLeads = [];
       const allContacts = contacts.filter(c => c.company && c.company.name);
       
-      for (const contact of allContacts.slice(0, 50)) { // Focus on 50 qualified targets
-        const qualification = SalesWorkflowEngine.qualifyLead(contact.company);
+      for (const contact of allContacts.slice(0, 100)) { // Check more to find 50 qualified
+        const qualification = automationEngine.qualifyLead(contact.company);
         if (qualification.qualified) {
-          const research = await SalesWorkflowEngine.extractResearch(contact.company);
-          const emailVerification = SalesWorkflowEngine.verifyEmail(contact.email);
-          
           qualifiedLeads.push({
             id: contact.id,
             contact,
             company: contact.company,
             qualification,
-            research,
-            email_verification: emailVerification,
-            cadence_step: 0,
             status: 'qualified',
             created_at: new Date()
           });
         }
+        
+        if (qualifiedLeads.length >= 50) break; // Stop at 50 qualified leads
       }
       
-      // Step 2: Move to research queue
-      setSalesPipeline(prev => ({
-        ...prev,
-        qualified_leads: qualifiedLeads,
-        research_queue: qualifiedLeads
+      addNotification('success', `Qualified ${qualifiedLeads.length} leads from ICP. Target: 50`);
+      
+      // Step 2: Research phase
+      setCampaign(prev => ({ 
+        ...prev, 
+        status: 'researching', 
+        qualified_leads: qualifiedLeads.slice(0, 50) 
       }));
       
-      addNotification('success', `Qualified ${qualifiedLeads.length} leads from ICP. Ready for research phase.`);
-      
-      // Step 3: Start automated research if not in manual mode
-      if (!manualMode) {
-        await processResearchQueue();
-      }
+      await processResearchQueue(qualifiedLeads.slice(0, 50));
       
     } catch (err) {
-      console.error('Failed to start sales campaign:', err);
-      addNotification('error', 'Failed to start sales campaign: ' + err.message);
+      console.error('Campaign failed:', err);
+      addNotification('error', 'Campaign failed: ' + err.message);
+      setCampaign(prev => ({ ...prev, status: 'failed' }));
     } finally {
       setLoading(false);
     }
   };
 
-  const processResearchQueue = async () => {
+  // Process research queue
+  const processResearchQueue = async (leads) => {
     try {
-      const researchQueue = [...salesPipeline.research_queue];
-      const processedLeads = [];
+      addNotification('info', 'Processing research queue...');
+      const researchedLeads = [];
       
-      for (const lead of researchQueue.slice(0, 10)) { // Process 10 at a time
-        if (lead.research.decision_makers.length === 0) {
-          // Trigger manual research workflow
-          const manualResearchData = await ManualSalesWorkflow.manuallyResearchCompany(lead.company.name);
-          setManualResearch(manualResearchData);
-          addNotification('warning', `Manual research required for ${lead.company.name}`);
-        } else {
-          // Verify emails for decision makers
-          lead.research.decision_makers.forEach(dm => {
-            dm.email_verification = SalesWorkflowEngine.verifyEmail(dm.email);
-          });
-          
-          processedLeads.push({
-            ...lead,
-            status: 'researched',
-            research_completed_at: new Date()
-          });
+      for (const lead of leads) {
+        const research = await automationEngine.extractResearch(lead.company);
+        
+        // Verify emails for decision makers
+        if (research.decision_makers.length > 0) {
+          for (const dm of research.decision_makers) {
+            if (dm.email) {
+              const verification = await automationEngine.verifyEmail(dm.email);
+              dm.verification = verification;
+              dm.verified = verification.valid;
+            }
+          }
         }
+        
+        researchedLeads.push({
+          ...lead,
+          research,
+          status: 'researched',
+          decision_maker: research.decision_makers[0] || null, // Primary decision maker
+          researched_at: new Date()
+        });
       }
       
-      // Move processed leads to outreach queue
-      setSalesPipeline(prev => ({
+      // Move to outreach queue
+      setCampaign(prev => ({
         ...prev,
-        research_queue: researchQueue.slice(10),
-        outreach_queue: [...prev.outreach_queue, ...processedLeads]
+        status: 'outreach',
+        research_queue: [],
+        outreach_queue: researchedLeads.filter(l => l.decision_maker && l.decision_maker.verified)
       }));
       
-      if (processedLeads.length > 0) {
-        addNotification('success', `Research completed for ${processedLeads.length} leads. Ready for outreach.`);
-        await processOutreachQueue();
-      }
+      addNotification('success', `Research completed. ${researchedLeads.filter(l => l.decision_maker && l.decision_maker.verified).length} leads ready for outreach`);
+      
+      // Start outreach
+      await processOutreachQueue();
       
     } catch (err) {
-      console.error('Failed to process research queue:', err);
-      addNotification('error', 'Research processing failed: ' + err.message);
+      console.error('Research failed:', err);
+      addNotification('error', 'Research failed: ' + err.message);
     }
   };
 
+  // Process outreach queue
   const processOutreachQueue = async () => {
     try {
-      // Check send safety
-      const safetyCheck = await SalesWorkflowEngine.checkSendSafety(
-        dailySendCount,
-        kpis.bounce_rate,
-        kpis.unsubscribe_rate
-      );
-      
+      const safetyCheck = await automationEngine.checkSendSafety();
       if (!safetyCheck.safe) {
-        addNotification('error', `Send safety check failed: ${safetyCheck.warnings.join(', ')}`);
+        addNotification('error', `Send safety check failed. Daily limit reached or system unhealthy.`);
         return;
       }
       
-      const outreachQueue = [...salesPipeline.outreach_queue];
+      setCampaign(prev => ({ ...prev, status: 'outreach' }));
+      addNotification('info', 'Starting outreach sequence...');
+      
+      const outreachQueue = [...campaign.outreach_queue];
       const processedLeads = [];
       
-      for (const lead of outreachQueue.slice(0, Math.min(SALES_STRATEGY.safety.maxEmailsPerDay - dailySendCount, 10))) {
-        // Execute cadence step
-        const cadenceStep = SALES_STRATEGY.cadence[`day${lead.cadence_step}`];
-        if (cadenceStep && cadenceStep.template) {
-          const emailData = await SalesWorkflowEngine.executeCadenceStep(lead, cadenceStep, manualMode);
-          
-          // Send email (manual or automated)
-          if (manualMode) {
-            setManualEmailComposer(emailData);
-            addNotification('info', `Manual email ready for ${lead.company.name}`);
-          } else {
-            // Automated send would go here
-            addNotification('success', `Email sent to ${lead.company.name}`);
-            setDailySendCount(prev => prev + 1);
-            setKpis(prev => ({ ...prev, emails_sent: prev.emails_sent + 1 }));
-          }
-          
-          // Update cadence tracker
-          setCadenceTracker(prev => ({
-            ...prev,
-            [lead.id]: {
-              current_step: lead.cadence_step,
-              next_step: lead.cadence_step + 1,
-              last_action: new Date(),
-              completed_steps: [...(prev[lead.id]?.completed_steps || []), cadenceStep.template]
-            }
-          }));
-          
-          processedLeads.push({
-            ...lead,
-            cadence_step: lead.cadence_step + 1,
-            last_outreach: new Date(),
-            status: lead.cadence_step >= 7 ? 'completed' : 'in_progress'
-          });
-        }
-      }
-      
-      // Update pipeline
-      setSalesPipeline(prev => {
-        const newQueue = outreachQueue.slice(processedLeads.length);
-        const completedLeads = processedLeads.filter(l => l.status === 'completed');
-        const inProgressLeads = processedLeads.filter(l => l.status === 'in_progress');
+      for (const lead of outreachQueue.slice(0, Math.min(safetyCheck.remaining, 10))) {
+        // Execute Day 0 cadence
+        const step = CADENCE_RULES.day0;
+        const emailData = await automationEngine.executeCadenceStep(lead, step, manualMode);
         
-        return {
-          ...prev,
-          outreach_queue: newQueue,
-          follow_up_queue: [...prev.follow_up_queue, ...inProgressLeads],
-          completed: [...prev.completed, ...completedLeads]
-        };
-      });
-      
-      if (processedLeads.length > 0) {
-        addNotification('success', `Outreach completed for ${processedLeads.length} leads.`);
-      }
-      
-    } catch (err) {
-      console.error('Failed to process outreach queue:', err);
-      addNotification('error', 'Outreach processing failed: ' + err.message);
-    }
-  };
-
-  const manuallyProcessLead = async (leadId, action) => {
-    try {
-      const lead = salesPipeline.qualified_leads.find(l => l.id === leadId) || 
-                   salesPipeline.research_queue.find(l => l.id === leadId) ||
-                   salesPipeline.outreach_queue.find(l => l.id === leadId);
-      
-      if (!lead) {
-        addNotification('error', 'Lead not found in pipeline');
-        return;
-      }
-      
-      switch (action) {
-        case 'research':
-          const manualResearchData = await ManualSalesWorkflow.manuallyResearchCompany(lead.company.name);
-          setManualResearch(manualResearchData);
-          addNotification('info', `Manual research started for ${lead.company.name}`);
-          break;
-          
-        case 'compose':
-          const emailData = await ManualSalesWorkflow.manuallyComposeEmail(lead, 'intro', 'Manual research insight');
+        if (manualMode) {
           setManualEmailComposer(emailData);
-          addNotification('info', `Email composer opened for ${lead.company.name}`);
-          break;
-          
-        case 'skip':
-          // Move to next stage or skip
-          setSalesPipeline(prev => {
-            const updated = { ...prev };
-            if (lead.status === 'qualified') {
-              updated.research_queue = updated.research_queue.filter(l => l.id !== leadId);
-              updated.outreach_queue = [...updated.outreach_queue, { ...lead, status: 'researched' }];
-            } else if (lead.status === 'researched') {
-              updated.outreach_queue = updated.outreach_queue.filter(l => l.id !== leadId);
-              updated.completed = [...updated.completed, { ...lead, status: 'skipped' }];
-            }
-            return updated;
-          });
-          addNotification('info', `Lead skipped: ${lead.company.name}`);
-          break;
-          
-        default:
-          addNotification('error', 'Unknown action');
-      }
-      
-    } catch (err) {
-      console.error('Failed to process lead manually:', err);
-      addNotification('error', 'Manual processing failed: ' + err.message);
-    }
-  };
-
-  // ✅ AUTOMATION RULES
-  const [automationRules, setAutomationRules] = useState([]);
-  const [ruleModalOpen, setRuleModalOpen] = useState(false);
-  const [newRule, setNewRule] = useState({
-    name: '',
-    trigger: 'status_change',
-    condition: { status: 'new' },
-    action: 'send_email',
-    template: 'initial',
-    delay: 0,
-    enabled: true,
-    priority: 1
-  });
-
-  const createRule = () => {
-    if (!newRule.name) return;
-    
-    const rule = {
-      id: Date.now().toString(),
-      ...newRule,
-      created_at: new Date()
-    };
-    
-    setAutomationRules(prev => [...prev, rule].sort((a, b) => a.priority - b.priority));
-    setRuleModalOpen(false);
-    setNewRule({
-      name: '',
-      trigger: 'status_change',
-      condition: { status: 'new' },
-      action: 'send_email',
-      template: 'initial',
-      delay: 0,
-      enabled: true,
-      priority: 1
-    });
-    
-    addNotification('success', `Automation rule "${rule.name}" created`);
-  };
-
-  const toggleRule = (ruleId) => {
-    setAutomationRules(prev => 
-      prev.map(rule => 
-        rule.id === ruleId ? { ...rule, enabled: !rule.enabled } : rule
-      )
-    );
-  };
-
-  const deleteRule = (ruleId) => {
-    setAutomationRules(prev => prev.filter(rule => rule.id !== ruleId));
-    addNotification('success', 'Automation rule deleted');
-  };
-
-  // ✅ UTILITY FUNCTIONS
-  const getDaysSinceContact = (contact) => {
-    const lastContact = contact.updated_at?.toDate() || contact.created_at?.toDate() || new Date();
-    const now = new Date();
-    const diffTime = Math.abs(now - lastContact);
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  };
-
-  const filterContacts = (contacts, searchTerm, statusFilter) => {
-    return contacts.filter(contact => {
-      const matchesSearch = !searchTerm || 
-        contact.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        contact.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        contact.company?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesStatus = !statusFilter || contact.status === statusFilter;
-      
-      return matchesSearch && matchesStatus;
-    });
-  };
-
-  const sortContacts = (contacts, sortBy) => {
-    return [...contacts].sort((a, b) => {
-      switch (sortBy) {
-        case 'name':
-          return (a.name || '').localeCompare(b.name || '');
-        case 'created_at':
-          return (b.created_at?.toDate() || new Date()) - (a.created_at?.toDate() || new Date());
-        case 'status':
-          return (a.status || '').localeCompare(b.status || '');
-        default:
-          return 0;
-      }
-    });
-  };
-
-  // ✅ EXPORT FUNCTIONS
-  const exportContactsData = () => {
-    try {
-      const csvContent = [
-        ['Name', 'Email', 'Company', 'Status', 'Created At'].join(','),
-        ...contacts.map(contact => [
-          contact.name || '',
-          contact.email || '',
-          contact.company || '',
-          contact.status || '',
-          contact.created_at?.toDate()?.toLocaleString() || ''
-        ].join(','))
-      ].join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `contacts_export_${new Date().toISOString().split('T')[0]}.csv`;
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      addNotification('success', 'Contacts exported successfully');
-    } catch (err) {
-      console.error('Export failed:', err);
-      addNotification('error', 'Failed to export contacts');
-    }
-  };
-
-  const exportAutomationLogs = () => {
-    try {
-      const logs = {
-        export_date: new Date().toISOString(),
-        pipeline: salesPipeline,
-        kpis,
-        automation_rules: automationRules,
-        manual_mode: manualMode
-      };
-
-      const blob = new Blob([JSON.stringify(logs, null, 2)], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `automation_logs_${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      addNotification('success', 'Automation logs exported successfully');
-    } catch (err) {
-      console.error('Export failed:', err);
-      addNotification('error', 'Failed to export automation logs');
-    }
-  };
-
-  const createBackup = () => {
-    try {
-      const backup = {
-        timestamp: new Date().toISOString(),
-        contacts,
-        pipeline: salesPipeline,
-        kpis,
-        automation_rules: automationRules,
-        settings: {
-          manual_mode: manualMode,
-          daily_send_count: dailySendCount
+          addNotification('info', `Manual email ready for ${lead.company.name}`);
+        } else {
+          // In real implementation, this would send the email
+          automationEngine.dailySendCount++;
+          addNotification('success', `Email sent to ${lead.company.name}`);
+          setKpis(prev => ({ ...prev, emails_sent: prev.emails_sent + 1 }));
         }
-      };
-
-      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `sales_machine_backup_${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+        
+        processedLeads.push({
+          ...lead,
+          last_outreach: new Date(),
+          cadence_step: 0,
+          next_action_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // Day 3
+          status: 'in_sequence'
+        });
+      }
       
-      addNotification('success', 'Backup created successfully');
+      // Update campaign state
+      setCampaign(prev => ({
+        ...prev,
+        outreach_queue: outreachQueue.slice(processedLeads.length),
+        completed_leads: [...prev.completed_leads, ...processedLeads]
+      }));
+      
     } catch (err) {
-      console.error('Backup failed:', err);
-      addNotification('error', 'Failed to create backup');
+      console.error('Outreach failed:', err);
+      addNotification('error', 'Outreach failed: ' + err.message);
     }
   };
 
-  // ✅ AUTOMATION CONTROL FUNCTIONS
-  const pauseAllAutomation = () => {
-    setManualMode(true);
-    addNotification('warning', 'All automation paused. Switched to manual mode.');
+  // Manual email composition
+  const composeManualEmail = (lead, templateType) => {
+    const template = SALES_TEMPLATES[templateType];
+    if (!template) {
+      addNotification('error', 'Template not found');
+      return;
+    }
+    
+    const emailData = automationEngine.personalizeTemplate(template, lead);
+    setManualEmailComposer({
+      ...emailData,
+      lead,
+      template_type: templateType,
+      ready_to_send: true
+    });
   };
 
-  const resumeAllAutomation = () => {
-    setManualMode(false);
-    addNotification('success', 'Automation resumed. Switched to auto mode.');
+  // Send manual email
+  const sendManualEmail = async (emailData) => {
+    try {
+      // In real implementation, this would actually send the email
+      addNotification('success', `Manual email sent to ${emailData.lead.company.name}`);
+      setKpis(prev => ({ ...prev, emails_sent: prev.emails_sent + 1 }));
+      setManualEmailComposer(null);
+      
+      // Update lead status
+      const updatedLead = {
+        ...emailData.lead,
+        last_outreach: new Date(),
+        cadence_step: emailData.lead.cadence_step + 1,
+        status: 'in_sequence'
+      };
+      
+      setCampaign(prev => ({
+        ...prev,
+        completed_leads: prev.completed_leads.map(l => 
+          l.id === updatedLead.id ? updatedLead : l
+        )
+      }));
+      
+    } catch (err) {
+      console.error('Manual email failed:', err);
+      addNotification('error', 'Failed to send manual email');
+    }
   };
 
-  // ✅ EFFECTS
+  // Health monitoring
+  const checkSystemHealth = async () => {
+    const health = await automationEngine.runHealthCheck();
+    setSystemHealth({
+      status: health.status,
+      last_check: health.timestamp,
+      failures: automationEngine.failures.slice(-5)
+    });
+    
+    if (health.status === 'failed') {
+      setManualMode(true);
+      addNotification('error', 'System health check failed. Switched to manual mode.');
+    }
+    
+    return health;
+  };
+
+  // Effects
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoadingAuth(false);
       if (user) {
         loadContacts();
-        startHealthMonitoring(); // Start health monitoring when user signs in
-      } else {
-        stopHealthMonitoring(); // Stop health monitoring when user signs out
+        checkSystemHealth();
       }
     });
+    
+    // Health check interval
+    const healthInterval = setInterval(checkSystemHealth, 120000); // Every 2 minutes
+    
     return () => {
       unsubscribe();
-      stopHealthMonitoring(); // Cleanup on unmount
+      clearInterval(healthInterval);
     };
   }, []);
 
-  // Update manual mode when automation status changes
+  // Auto-switch to manual mode on health failures
   useEffect(() => {
-    if (automationStatus.manualMode && !manualMode) {
+    if (systemHealth.status === 'failed' && !manualMode) {
       setManualMode(true);
+      addNotification('warning', 'Automatically switched to manual mode due to system issues.');
     }
-  }, [automationStatus.manualMode, manualMode]);
+  }, [systemHealth.status, manualMode]);
 
-  // ✅ RENDER
   return (
     <div className="min-h-screen bg-gray-50">
       <Head>
-        <title>Strategic Sales Machine</title>
+        <title>Strategic Sales Automation</title>
         <meta name="description" content="B2B Sales Automation with Manual Fallback" />
       </Head>
 
@@ -1389,25 +719,21 @@ export default function FinalOptimalSalesMachine() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">Strategic Sales Machine</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Strategic Sales Automation</h1>
+              <div className="ml-4 flex items-center space-x-2">
+                <div className={`w-3 h-3 rounded-full ${
+                  systemHealth.status === 'healthy' ? 'bg-green-500' :
+                  systemHealth.status === 'failed' ? 'bg-red-500' :
+                  'bg-yellow-500'
+                }`} />
+                <span className="text-xs text-gray-600">
+                  {systemHealth.status === 'healthy' ? 'System Online' :
+                   systemHealth.status === 'failed' ? 'System Offline' :
+                   'Checking...'}
+                </span>
+              </div>
             </div>
             <div className="flex items-center space-x-4">
-              {/* Health Status Indicator */}
-              {user && (
-                <div className="flex items-center space-x-2">
-                  <div className={`w-3 h-3 rounded-full ${
-                    automationStatus.healthStatus === 'healthy' ? 'bg-green-500' :
-                    automationStatus.healthStatus === 'failed' ? 'bg-red-500' :
-                    'bg-yellow-500'
-                  }`} />
-                  <span className="text-xs text-gray-600">
-                    {automationStatus.healthStatus === 'healthy' ? 'System Online' :
-                     automationStatus.healthStatus === 'failed' ? 'System Offline' :
-                     'Checking...'}
-                  </span>
-                </div>
-              )}
-              
               {user ? (
                 <>
                   <div className="text-sm text-gray-600">
@@ -1461,156 +787,428 @@ export default function FinalOptimalSalesMachine() {
           </div>
         )}
 
-        {/* Automation Status & Control Panel */}
-        {user && (
-          <div className="mb-8">
-            {/* Critical Alert Banner */}
-            {automationStatus.healthStatus === 'failed' && (
-              <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-red-800">Automation System Offline</h3>
-                    <div className="mt-2 text-sm text-red-700">
-                      <p>⚠️ Automation has been disabled due to system issues.</p>
-                      <p className="mt-1">All manual operations remain fully functional.</p>
-                    </div>
-                    <div className="mt-4">
-                      <div className="flex space-x-3">
-                        <button
-                          onClick={reenableAutomation}
-                          disabled={loading}
-                          className="bg-red-100 text-red-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-red-200 disabled:opacity-50"
-                        >
-                          Re-enable Automation
-                        </button>
-                        <button
-                          onClick={refreshGoogleToken}
-                          disabled={loading}
-                          className="bg-white text-red-800 px-4 py-2 rounded-md text-sm font-medium border border-red-300 hover:bg-red-50 disabled:opacity-50"
-                        >
-                          Refresh Token
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+        {/* Critical Alert */}
+        {systemHealth.status === 'failed' && (
+          <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-red-800">Automation System Offline</h3>
+                <div className="mt-2 text-sm text-red-700">
+                  <p>⚠️ Automation has been disabled due to system issues.</p>
+                  <p className="mt-1">All manual operations remain fully functional.</p>
+                </div>
+                <div className="mt-4">
+                  <button
+                    onClick={checkSystemHealth}
+                    className="bg-red-100 text-red-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-red-200"
+                  >
+                    Re-check System
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
+          </div>
+        )}
 
-            {/* Manual Operations Panel */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="px-6 py-4 border-b border-gray-200">
-                <h2 className="text-lg font-medium text-gray-900">
-                  {automationStatus.manualMode ? 'Manual Operations' : 'Automation Control'}
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  {automationStatus.manualMode 
-                    ? 'System is running in manual mode due to health issues' 
-                    : 'All systems operational - automation is running'}
-                </p>
+        {/* ICP Definition */}
+        <div className="bg-white rounded-lg shadow mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-gray-900">Target ICP Definition</h2>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Industry</h3>
+                <p className="text-sm text-gray-600">{ICP_DEFINITION.industry}</p>
               </div>
-              <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {/* Manual Email */}
-                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Size</h3>
+                <p className="text-sm text-gray-600">{ICP_DEFINITION.size}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Geography</h3>
+                <p className="text-sm text-gray-600">{ICP_DEFINITION.geo}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Key Pain</h3>
+                <p className="text-sm text-gray-600">{ICP_DEFINITION.pain}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Trigger</h3>
+                <p className="text-sm text-gray-600">{ICP_DEFINITION.trigger}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-900 mb-2">Target Count</h3>
+                <p className="text-sm text-gray-600">{campaign.target_count} qualified companies</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Campaign Control */}
+        <div className="bg-white rounded-lg shadow mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-medium text-gray-900">Campaign Control</h2>
+              <div className="flex items-center space-x-2">
+                <span className={`px-3 py-1 text-xs font-medium rounded-full ${
+                  campaign.status === 'idle' ? 'bg-gray-100 text-gray-800' :
+                  campaign.status === 'qualifying' ? 'bg-blue-100 text-blue-800' :
+                  campaign.status === 'researching' ? 'bg-yellow-100 text-yellow-800' :
+                  campaign.status === 'outreach' ? 'bg-green-100 text-green-800' :
+                  campaign.status === 'completed' ? 'bg-emerald-100 text-emerald-800' :
+                  'bg-red-100 text-red-800'
+                }`}>
+                  {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
+                </span>
+                {manualMode && (
+                  <span className="px-3 py-1 text-xs font-medium rounded-full bg-orange-100 text-orange-800">
+                    Manual Mode
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex space-x-4">
+                <button
+                  onClick={startCampaign}
+                  disabled={loading || campaign.status !== 'idle' || !user}
+                  className="px-6 py-3 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  Start Campaign
+                </button>
+                <button
+                  onClick={() => setManualMode(!manualMode)}
+                  disabled={loading}
+                  className="px-6 py-3 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  {manualMode ? 'Switch to Auto' : 'Switch to Manual'}
+                </button>
+                <button
+                  onClick={checkSystemHealth}
+                  disabled={loading}
+                  className="px-6 py-3 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
+                >
+                  Check Health
+                </button>
+              </div>
+            </div>
+
+            {/* Campaign Progress */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="text-center p-4 bg-gray-50 rounded-lg">
+                <div className="text-2xl font-bold text-gray-900">{campaign.qualified_leads.length}</div>
+                <div className="text-sm text-gray-600">Qualified</div>
+              </div>
+              <div className="text-center p-4 bg-blue-50 rounded-lg">
+                <div className="text-2xl font-bold text-blue-900">{campaign.research_queue.length}</div>
+                <div className="text-sm text-blue-600">Research Queue</div>
+              </div>
+              <div className="text-center p-4 bg-yellow-50 rounded-lg">
+                <div className="text-2xl font-bold text-yellow-900">{campaign.outreach_queue.length}</div>
+                <div className="text-sm text-yellow-600">Outreach Queue</div>
+              </div>
+              <div className="text-center p-4 bg-green-50 rounded-lg">
+                <div className="text-2xl font-bold text-green-900">{campaign.completed_leads.length}</div>
+                <div className="text-sm text-green-600">In Sequence</div>
+              </div>
+              <div className="text-center p-4 bg-red-50 rounded-lg">
+                <div className="text-2xl font-bold text-red-900">{campaign.failed_leads.length}</div>
+                <div className="text-sm text-red-600">Failed</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* KPI Dashboard */}
+        <div className="bg-white rounded-lg shadow mb-8">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-gray-900">Campaign KPIs</h2>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div>
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-gray-900">Manual Email</h3>
-                    <p className="text-xs text-gray-500 mt-1">Send emails manually when automation is down</p>
-                    <button className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
-                      Compose Email
-                    </button>
                   </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-gray-500 truncate">Emails Sent</dt>
+                      <dd className="text-lg font-medium text-gray-900">{kpis.emails_sent}</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
 
-                  {/* Manual SMS */}
-                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14l2-2z" />
+              <div>
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-gray-900">Manual SMS</h3>
-                    <p className="text-xs text-gray-500 mt-1">Send SMS messages manually</p>
-                    <button className="mt-3 text-sm text-green-600 hover:text-green-800 font-medium">
-                      Send SMS
-                    </button>
                   </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-gray-500 truncate">Replies</dt>
+                      <dd className="text-lg font-medium text-gray-900">{kpis.replies}</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
 
-                  {/* Status Update */}
-                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              <div>
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-gray-900">Status Update</h3>
-                    <p className="text-xs text-gray-500 mt-1">Manually update contact status</p>
-                    <button className="mt-3 text-sm text-yellow-600 hover:text-yellow-800 font-medium">
-                      Update Status
-                    </button>
                   </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-gray-500 truncate">Meetings Booked</dt>
+                      <dd className="text-lg font-medium text-gray-900">{kpis.meetings_booked}</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
 
-                  {/* System Control */}
-                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
-                    <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <div>
+                <div className="flex items-center">
+                  <div className="flex-shrink-0">
+                    <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                       </svg>
                     </div>
-                    <h3 className="text-sm font-medium text-gray-900">System Control</h3>
-                    <p className="text-xs text-gray-500 mt-1">Manage system settings</p>
-                    <button 
-                      onClick={performHealthCheck}
-                      className="mt-3 text-sm text-purple-600 hover:text-purple-800 font-medium"
+                  </div>
+                  <div className="ml-5 w-0 flex-1">
+                    <dl>
+                      <dt className="text-sm font-medium text-gray-500 truncate">Reply Rate</dt>
+                      <dd className="text-lg font-medium text-gray-900">{kpis.reply_rate.toFixed(1)}%</dd>
+                    </dl>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Manual Operations Panel */}
+        {user && (
+          <div className="bg-white rounded-lg shadow mb-8">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-medium text-gray-900">
+                {manualMode ? 'Manual Operations' : 'Automation Control'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                {manualMode 
+                  ? 'System is running in manual mode - execute operations manually' 
+                  : 'Automation is running - monitor progress'}
+              </p>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* Manual Email */}
+                <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-medium text-gray-900">Manual Email</h3>
+                  <p className="text-xs text-gray-500 mt-1">Send emails manually</p>
+                  <button className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
+                    Compose Email
+                  </button>
+                </div>
+
+                {/* Research Queue */}
+                <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-medium text-gray-900">Research Queue</h3>
+                  <p className="text-xs text-gray-500 mt-1">{manualResearchQueue.length} pending</p>
+                  <button className="mt-3 text-sm text-green-600 hover:text-green-800 font-medium">
+                    Process Research
+                  </button>
+                </div>
+
+                {/* Outreach Queue */}
+                <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-medium text-gray-900">Outreach Queue</h3>
+                  <p className="text-xs text-gray-500 mt-1">{manualOutreachQueue.length} pending</p>
+                  <button className="mt-3 text-sm text-yellow-600 hover:text-yellow-800 font-medium">
+                    Send Emails
+                  </button>
+                </div>
+
+                {/* Templates */}
+                <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-sm font-medium text-gray-900">Templates</h3>
+                  <p className="text-xs text-gray-500 mt-1">3 controlled templates</p>
+                  <button className="mt-3 text-sm text-purple-600 hover:text-purple-800 font-medium">
+                    View Templates
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Leads Table */}
+        {campaign.completed_leads.length > 0 && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-medium text-gray-900">Active Leads</h2>
+            </div>
+            <div className="overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Decision Maker</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {campaign.completed_leads.slice(0, 10).map(lead => (
+                    <tr key={lead.id}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {lead.company.name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {lead.decision_maker?.name || 'N/A'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                          lead.status === 'in_sequence' ? 'bg-green-100 text-green-800' :
+                          lead.status === 'researched' ? 'bg-blue-100 text-blue-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {lead.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        Step {lead.cadence_step}/3
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                        <button
+                          onClick={() => setSelectedLead(lead)}
+                          className="text-blue-600 hover:text-blue-900 mr-3"
+                        >
+                          View
+                        </button>
+                        <button
+                          onClick={() => composeManualEmail(lead, 'email1')}
+                          className="text-green-600 hover:text-green-900"
+                        >
+                          Email
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Manual Email Composer */}
+        {manualEmailComposer && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Compose Email: {manualEmailComposer.lead.company.name}
+                  </h3>
+                  <button
+                    onClick={() => setManualEmailComposer(null)}
+                    className="text-gray-400 hover:text-gray-500"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">To</label>
+                    <input
+                      type="text"
+                      value={manualEmailComposer.lead.decision_maker?.email || ''}
+                      readOnly
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Subject</label>
+                    <input
+                      type="text"
+                      value={manualEmailComposer.subject}
+                      readOnly
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Body</label>
+                    <textarea
+                      rows={10}
+                      value={manualEmailComposer.body}
+                      readOnly
+                      className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                    />
+                  </div>
+
+                  <div className="flex justify-end space-x-3">
+                    <button
+                      onClick={() => setManualEmailComposer(null)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                     >
-                      Check Health
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => sendManualEmail(manualEmailComposer)}
+                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                    >
+                      Send Email
                     </button>
                   </div>
                 </div>
-
-                {/* Recent Failures */}
-                {automationStatus.criticalFailures.length > 0 && (
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-medium text-gray-900">Recent System Failures</h3>
-                      <button
-                        onClick={() => HealthMonitor.clearFailures()}
-                        className="text-sm text-gray-500 hover:text-gray-700"
-                      >
-                        Clear All
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {automationStatus.criticalFailures.map((failure, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-md">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-2 h-2 bg-red-400 rounded-full"></div>
-                            <div>
-                              <p className="text-sm font-medium text-red-800">
-                                Critical failure detected: Health checks failed: {failure.type}
-                              </p>
-                              <p className="text-xs text-red-600">
-                                System switched to manual mode for safety.
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-xs text-red-600">
-                            {new Date(failure.timestamp).toLocaleString()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
