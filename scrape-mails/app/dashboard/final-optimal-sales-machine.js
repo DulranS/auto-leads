@@ -21,13 +21,13 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// ✅ AUTOMATION ENGINE CONFIGURATION
+// ✅ AUTOMATION ENGINE CONFIGURATION (Legacy support)
 const AUTOMATION_CONFIG = {
   enabled: true,
-  fallbackMode: 'manual', // manual, semi-auto, full-auto
+  fallbackMode: 'manual',
   automationInterval: 60000, // 1 minute
   batchProcessingSize: 50,
-  emailRateLimit: 100,
+  emailRateLimit: 40,
   smsRateLimit: 50,
   callRateLimit: 25,
   retryAttempts: 3,
@@ -2784,6 +2784,160 @@ export default function FinalOptimalSalesMachine() {
           </div>
         </div>
       </header>
+
+      {/* Strategic Sales Workflow Section */}
+      {user && (
+        <div className="bg-white border-b">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <h2 className="text-lg font-semibold text-gray-900">Strategic Sales Campaign</h2>
+                <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+                  manualMode ? 'bg-orange-100 text-orange-800' : 'bg-green-100 text-green-800'
+                }`}>
+                  {manualMode ? 'Manual Mode' : 'Automated Mode'}
+                </div>
+                <button
+                  onClick={() => setManualMode(!manualMode)}
+                  className="px-3 py-1 text-xs font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200"
+                >
+                  Switch to {manualMode ? 'Automated' : 'Manual'}
+                </button>
+              </div>
+              
+              <div className="flex items-center space-x-4">
+                <button
+                  onClick={startSalesCampaign}
+                  disabled={loading}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {loading ? 'Starting...' : 'Start Campaign'}
+                </button>
+                <button
+                  onClick={updateKPIs}
+                  className="px-3 py-1 text-xs font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200"
+                >
+                  Update KPIs
+                </button>
+              </div>
+            </div>
+
+            {/* ICP Definition */}
+            <div className="mt-4 bg-gray-50 rounded-lg p-4">
+              <h3 className="text-sm font-medium text-gray-900 mb-2">Ideal Customer Profile</h3>
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-xs">
+                <div>
+                  <span className="font-medium">Industry:</span> {SALES_STRATEGY.icp.industry}
+                </div>
+                <div>
+                  <span className="font-medium">Size:</span> {SALES_STRATEGY.icp.size}
+                </div>
+                <div>
+                  <span className="font-medium">Geo:</span> {SALES_STRATEGY.icp.geo}
+                </div>
+                <div>
+                  <span className="font-medium">Pain:</span> {SALES_STRATEGY.icp.pain}
+                </div>
+                <div>
+                  <span className="font-medium">Trigger:</span> {SALES_STRATEGY.icp.trigger}
+                </div>
+              </div>
+            </div>
+
+            {/* Sales Pipeline */}
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-6 gap-4">
+              <div className="bg-blue-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-blue-900">{salesPipeline.qualified_leads.length}</div>
+                <div className="text-xs text-blue-700">Qualified Leads</div>
+              </div>
+              <div className="bg-yellow-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-yellow-900">{salesPipeline.research_queue.length}</div>
+                <div className="text-xs text-yellow-700">Research Queue</div>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-purple-900">{salesPipeline.outreach_queue.length}</div>
+                <div className="text-xs text-purple-700">Outreach Queue</div>
+              </div>
+              <div className="bg-indigo-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-indigo-900">{salesPipeline.follow_up_queue.length}</div>
+                <div className="text-xs text-indigo-700">Follow-up Queue</div>
+              </div>
+              <div className="bg-green-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-green-900">{salesPipeline.completed.length}</div>
+                <div className="text-xs text-green-700">Completed</div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <div className="text-2xl font-bold text-gray-900">{dailySendCount}</div>
+                <div className="text-xs text-gray-700">Daily Sends</div>
+              </div>
+            </div>
+
+            {/* KPI Dashboard */}
+            <div className="mt-4 bg-gray-50 rounded-lg p-4">
+              <h3 className="text-sm font-medium text-gray-900 mb-3">Key Performance Indicators</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{kpis.reply_rate}%</div>
+                  <div className="text-xs text-gray-600">Reply Rate</div>
+                  <div className="text-xs text-gray-500">Target: 15%+</div>
+                </div>
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{kpis.meeting_rate}%</div>
+                  <div className="text-xs text-gray-600">Meeting Rate</div>
+                  <div className="text-xs text-gray-500">Target: 5%+</div>
+                </div>
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{kpis.bounce_rate}%</div>
+                  <div className="text-xs text-gray-600">Bounce Rate</div>
+                  <div className={`text-xs ${kpis.bounce_rate > 5 ? 'text-red-500' : 'text-gray-500'}`}>
+                    {kpis.bounce_rate > 5 ? '⚠️ Above 5%' : 'Target: <5%'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">{kpis.unsubscribe_rate}%</div>
+                  <div className="text-xs text-gray-600">Unsubscribe Rate</div>
+                  <div className={`text-xs ${kpis.unsubscribe_rate > 1 ? 'text-red-500' : 'text-gray-500'}`}>
+                    {kpis.unsubscribe_rate > 1 ? '⚠️ Above 1%' : 'Target: <1%'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Manual Workflow Controls (shown when in manual mode) */}
+            {manualMode && (
+              <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-orange-900 mb-2">Manual Workflow Controls</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <button
+                    onClick={() => processResearchQueue()}
+                    className="px-3 py-2 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700"
+                  >
+                    Process Research Queue
+                  </button>
+                  <button
+                    onClick={() => processOutreachQueue()}
+                    className="px-3 py-2 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700"
+                  >
+                    Process Outreach Queue
+                  </button>
+                  <button
+                    onClick={() => setManualEmailComposer({})}
+                    className="px-3 py-2 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700"
+                  >
+                    Compose Manual Email
+                  </button>
+                  <button
+                    onClick={() => setManualResearch({})}
+                    className="px-3 py-2 bg-orange-600 text-white text-sm rounded-md hover:bg-orange-700"
+                  >
+                    Manual Research
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
