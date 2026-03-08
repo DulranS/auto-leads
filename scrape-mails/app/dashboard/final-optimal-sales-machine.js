@@ -74,7 +74,7 @@ Best,
     subject: 'Closing the loop',
     body: `Hi {{name}},
 
-I'll stop reaching out after this - but wanted to share one final thought:
+I'll stop reaching out after this one - but wanted to share one final thought:
 
 {{personalized_insight}}
 
@@ -116,7 +116,7 @@ const AUTO_EXIT_RULES = {
   not_interested: true
 };
 
-// ===== CORE BUSINESS ENGINE =====
+// ===== ENTERPRISE BUSINESS ENGINE =====
 class SalesAutomationEngine {
   constructor() {
     this.isHealthy = true;
@@ -130,6 +130,8 @@ class SalesAutomationEngine {
       email2: { sent: 0, replies: 0, meetings: 0 },
       breakup: { sent: 0, replies: 0, meetings: 0 }
     };
+    this.manualMode = false;
+    this.automationPaused = false;
   }
 
   // Lead qualification based on ICP
@@ -503,6 +505,24 @@ class SalesAutomationEngine {
       };
     });
     return metrics;
+  }
+
+  // Manual mode toggle
+  setManualMode(enabled) {
+    this.manualMode = enabled;
+    if (enabled) {
+      this.automationPaused = true;
+    }
+  }
+
+  // Pause automation
+  pauseAutomation() {
+    this.automationPaused = true;
+  }
+
+  // Resume automation
+  resumeAutomation() {
+    this.automationPaused = false;
   }
 }
 
