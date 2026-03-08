@@ -47,19 +47,19 @@
 
 import dynamic from 'next/dynamic';
 
-const FinalOptimalSalesMachine = dynamic(() => import('./final-optimal-sales-machine'), {
+const CleanSalesAutomation = dynamic(() => import('./clean-sales-automation'), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
       <div className="text-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
-        <p>Loading Final Optimal Sales Machine...</p>
-        <p className="text-sm text-gray-400 mt-2">Best of Both Worlds: Complete Manual Control + Strategic AI</p>
+        <p>Loading Sales Automation System...</p>
+        <p className="text-sm text-gray-400 mt-2">Clean & Reliable Performance</p>
       </div>
     </div>
   )
 });
 
 export default function Home() {
-  return <FinalOptimalSalesMachine />;
+  return <CleanSalesAutomation />;
 }
