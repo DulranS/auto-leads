@@ -21,6 +21,90 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+// ✅ HEALTH CHECK & TOKEN MANAGEMENT SYSTEM
+const HealthMonitor = {
+  lastHealthCheck: null,
+  isHealthy: true,
+  failures: [],
+  
+  // Check Google token validity
+  async checkGoogleToken() {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        throw new Error('No authenticated user');
+      }
+      
+      // Force token refresh to check validity
+      const token = await user.getIdToken(true);
+      if (!token) {
+        throw new Error('Failed to get token');
+      }
+      
+      return { valid: true, token, user: user.email };
+    } catch (error) {
+      console.error('Google token check failed:', error);
+      return { valid: false, error: error.message };
+    }
+  },
+
+  // Comprehensive health check
+  async runHealthCheck() {
+    const checks = {
+      timestamp: new Date(),
+      googleToken: null,
+      firestore: null,
+      overall: null
+    };
+
+    // Check Google token
+    const tokenCheck = await this.checkGoogleToken();
+    checks.googleToken = {
+      status: tokenCheck.valid ? 'healthy' : 'failed',
+      error: tokenCheck.error,
+      lastChecked: new Date()
+    };
+
+    // Check Firestore connectivity
+    try {
+      const testDoc = doc(db, 'health', 'check');
+      await setDoc(testDoc, { timestamp: serverTimestamp() });
+      checks.firestore = { status: 'healthy', lastChecked: new Date() };
+    } catch (error) {
+      checks.firestore = { status: 'failed', error: error.message, lastChecked: new Date() };
+    }
+
+    // Overall health
+    checks.overall = {
+      status: (checks.googleToken.status === 'healthy' && checks.firestore.status === 'healthy') ? 'healthy' : 'failed',
+      critical: checks.googleToken.status === 'failed'
+    };
+
+    this.lastHealthCheck = checks;
+    this.isHealthy = checks.overall.status === 'healthy';
+
+    if (!this.isHealthy) {
+      this.failures.push({
+        timestamp: new Date(),
+        type: checks.googleToken.status === 'failed' ? 'googleToken' : 'firestore',
+        error: checks.googleToken.error || checks.firestore.error
+      });
+    }
+
+    return checks;
+  },
+
+  // Get recent failures
+  getRecentFailures(count = 5) {
+    return this.failures.slice(-count);
+  },
+
+  // Clear failures
+  clearFailures() {
+    this.failures = [];
+  }
+};
+
 // ✅ AUTOMATION ENGINE CONFIGURATION (Legacy support)
 const AUTOMATION_CONFIG = {
   enabled: true,
@@ -565,6 +649,16 @@ export default function FinalOptimalSalesMachine() {
   const [manualEmailComposer, setManualEmailComposer] = useState(null);
   const [cadenceTracker, setCadenceTracker] = useState({});
 
+  // ✅ HEALTH & AUTOMATION STATE
+  const [automationStatus, setAutomationStatus] = useState({
+    enabled: true,
+    healthStatus: 'unknown',
+    lastHealthCheck: null,
+    criticalFailures: [],
+    manualMode: false
+  });
+  const [healthCheckInterval, setHealthCheckInterval] = useState(null);
+
   // ✅ GENERAL STATE
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -620,6 +714,107 @@ export default function FinalOptimalSalesMachine() {
     } catch (err) {
       console.error('Sign out error:', err);
       addNotification('error', 'Failed to sign out');
+    }
+  };
+
+  // ✅ HEALTH MONITORING & AUTOMATION CONTROL
+  const performHealthCheck = useCallback(async () => {
+    try {
+      const healthResults = await HealthMonitor.runHealthCheck();
+      
+      setAutomationStatus(prev => ({
+        ...prev,
+        healthStatus: healthResults.overall.status,
+        lastHealthCheck: healthResults.timestamp,
+        criticalFailures: HealthMonitor.getRecentFailures(),
+        manualMode: healthResults.overall.critical || prev.manualMode
+      }));
+
+      // If critical failure, switch to manual mode
+      if (healthResults.overall.critical) {
+        setManualMode(true);
+        addNotification('error', `Critical failure detected: ${healthResults.googleToken.error}. System switched to manual mode for safety.`);
+      }
+
+      return healthResults;
+    } catch (error) {
+      console.error('Health check failed:', error);
+      addNotification('error', 'Health check system failure');
+      return null;
+    }
+  }, []);
+
+  // Start health monitoring
+  const startHealthMonitoring = useCallback(() => {
+    // Clear existing interval
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+    }
+
+    // Run initial health check
+    performHealthCheck();
+
+    // Set up recurring health checks (every 2 minutes)
+    const interval = setInterval(performHealthCheck, 120000);
+    setHealthCheckInterval(interval);
+  }, [healthCheckInterval, performHealthCheck]);
+
+  // Stop health monitoring
+  const stopHealthMonitoring = useCallback(() => {
+    if (healthCheckInterval) {
+      clearInterval(healthCheckInterval);
+      setHealthCheckInterval(null);
+    }
+  }, [healthCheckInterval]);
+
+  // Manual re-enable automation
+  const reenableAutomation = async () => {
+    try {
+      setLoading(true);
+      addNotification('info', 'Attempting to re-enable automation...');
+      
+      // Force fresh authentication
+      const healthResults = await performHealthCheck();
+      
+      if (healthResults && healthResults.overall.status === 'healthy') {
+        setManualMode(false);
+        setAutomationStatus(prev => ({
+          ...prev,
+          enabled: true,
+          manualMode: false
+        }));
+        HealthMonitor.clearFailures();
+        addNotification('success', 'Automation re-enabled successfully!');
+      } else {
+        addNotification('error', 'Cannot re-enable automation: Health checks still failing');
+      }
+    } catch (error) {
+      console.error('Failed to re-enable automation:', error);
+      addNotification('error', 'Failed to re-enable automation: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Manual token refresh
+  const refreshGoogleToken = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        addNotification('error', 'No authenticated user found');
+        return false;
+      }
+
+      await user.getIdToken(true);
+      addNotification('success', 'Google token refreshed successfully');
+      
+      // Re-run health check
+      await performHealthCheck();
+      return true;
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      addNotification('error', 'Token refresh failed: ' + error.message);
+      return false;
     }
   };
 
@@ -1163,10 +1358,23 @@ export default function FinalOptimalSalesMachine() {
       setLoadingAuth(false);
       if (user) {
         loadContacts();
+        startHealthMonitoring(); // Start health monitoring when user signs in
+      } else {
+        stopHealthMonitoring(); // Stop health monitoring when user signs out
       }
     });
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      stopHealthMonitoring(); // Cleanup on unmount
+    };
   }, []);
+
+  // Update manual mode when automation status changes
+  useEffect(() => {
+    if (automationStatus.manualMode && !manualMode) {
+      setManualMode(true);
+    }
+  }, [automationStatus.manualMode, manualMode]);
 
   // ✅ RENDER
   return (
@@ -1184,6 +1392,22 @@ export default function FinalOptimalSalesMachine() {
               <h1 className="text-2xl font-bold text-gray-900">Strategic Sales Machine</h1>
             </div>
             <div className="flex items-center space-x-4">
+              {/* Health Status Indicator */}
+              {user && (
+                <div className="flex items-center space-x-2">
+                  <div className={`w-3 h-3 rounded-full ${
+                    automationStatus.healthStatus === 'healthy' ? 'bg-green-500' :
+                    automationStatus.healthStatus === 'failed' ? 'bg-red-500' :
+                    'bg-yellow-500'
+                  }`} />
+                  <span className="text-xs text-gray-600">
+                    {automationStatus.healthStatus === 'healthy' ? 'System Online' :
+                     automationStatus.healthStatus === 'failed' ? 'System Offline' :
+                     'Checking...'}
+                  </span>
+                </div>
+              )}
+              
               {user ? (
                 <>
                   <div className="text-sm text-gray-600">
@@ -1234,6 +1458,161 @@ export default function FinalOptimalSalesMachine() {
                 </p>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Automation Status & Control Panel */}
+        {user && (
+          <div className="mb-8">
+            {/* Critical Alert Banner */}
+            {automationStatus.healthStatus === 'failed' && (
+              <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                    </svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">Automation System Offline</h3>
+                    <div className="mt-2 text-sm text-red-700">
+                      <p>⚠️ Automation has been disabled due to system issues.</p>
+                      <p className="mt-1">All manual operations remain fully functional.</p>
+                    </div>
+                    <div className="mt-4">
+                      <div className="flex space-x-3">
+                        <button
+                          onClick={reenableAutomation}
+                          disabled={loading}
+                          className="bg-red-100 text-red-800 px-4 py-2 rounded-md text-sm font-medium hover:bg-red-200 disabled:opacity-50"
+                        >
+                          Re-enable Automation
+                        </button>
+                        <button
+                          onClick={refreshGoogleToken}
+                          disabled={loading}
+                          className="bg-white text-red-800 px-4 py-2 rounded-md text-sm font-medium border border-red-300 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Refresh Token
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Manual Operations Panel */}
+            <div className="bg-white rounded-lg shadow">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-medium text-gray-900">
+                  {automationStatus.manualMode ? 'Manual Operations' : 'Automation Control'}
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {automationStatus.manualMode 
+                    ? 'System is running in manual mode due to health issues' 
+                    : 'All systems operational - automation is running'}
+                </p>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* Manual Email */}
+                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-medium text-gray-900">Manual Email</h3>
+                    <p className="text-xs text-gray-500 mt-1">Send emails manually when automation is down</p>
+                    <button className="mt-3 text-sm text-blue-600 hover:text-blue-800 font-medium">
+                      Compose Email
+                    </button>
+                  </div>
+
+                  {/* Manual SMS */}
+                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                    <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14l2-2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-medium text-gray-900">Manual SMS</h3>
+                    <p className="text-xs text-gray-500 mt-1">Send SMS messages manually</p>
+                    <button className="mt-3 text-sm text-green-600 hover:text-green-800 font-medium">
+                      Send SMS
+                    </button>
+                  </div>
+
+                  {/* Status Update */}
+                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                    <div className="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-medium text-gray-900">Status Update</h3>
+                    <p className="text-xs text-gray-500 mt-1">Manually update contact status</p>
+                    <button className="mt-3 text-sm text-yellow-600 hover:text-yellow-800 font-medium">
+                      Update Status
+                    </button>
+                  </div>
+
+                  {/* System Control */}
+                  <div className="text-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+                    <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </div>
+                    <h3 className="text-sm font-medium text-gray-900">System Control</h3>
+                    <p className="text-xs text-gray-500 mt-1">Manage system settings</p>
+                    <button 
+                      onClick={performHealthCheck}
+                      className="mt-3 text-sm text-purple-600 hover:text-purple-800 font-medium"
+                    >
+                      Check Health
+                    </button>
+                  </div>
+                </div>
+
+                {/* Recent Failures */}
+                {automationStatus.criticalFailures.length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-gray-200">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-medium text-gray-900">Recent System Failures</h3>
+                      <button
+                        onClick={() => HealthMonitor.clearFailures()}
+                        className="text-sm text-gray-500 hover:text-gray-700"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {automationStatus.criticalFailures.map((failure, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 bg-red-50 rounded-md">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                            <div>
+                              <p className="text-sm font-medium text-red-800">
+                                Critical failure detected: Health checks failed: {failure.type}
+                              </p>
+                              <p className="text-xs text-red-600">
+                                System switched to manual mode for safety.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-xs text-red-600">
+                            {new Date(failure.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </main>
