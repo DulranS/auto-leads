@@ -1641,8 +1641,8 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
-  // Manual email composition
-  const composeManualEmail = (lead, templateType) => {
+  // Manual email composition (legacy function - will be replaced)
+  const composeManualEmailLegacy = (lead, templateType) => {
     const template = SALES_TEMPLATES[templateType];
     if (!template) {
       addNotification('error', 'Template not found');
@@ -1738,6 +1738,7 @@ export default function FinalOptimalSalesMachine() {
         status: 'in_sequence'
       };
       
+      // Update local state
       setCampaign(prev => ({
         ...prev,
         in_sequence_leads: prev.in_sequence_leads.map(l => 
@@ -1746,14 +1747,40 @@ export default function FinalOptimalSalesMachine() {
       }));
       
     } catch (err) {
+      console.error('Failed to process cadence step:', err);
+      addNotification('error', 'Failed to send email');
+    }
+  };
+
+  // Move lead to nurture function with proper error handling
+  const moveToNurture = useCallback(async (leadId) => {
+    if (!user?.uid) {
+      addNotification('error', 'Please sign in to move leads to nurture');
+      return;
+    }
+    
+    try {
+      const lead = campaign.in_sequence_leads.find(l => l.id === leadId);
+      if (!lead) {
+        addNotification('error', 'Lead not found');
         return;
       }
 
+      // Update lead status in Firestore
+      const leadRef = doc(db, 'users', user.uid, 'contacts', leadId);
+      await updateDoc(leadRef, {
+        status: 'nurtured',
+        moved_to_nurture: serverTimestamp(),
+        nurture_scheduled: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        lastUpdated: serverTimestamp()
+      });
+
+      // Update local state
       const nurturedLead = {
         ...lead,
         status: 'nurtured',
         moved_to_nurture: new Date(),
-        nurture_scheduled: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+        nurture_scheduled: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       };
 
       setCampaign(prev => ({
@@ -1768,7 +1795,29 @@ export default function FinalOptimalSalesMachine() {
       console.error('Failed to move to nurture:', err);
       addNotification('error', 'Failed to move to nurture');
     }
-  };
+  }, [user, campaign.in_sequence_leads, addNotification]);
+
+  // Enhanced Firebase error handling with retry logic
+  const safeFirebaseOperation = useCallback(async (operation, retryCount = 3) => {
+    for (let i = 0; i < retryCount; i++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (error.code === 'unavailable' && i < retryCount - 1) {
+          console.warn(`Firebase operation failed, retrying (${i + 1}/${retryCount}):`, error);
+          await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+        } else if (error.code === 'permission-denied' || error.message?.includes('uid')) {
+          console.error('Authentication error:', error);
+          addNotification('error', 'Please sign in to perform this action');
+          throw error;
+        } else {
+          console.error('Firebase operation failed:', error);
+          addNotification('error', `Operation failed: ${error.message}`);
+          throw error;
+        }
+      }
+    }
+  }, [addNotification]);
 
   // Compose manual email function
   const composeManualEmail = useCallback((lead, templateType) => {
@@ -1880,16 +1929,40 @@ export default function FinalOptimalSalesMachine() {
     }
   }, []);
   
-  // Add error boundary for network requests
+  // Enhanced error handling for network requests and browser extensions
   useEffect(() => {
+    // Handle abort errors gracefully
     const handleAbortError = (event) => {
-      console.warn('Request aborted:', event);
+      console.warn('Request aborted gracefully:', event);
+    };
+    
+    // Handle unhandled promise rejections
+    const handleUnhandledRejection = (event) => {
+      console.error('Unhandled promise rejection:', event.reason);
+      if (event.reason?.message?.includes('AbortError')) {
+        console.warn('Ignoring AbortError from browser extension conflict');
+        event.preventDefault();
+      }
+    };
+    
+    // Handle extension conflicts
+    const handleExtensionError = (event) => {
+      if (event.message?.includes('TronWeb') || 
+          event.message?.includes('bybit') || 
+          event.message?.includes('ethereum')) {
+        console.warn('Browser extension conflict detected and ignored');
+        return;
+      }
     };
     
     window.addEventListener('abort', handleAbortError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    window.addEventListener('error', handleExtensionError);
     
     return () => {
       window.removeEventListener('abort', handleAbortError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+      window.removeEventListener('error', handleExtensionError);
     };
   }, []);
 
