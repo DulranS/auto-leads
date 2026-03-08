@@ -2,17 +2,94 @@
 
 // Global error handling for React loading issues
 if (typeof window !== 'undefined') {
+  // Prevent infinite reload loops
+  let reloadCount = parseInt(sessionStorage.getItem('reactReloadCount') || '0');
+  let lastReloadTime = parseInt(sessionStorage.getItem('lastReloadTime') || '0');
+  const now = Date.now();
+  
+  // Reset count if it's been more than 30 seconds
+  if (now - lastReloadTime > 30000) {
+    reloadCount = 0;
+  }
+  
   window.addEventListener('error', (event) => {
     // Handle React not defined errors
     if (event.message?.includes('React is not defined') ||
         event.message?.includes('ReferenceError: React is not defined')) {
-      console.warn('React loading error detected, will retry...');
+      
+      // Prevent infinite reload loops
+      if (reloadCount >= 2) {
+        console.error('Too many reload attempts, stopping to prevent infinite loop');
+        sessionStorage.setItem('reactReloadCount', '999'); // Lock further reloads
+        
+        // Show a static error message instead of reloading
+        document.body.innerHTML = `
+          <div style="
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #111827;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: system-ui;
+            z-index: 999999;
+          ">
+            <div style="
+              background: #1f2937;
+              padding: 2rem;
+              border-radius: 1rem;
+              border: 1px solid #374151;
+              max-width: 500px;
+              text-align: center;
+            ">
+              <h1 style="color: #f59e0b; margin-bottom: 1rem;">Application Loading Issue</h1>
+              <p style="margin-bottom: 1.5rem; line-height: 1.6;">
+                The application is having trouble loading due to browser extensions or network issues.
+                Please try disabling browser extensions and refreshing manually.
+              </p>
+              <button onclick="window.location.reload()" style="
+                background: #3b82f6;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 0.5rem;
+                cursor: pointer;
+                font-size: 1rem;
+              ">
+                Try Again
+              </button>
+              <button onclick="sessionStorage.clear(); window.location.reload()" style="
+                background: #6b7280;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 0.5rem;
+                cursor: pointer;
+                font-size: 1rem;
+                margin-left: 0.5rem;
+              ">
+                Clear Cache & Reload
+              </button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+      
+      console.warn('React loading error detected, will retry...', `Attempt ${reloadCount + 1}`);
       event.preventDefault();
       
       // Try to reload the page after a short delay
       setTimeout(() => {
-        if (window.location && !window.reactLoaded) {
-          console.log('Reloading due to React loading failure...');
+        if (window.location && reloadCount < 2) {
+          reloadCount++;
+          sessionStorage.setItem('reactReloadCount', reloadCount.toString());
+          sessionStorage.setItem('lastReloadTime', now.toString());
+          console.log(`Reloading due to React loading failure... Attempt ${reloadCount}`);
           window.location.reload();
         }
       }, 2000);
@@ -1072,11 +1149,16 @@ class SalesAutomationEngine {
 const automationEngine = new SalesAutomationEngine();
 
 function FinalOptimalSalesMachine() {
-  // Mark React as successfully loaded
+  // Clear reload locks on successful mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      // Clear reload counters on successful component mount
+      sessionStorage.removeItem('reactReloadCount');
+      sessionStorage.removeItem('componentReloadCount');
+      sessionStorage.removeItem('lastReloadTime');
+      
       window.reactLoaded = true;
-      console.log('React component successfully mounted');
+      console.log('React component successfully mounted, reload locks cleared');
     }
   }, []);
   
@@ -3106,7 +3188,17 @@ class ErrorBoundary extends React.Component {
     // Handle React not defined errors specifically
     if (error.message?.includes('React is not defined') ||
         error.message?.includes('ReferenceError: React is not defined')) {
+      
+      // Prevent infinite reload loops in component boundary
+      const reloadCount = parseInt(sessionStorage.getItem('componentReloadCount') || '0');
+      if (reloadCount >= 1) {
+        console.error('Component boundary: Too many reload attempts, stopping to prevent infinite loop');
+        sessionStorage.setItem('componentReloadCount', '999'); // Lock further reloads
+        return;
+      }
+      
       console.error('React loading error in component, attempting reload...');
+      sessionStorage.setItem('componentReloadCount', (reloadCount + 1).toString());
       setTimeout(() => {
         window.location.reload();
       }, 1000);
