@@ -489,14 +489,11 @@ export default function StrategicSalesSystem() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   
-  // Campaign state
-  const [campaignManager] = useState(() => new CampaignManager());
-  const [businessIntelligence] = useState(() => new BusinessIntelligence());
+  // Campaign state - Initialize instances directly
+  const campaignManager = new CampaignManager();
+  const businessIntelligence = new BusinessIntelligence();
   const [campaignStatus, setCampaignStatus] = useState('idle');
   const [dailyStats, setDailyStats] = useState({});
-  
-  const biInstance = businessIntelligence[0]; // Get the actual instance from state array
-  const cmInstance = campaignManager[0]; // Get the actual campaign manager instance
   
   // Notification system
   const addNotification = useCallback((message, type = 'info') => {
@@ -706,6 +703,13 @@ export default function StrategicSalesSystem() {
     if (!user || !db) return;
     
     try {
+      // Check if campaign should be paused due to safety rules
+      if (campaignManager?.shouldPauseCampaign?.()) {
+        addNotification('🚫 Campaign paused due to high bounce or unsubscribe rate. Fix email list quality before resuming.', 'error');
+        setCampaignStatus('paused');
+        return;
+      }
+      
       setCampaignStatus('running');
       addNotification('🚀 Starting strategic outreach campaign...', 'info');
       
@@ -743,11 +747,13 @@ export default function StrategicSalesSystem() {
         try {
           // Send Email 1
           const template = CONTROLLED_TEMPLATES.email1;
-          await cmInstance.sendEmail(
-            target, 
-            template, 
-            { senderName: user.displayName || 'Dulran Samarasinghe' }
-          );
+          if (campaignManager?.sendEmail) {
+            await campaignManager.sendEmail(
+              target, 
+              template, 
+              { senderName: user.displayName || 'Dulran Samarasinghe' }
+            );
+          }
           
           // Update target status
           await updateTargetStatus(target.id, 'contacted', 'Email 1 sent + LinkedIn connection attempted');
@@ -763,21 +769,27 @@ export default function StrategicSalesSystem() {
           
           // Handle bounce
           if (error.message.includes('bounce')) {
-            cmInstance.recordBounce();
+            if (campaignManager?.recordBounce) {
+              campaignManager.recordBounce();
+            }
             await updateTargetStatus(target.id, 'bounced', 'Email bounced');
           }
         }
       }
       
       // Update campaign stats
-      setDailyStats(cmInstance.getDailyStats());
-      biInstance.updateKPIs(sentCount, 0, 0, errorCount, 0);
+      if (campaignManager?.getDailyStats) {
+        setDailyStats(campaignManager.getDailyStats());
+      }
+      if (businessIntelligence?.updateKPIs) {
+        businessIntelligence.updateKPIs(sentCount, 0, 0, errorCount, 0);
+      }
       
       // Update campaign in Firestore
       await updateDoc(campaignRef, {
         status: 'completed',
-        'stats.sent': cmInstance.stats.sent + sentCount,
-        'stats.bounces': cmInstance.stats.bounces + errorCount,
+        'stats.sent': (campaignManager?.stats?.sent || 0) + sentCount,
+        'stats.bounces': (campaignManager?.stats?.bounces || 0) + errorCount,
         lastExecuted: serverTimestamp()
       });
       
@@ -867,11 +879,15 @@ export default function StrategicSalesSystem() {
   // Update daily stats
   useEffect(() => {
     const interval = setInterval(() => {
-      setDailyStats(cmInstance.getDailyStats());
+      try {
+        setDailyStats(campaignManager?.getDailyStats?.() || {});
+      } catch (error) {
+        console.error('Error updating daily stats:', error);
+      }
     }, 30000); // Update every 30 seconds
     
     return () => clearInterval(interval);
-  }, [cmInstance]);
+  }, [campaignManager]);
   
   // Loading state
   if (loading) {
@@ -910,7 +926,16 @@ export default function StrategicSalesSystem() {
     );
   }
   
-  const kpiData = biInstance.getKPIs();
+  const kpiData = businessIntelligence?.getKPIs?.() || {
+    replyRate: 0,
+    meetingRate: 0,
+    bounceRate: 0,
+    healthScore: 0,
+    totalSent: 0,
+    totalReplies: 0,
+    totalMeetings: 0,
+    totalBounces: 0
+  };
   
   return (
     <>
@@ -1235,7 +1260,7 @@ export default function StrategicSalesSystem() {
                 <div>
                   <h3 className="text-lg font-semibold text-white mb-3">🤖 AI Insights & Recommendations</h3>
                   <div className="space-y-3">
-                    {biInstance.getInsights().map((insight, index) => (
+                    {(businessIntelligence?.getInsights?.() || []).map((insight, index) => (
                       <div key={index} className={`p-4 rounded-lg border-l-4 ${
                         insight.type === 'success' ? 'bg-green-900/20 border-green-600' :
                         insight.type === 'warning' ? 'bg-yellow-900/20 border-yellow-600' :
