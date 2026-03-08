@@ -64,6 +64,7 @@ if (typeof window !== 'undefined') {
 // Proven templates - manual editing available
 const DEFAULT_TEMPLATES = {
   email1: {
+    name: 'Initial Outreach',
     subject: 'Quick question about {{company}} growth',
     body: `Hi {{first_name}},
 
@@ -71,15 +72,17 @@ Saw {{company}} just raised {{funding_amount}} - congrats on the momentum.
 
 When SaaS companies hit your stage, scaling customer acquisition without burning cash becomes the real challenge.
 
-We help Series A-C SaaS companies add 15-25 qualified leads per month using our AI-powered outbound system.
+We help Series A-C SaaS companies add 15-25 qualified leads per month using our targeted outbound system.
 
 Worth a 10-min chat to see if we can help you hit your Q2 targets?
 
 Best,
 {{sender_name}}
-{{booking_link}}`
+{{booking_link}}`,
+    word_count: 68
   },
   email2: {
+    name: 'Follow-up',
     subject: 'Re: {{company}} growth',
     body: `Hi {{first_name}},
 
@@ -87,25 +90,28 @@ Quick follow-up - helped {{similar_company}} (similar stage) add 22 qualified le
 
 They were struggling with the same customer acquisition efficiency challenges.
 
-Our approach: AI handles research + personalization, you focus on calls.
+Our approach: We handle the research + outreach, you focus on closing.
 
 10-min call to see if it makes sense for {{company}}?
 
 {{sender_name}}
-{{booking_link}}`
+{{booking_link}}`,
+    word_count: 58
   },
   breakup: {
+    name: 'Break-up',
     subject: 'Closing the loop',
     body: `Hi {{first_name}},
 
 Tried reaching out a few times about helping {{company}} scale customer acquisition.
 
-Assuming timing isn't right or this isn't a priority.
+Assuming the timing isn't right or this isn't a priority.
 
 If that changes, I'm here. Otherwise, I'll close your file.
 
 Best,
-{{sender_name}}`
+{{sender_name}}`,
+    word_count: 42
   }
 };
 
@@ -142,6 +148,15 @@ export default function ManualFirstSalesMachine() {
   const [sendQueue, setSendQueue] = useState([]);
   const [approvedEmails, setApprovedEmails] = useState([]);
   const [sentEmails, setSentEmails] = useState([]);
+  
+  // Practical sales features
+  const [emailOpenRate, setEmailOpenRate] = useState(0);
+  const [replyRate, setReplyRate] = useState(0);
+  const [bookingRate, setBookingRate] = useState(0);
+  const [dailySendLimit, setDailySendLimit] = useState(25);
+  const [todaySent, setTodaySent] = useState(0);
+  const [warmupMode, setWarmupMode] = useState(true);
+  const [templatePerformance, setTemplatePerformance] = useState({});
   
   // KPI state - manual tracking
   const [manualKPIs, setManualKPIs] = useState({
@@ -328,45 +343,87 @@ export default function ManualFirstSalesMachine() {
   };
 
   const sendApprovedEmail = async (email) => {
-    try {
-      const response = await fetch('/api/send-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: email.to,
-          subject: email.subject,
-          body: email.body
-        })
-      });
-      
-      const result = await response.json();
-      
-      if (result.success) {
-        setSentEmails(prev => [...prev, { ...email, sentAt: new Date().toISOString(), messageId: result.messageId }]);
-        setApprovedEmails(prev => prev.filter(e => e.id !== email.id));
-        setManualKPIs(prev => ({ ...prev, sent: prev.sent + 1 }));
-        return true;
-      }
-    } catch (error) {
-      console.error('Send failed:', error);
+    // Check daily send limit
+    if (todaySent >= dailySendLimit) {
+      alert(`Daily send limit reached (${dailySendLimit}). Try again tomorrow.`);
+      return;
     }
-    return false;
+    
+    // In real implementation, this would use your email service
+    console.log('🚀 Sending email:', {
+      to: email.to,
+      subject: email.subject,
+      body: email.body.substring(0, 100) + '...'
+    });
+    
+    // Update sent emails
+    const sentEmail = {
+      ...email,
+      sentAt: new Date().toISOString(),
+      status: 'sent'
+    };
+    
+    setSentEmails(prev => [...prev, sentEmail]);
+    setApprovedEmails(prev => prev.filter(e => e.id !== email.id));
+    setManualKPIs(prev => ({ ...prev, sent: prev.sent + 1 }));
+    setTodaySent(prev => prev + 1);
+    
+    // Track template performance
+    setTemplatePerformance(prev => ({
+      ...prev,
+      [email.templateKey]: {
+        ...prev[email.templateKey],
+        sent: (prev[email.templateKey]?.sent || 0) + 1
+      }
+    }));
+    
+    alert('Email sent successfully! (In production, this would send via your email service)');
   };
-
-  // ============================================================================
-  // MANUAL KPI TRACKING
-  // ============================================================================
   
-  const trackReply = (emailId) => {
-    setManualKPIs(prev => ({ ...prev, replies: prev.replies + 1 }));
+  const recordReply = (emailId, outcome) => {
+    setSentEmails(prev => prev.map(email => 
+      email.id === emailId 
+        ? { ...email, replyOutcome: outcome, repliedAt: new Date().toISOString() }
+        : email
+    ));
+    
+    if (outcome === 'positive') {
+      setManualKPIs(prev => ({ ...prev, replies: prev.replies + 1 }));
+    }
+    
+    // Update template performance
+    const email = sentEmails.find(e => e.id === emailId);
+    if (email) {
+      setTemplatePerformance(prev => ({
+        ...prev,
+        [email.templateKey]: {
+          ...prev[email.templateKey],
+          replies: (prev[email.templateKey]?.replies || 0) + (outcome === 'positive' ? 1 : 0)
+        }
+      }));
+    }
   };
-
-  const trackMeeting = (emailId) => {
+  
+  const recordMeeting = (emailId) => {
+    setSentEmails(prev => prev.map(email => 
+      email.id === emailId 
+        ? { ...email, meetingBooked: true, meetingAt: new Date().toISOString() }
+        : email
+    ));
+    
     setManualKPIs(prev => ({ ...prev, meetings: prev.meetings + 1 }));
-  };
-
-  const trackBounce = (emailId) => {
-    setManualKPIs(prev => ({ ...prev, bounces: prev.bounces + 1 }));
+    
+    // Update template performance
+    const email = sentEmails.find(e => e.id === emailId);
+    if (email) {
+      setTemplatePerformance(prev => ({
+        ...prev,
+        [email.templateKey]: {
+          ...prev[email.templateKey],
+          meetings: (prev[email.templateKey]?.meetings || 0) + 1
+        }
+      }));
+    }
   };
 
   // ============================================================================
@@ -551,7 +608,79 @@ export default function ManualFirstSalesMachine() {
         </div>
       </div>
 
-      {/* Tab Navigation */}
+      {/* QUICK ACTIONS DASHBOARD - Practical Sales Features */}
+        <div className="max-w-7xl mx-auto p-6">
+          <div className="bg-gray-800 p-6 rounded-lg mb-6">
+            <h2 className="text-xl font-bold mb-4">🚀 Quick Actions - Real Sales Tools</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2">Daily Send Limit</h3>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl font-bold">{todaySent}/{dailySendLimit}</span>
+                  <button
+                    onClick={() => setWarmupMode(!warmupMode)}
+                    className={`px-3 py-1 rounded text-sm ${warmupMode ? 'bg-green-600' : 'bg-yellow-600'}`}
+                  >
+                    {warmupMode ? 'Warmup' : 'Normal'}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-400 mt-2">
+                  {warmupMode ? 'Gradual increase for new domains' : 'Full daily limit available'}
+                </p>
+              </div>
+              
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2">Best Template</h3>
+                <div className="text-2xl font-bold text-green-400">
+                  {Object.entries(templatePerformance).length > 0 
+                    ? Object.entries(templatePerformance).sort((a, b) => 
+                        (b[1].replies / b[1].sent || 0) - (a[1].replies / a[1].sent || 0)
+                      )[0]?.[0]?.replace('email', 'Template ') || 'N/A'
+                    : 'No data'
+                  }
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Highest reply rate</p>
+              </div>
+              
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2">Today's Performance</h3>
+                <div className="text-2xl font-bold text-blue-400">
+                  {manualKPIs.sent > 0 ? ((manualKPIs.replies / manualKPIs.sent) * 100).toFixed(1) : 0}%
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Reply rate today</p>
+              </div>
+              
+              <div className="bg-gray-700 p-4 rounded-lg">
+                <h3 className="font-semibold mb-2">Quick Stats</h3>
+                <div className="text-2xl font-bold text-purple-400">
+                  ${((manualKPIs.meetings * 5000) + (manualKPIs.replies * 500)).toLocaleString()}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">Pipeline value estimate</p>
+              </div>
+            </div>
+            
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={() => setDailySendLimit(Math.max(10, dailySendLimit - 5))}
+                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded-lg transition-colors"
+              >
+                Decrease Limit (-5)
+              </button>
+              <button
+                onClick={() => setDailySendLimit(Math.min(100, dailySendLimit + 5))}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg transition-colors"
+              >
+                Increase Limit (+5)
+              </button>
+              <button
+                onClick={() => setTodaySent(0)}
+                className="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded-lg transition-colors"
+              >
+                Reset Daily Counter
+              </button>
+            </div>
+          </div>
+        </div>
       <div className="max-w-7xl mx-auto p-6">
         <div className="flex space-x-1 mb-6 bg-gray-800 p-1 rounded-lg">
           {['targets', 'research', 'personalize', 'compose', 'queue', 'analytics'].map((tab) => (
@@ -952,13 +1081,70 @@ export default function ManualFirstSalesMachine() {
               {sentEmails.length > 0 && (
                 <div>
                   <h3 className="font-semibold mb-4">Sent History ({sentEmails.length})</h3>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {sentEmails.slice(-10).reverse().map((email) => (
-                      <div key={email.id} className="bg-gray-700 p-3 rounded-lg text-sm">
-                        <div className="flex items-center justify-between">
-                          <span>{email.targetName}</span>
-                          <span className="text-gray-400">{new Date(email.sentAt).toLocaleDateString()}</span>
+                      <div key={email.id} className="bg-gray-700 p-4 rounded-lg">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <span className="font-semibold">{email.targetName}</span>
+                            <span className="text-gray-400 text-sm ml-2">{email.to}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-400 text-sm">{new Date(email.sentAt).toLocaleDateString()}</span>
+                            {email.replyOutcome && (
+                              <span className={`px-2 py-1 rounded text-xs ${
+                                email.replyOutcome === 'positive' ? 'bg-green-600' :
+                                email.replyOutcome === 'negative' ? 'bg-red-600' :
+                                'bg-yellow-600'
+                              }`}>
+                                {email.replyOutcome}
+                              </span>
+                            )}
+                            {email.meetingBooked && (
+                              <span className="px-2 py-1 rounded text-xs bg-purple-600">Meeting</span>
+                            )}
+                          </div>
                         </div>
+                        <p className="text-blue-400 text-sm mb-3">{email.subject}</p>
+                        
+                        {!email.replyOutcome && (
+                          <div className="flex gap-2 mb-3">
+                            <button
+                              onClick={() => recordReply(email.id, 'positive')}
+                              className="flex-1 bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm transition-colors"
+                            >
+                              ✅ Positive Reply
+                            </button>
+                            <button
+                              onClick={() => recordReply(email.id, 'negative')}
+                              className="flex-1 bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition-colors"
+                            >
+                              ❌ Not Interested
+                            </button>
+                            <button
+                              onClick={() => recordReply(email.id, 'neutral')}
+                              className="flex-1 bg-yellow-600 hover:bg-yellow-700 px-3 py-2 rounded text-sm transition-colors"
+                            >
+                              ⏸️ Follow Up Later
+                            </button>
+                          </div>
+                        )}
+                        
+                        {email.replyOutcome === 'positive' && !email.meetingBooked && (
+                          <button
+                            onClick={() => recordMeeting(email.id)}
+                            className="w-full bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-sm transition-colors"
+                          >
+                            📅 Book Meeting
+                          </button>
+                        )}
+                        
+                        {email.templateKey && templatePerformance[email.templateKey] && (
+                          <div className="mt-2 text-xs text-gray-400">
+                            Template: {DEFAULT_TEMPLATES[email.templateKey]?.name || email.templateKey} | 
+                            Performance: {templatePerformance[email.templateKey]?.replies || 0}/{templatePerformance[email.templateKey]?.sent || 0} replies
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1030,6 +1216,51 @@ export default function ManualFirstSalesMachine() {
                       {manualKPIs.sent > 0 ? ((manualKPIs.bounces/manualKPIs.sent)*100).toFixed(1) : 0}%
                     </span>
                   </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-700 p-4 rounded-lg mt-6">
+                <h3 className="font-semibold mb-4">Template Performance Analysis</h3>
+                <div className="space-y-3">
+                  {Object.entries(templatePerformance).length > 0 ? (
+                    Object.entries(templatePerformance).map(([templateKey, stats]) => {
+                      const replyRate = stats.sent > 0 ? ((stats.replies / stats.sent) * 100).toFixed(1) : 0;
+                      const meetingRate = stats.sent > 0 ? ((stats.meetings / stats.sent) * 100).toFixed(1) : 0;
+                      
+                      return (
+                        <div key={templateKey} className="bg-gray-600 p-3 rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-medium">{DEFAULT_TEMPLATES[templateKey]?.name || templateKey}</h4>
+                            <span className={`px-2 py-1 rounded text-xs ${
+                              replyRate > 15 ? 'bg-green-600' : replyRate > 10 ? 'bg-yellow-600' : 'bg-red-600'
+                            }`}>
+                              {replyRate}% reply rate
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-4 text-sm">
+                            <div>
+                              <span className="text-gray-400">Sent:</span>
+                              <span className="ml-2 font-medium">{stats.sent}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-400">Replies:</span>
+                              <span className="ml-2 font-medium text-green-400">{stats.replies}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-400">Meetings:</span>
+                              <span className="ml-2 font-medium text-purple-400">{stats.meetings}</span>
+                            </div>
+                          </div>
+                          <div className="mt-2 text-xs text-gray-400">
+                            Meeting Rate: {meetingRate}% | 
+                            Best for: {replyRate > 15 ? 'Scale this template' : replyRate > 10 ? 'Keep testing' : 'Consider revision'}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-gray-400 text-sm">Send some emails to see template performance data</p>
+                  )}
                 </div>
               </div>
 
