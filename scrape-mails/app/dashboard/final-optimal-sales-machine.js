@@ -1,9 +1,10 @@
 'use client';
-
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, where, updateDoc, doc, getDoc, setDoc, serverTimestamp, deleteDoc, writeBatch } from 'firebase/firestore';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, Timestamp, orderBy, limit, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import Head from 'next/head';
+import { useRouter } from 'next/navigation';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -12,105 +13,237 @@ const firebaseConfig = {
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
+const auth = getAuth(app);
 
-// Status definitions with colors and transitions
-const CONTACT_STATUSES = {
-  new: { label: 'New', color: 'bg-gray-100 text-gray-800', order: 1 },
-  contacted: { label: 'Contacted', color: 'bg-blue-100 text-blue-800', order: 2 },
-  replied: { label: 'Replied', color: 'bg-green-100 text-green-800', order: 3 },
-  meeting_scheduled: { label: 'Meeting Scheduled', color: 'bg-yellow-100 text-yellow-800', order: 4 },
-  meeting_completed: { label: 'Meeting Completed', color: 'bg-purple-100 text-purple-800', order: 5 },
-  proposal_sent: { label: 'Proposal Sent', color: 'bg-indigo-100 text-indigo-800', order: 6 },
-  negotiation: { label: 'Negotiation', color: 'bg-orange-100 text-orange-800', order: 7 },
-  closed_won: { label: 'Closed Won', color: 'bg-green-500 text-white', order: 8 },
-  closed_lost: { label: 'Closed Lost', color: 'bg-red-100 text-red-800', order: 9 },
-  archived: { label: 'Archived', color: 'bg-gray-200 text-gray-600', order: 10 }
-};
-
-// Valid status transitions
-const VALID_TRANSITIONS = {
-  new: ['contacted', 'archived'],
-  contacted: ['replied', 'archived'],
-  replied: ['meeting_scheduled', 'archived'],
-  meeting_scheduled: ['meeting_completed', 'archived'],
-  meeting_completed: ['proposal_sent', 'archived'],
-  proposal_sent: ['negotiation', 'closed_won', 'closed_lost', 'archived'],
-  negotiation: ['closed_won', 'closed_lost', 'archived'],
-  closed_won: ['archived'],
-  closed_lost: ['archived'],
-  archived: ['new'] // Allow reactivation
-};
-
-// Automation engine configuration
+// ✅ AUTOMATION ENGINE CONFIGURATION
 const AUTOMATION_CONFIG = {
   enabled: true,
-  fallbackMode: 'manual', // 'manual', 'semi-auto', 'full-auto'
-  retryAttempts: 3,
-  retryDelay: 5000, // 5 seconds
-  batchProcessingSize: 50,
+  fallbackMode: 'manual', // manual, semi-auto, full-auto
   automationInterval: 60000, // 1 minute
-  emailRateLimit: 100, // per hour
-  smsRateLimit: 50, // per hour
-  callRateLimit: 25 // per hour
+  batchProcessingSize: 50,
+  emailRateLimit: 100,
+  smsRateLimit: 50,
+  callRateLimit: 25,
+  retryAttempts: 3,
+  retryDelay: 300000, // 5 minutes
+  maxFailedTasks: 100
 };
 
-// Email templates with A/B testing variants
+// ✅ YOUR ACTUAL INITIAL PITCH
+const DEFAULT_TEMPLATE_A = {
+  subject: 'Quick question for {{business_name}}',
+  body: `Hi {{business_name}}, 😊👋🏻
+I hope you're doing well.
+My name is Dulran Samarasinghe. I run Syndicate Solutions, a Sri Lanka–based mini agency supporting
+small to mid-sized agencies and businesses with reliable execution across web, software,
+AI automation, and ongoing digital operations.
+We typically work as a white-label or outsourced partner when teams need:
+• extra delivery capacity
+• fast turnarounds without hiring
+• ongoing technical and digital support
+I'm reaching out to ask – do you ever use external support when workload or deadlines increase?
+If helpful, I'm open to starting with a small task or short contract to build trust before
+discussing anything larger.
+You can review my work here:
+Portfolio: https://syndicatesolutions.vercel.app/
+LinkedIn: https://www.linkedin.com/in/dulran-samarasinghe-13941b175/
+If it makes sense, you can book a short 15-minute call:
+https://cal.com/syndicate-solutions/15min
+You can contact me on Whatsapp - 0741143323
+You can email me at - syndicatesoftwaresolutions@gmail.com
+Otherwise, happy to continue the conversation over email.
+Best regards,
+Dulran Samarasinghe
+Founder – Syndicate Solutions`
+};
+
+// ✅ FOLLOW-UP TEMPLATES
+const FOLLOW_UP_1 = {
+  subject: 'Quick question for {{business_name}}',
+  body: `Hi {{business_name}},
+Just circling back—did my note about outsourced dev & ops support land at a bad time?
+No pressure at all, but if you're ever swamped with web, automation, or backend work and need a reliable extra hand (especially for white-label or fast-turnaround needs), we're ready to help.
+Even a 1-hour task is a great way to test the waters.
+Either way, wishing you a productive week!
+Best,
+Dulran
+Founder – Syndicate Solutions
+WhatsApp: 0741143323`
+};
+
+const FOLLOW_UP_2 = {
+  subject: '{{business_name}}, a quick offer (no strings)',
+  body: `Hi again,
+I noticed you haven't had a chance to reply—totally understand!
+To make this zero-risk: **I'll audit one of your digital workflows (e.g., lead capture, client onboarding, internal tooling) for free** and send 2–3 actionable automation ideas you can implement immediately—even if you never work with us.
+Zero sales pitch. Just value.
+Interested? Hit "Yes" or reply with a workflow you'd like optimized.
+Cheers,
+Dulran
+Portfolio: https://syndicatesolutions.vercel.app/
+Book a call: https://cal.com/syndicate-solutions/15min`
+};
+
+const FOLLOW_UP_3 = {
+  subject: 'Closing the loop',
+  body: `Hi {{business_name}},
+I'll stop emailing after this one! 😅
+Just wanted to say: if outsourcing ever becomes a priority—whether for web dev, AI tools, or ongoing ops—we're here. Many of our clients started with a tiny $100 task and now work with us monthly.
+If now's not the time, no worries! I'll circle back in a few months.
+Either way, keep crushing it!
+— Dulran
+WhatsApp: 0741143323`
+};
+
+// Keep B as fallback (or repurpose)
+const DEFAULT_TEMPLATE_B = FOLLOW_UP_1;
+const DEFAULT_WHATSAPP_TEMPLATE = `Hi {{business_name}} 👋😊
+Hope you're doing well.
+I'm {{sender_name}} from Sri Lanka – I run a small digital mini-agency supporting businesses with websites, content, and AI automation.
+Quick question:
+Are you currently working on anything digital that's taking too much time or not delivering the results you want?
+If yes, I'd be happy to share a quick idea – no pressure at all.`;
+
+const DEFAULT_SMS_TEMPLATE = `Hi {{business_name}} 👋
+This is {{sender_name}} from Syndicate Solutions.
+Quick question – are you currently working on any digital work that's delayed or not giving results?
+Reply YES or NO.`;
+
+// ✅ CONTACT STATUS DEFINITIONS (Business-Driven Workflow)
+const CONTACT_STATUSES = [
+  { id: 'new', label: '🆕 New Lead', color: 'gray', description: 'Never contacted' },
+  { id: 'contacted', label: '📞 Contacted', color: 'blue', description: 'Initial outreach sent' },
+  { id: 'engaged', label: '💬 Engaged', color: 'indigo', description: 'Opened/clicked but no reply' },
+  { id: 'replied', label: '✅ Replied', color: 'green', description: 'Responded to outreach' },
+  { id: 'demo_scheduled', label: '📅 Demo Scheduled', color: 'purple', description: 'Meeting booked' },
+  { id: 'proposal_sent', label: '📄 Proposal Sent', color: 'orange', description: 'Quote delivered' },
+  { id: 'negotiation', label: '🤝 Negotiation', color: 'yellow', description: 'Discussing terms' },
+  { id: 'closed_won', label: '💰 Closed Won', color: 'emerald', description: 'Deal secured!' },
+  { id: 'not_interested', label: '❌ Not Interested', color: 'red', description: 'Declined service' },
+  { id: 'do_not_contact', label: '🚫 Do Not Contact', color: 'rose', description: 'Requested no contact' },
+  { id: 'unresponsive', label: '⏳ Unresponsive', color: 'orange', description: 'No response after 3 attempts' },
+  { id: 'archived', label: '🗄️ Archived', color: 'gray', description: 'Inactive >30 days' }
+];
+
+// ✅ STATUS TRANSITION RULES (Prevent invalid state changes)
+const STATUS_TRANSITIONS = {
+  'new': ['contacted', 'do_not_contact'],
+  'contacted': ['engaged', 'replied', 'unresponsive', 'not_interested'],
+  'engaged': ['replied', 'unresponsive', 'not_interested'],
+  'replied': ['demo_scheduled', 'proposal_sent', 'negotiation', 'closed_won', 'not_interested'],
+  'demo_scheduled': ['proposal_sent', 'negotiation', 'closed_won', 'not_interested'],
+  'proposal_sent': ['negotiation', 'closed_won', 'not_interested'],
+  'negotiation': ['closed_won', 'not_interested'],
+  'closed_won': [],
+  'not_interested': ['archived'],
+  'do_not_contact': ['archived'],
+  'unresponsive': ['archived', 're_engage'],
+  'archived': ['re_engage']
+};
+
+// ✅ EMAIL TEMPLATES
 const EMAIL_TEMPLATES = {
-  initial: {
-    subject: 'Introduction from {{your_name}} at {{your_company}}',
-    body: `Hi {{contact_name}},
-
-I hope this email finds you well. I came across your profile and was impressed by your work at {{company}}.
-
-At {{your_company}}, we help businesses like yours {{value_proposition}}. I'd love to schedule a brief 15-minute call to explore how we might be able to help you achieve {{specific_goal}}.
-
-You can book a time directly on my calendar: {{calendar_link}}
-
-Looking forward to connecting!
-
-Best regards,
-{{your_name}}
-{{your_title}}
-{{your_company}}
-{{your_phone}}
-{{portfolio_link}}`
-  },
-  followup: {
-    subject: 'Following up - {{your_company}} + {{company}}',
-    body: `Hi {{contact_name}},
-
-Just wanted to follow up on my previous email. I believe there's a great opportunity for us to work together.
-
-{{personalized_insight}}
-
-Would you be available for a quick chat next week?
-
-Best regards,
-{{your_name}}
-{{your_company}}`
-  },
-  meeting: {
-    subject: 'Meeting Confirmation - {{your_company}} + {{company}}',
-    body: `Hi {{contact_name}},
-
-Great speaking with you today! As discussed, I'm confirming our meeting for {{meeting_time}}.
-
-{{meeting_agenda}}
-
-Looking forward to our conversation!
-
-Best regards,
-{{your_name}}
-{{your_company}}`
-  }
+  initial: DEFAULT_TEMPLATE_A,
+  followup: FOLLOW_UP_1,
+  proposal: FOLLOW_UP_2,
+  breakup: FOLLOW_UP_3
 };
+
+// ✅ UTILITY FUNCTIONS
+function formatForDialing(raw) {
+  if (!raw || raw === 'N/A') return null;
+  let cleaned = raw.toString().replace(/\D/g, '');
+  if (cleaned.startsWith('0') && cleaned.length >= 9) {
+    cleaned = '94' + cleaned.slice(1);
+  }
+  return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
+}
+
+const extractTemplateVariables = (text) => {
+  if (!text) return [];
+  const matches = text.match(/\{\{\s*([^}]+?)\s*\}\}/g) || [];
+  return [...new Set(matches.map(m => m.replace(/\{\{\s*|\s*\}\}/g, '').trim()))];
+};
+
+// ✅ SYNC WITH API: Use the EXACT same validation rules
+const isValidEmail = (email) => {
+  if (!email || typeof email !== 'string') return false;
+  let cleaned = email.trim()
+    .toLowerCase()
+    .replace(/^["'`]+/, '')
+    .replace(/["'`]+$/, '')
+    .replace(/\s+/g, '')
+    .replace(/[<>]/g, '');
+  if (cleaned.length < 5) return false;
+  if (cleaned === 'undefined' || cleaned === 'null' || cleaned === 'na' || cleaned === 'n/a') return false;
+  if (cleaned.startsWith('[') || cleaned.includes('missing')) return false;
+  const atCount = (cleaned.match(/@/g) || []).length;
+  if (atCount !== 1) return false;
+  const parts = cleaned.split('@');
+  const [localPart, domainPart] = parts;
+  if (!localPart || localPart.length < 1) return false;
+  if (localPart.startsWith('.') || localPart.endsWith('.')) return false;
+  if (!domainPart || domainPart.length < 3) return false;
+  if (!domainPart.includes('.')) return false;
+  if (domainPart.startsWith('.') || domainPart.endsWith('.')) return false;
+  const domainBits = domainPart.split('.');
+  const tld = domainBits[domainBits.length - 1];
+  if (!tld || tld.length < 2 || tld.length > 6) return false;
+  if (!/^[a-z0-9-]+$/.test(tld)) return false;
+  if (tld.startsWith('-') || tld.endsWith('-')) return false;
+  return true;
+};
+
+const parseCsvRow = (str) => {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === '"' && !inQuotes) inQuotes = true;
+    else if (char === '"' && inQuotes) {
+      if (i + 1 < str.length && str[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else inQuotes = false;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current); current = '';
+    } else current += char;
+  }
+  result.push(current);
+  return result.map(field => {
+    let cleaned = field.replace(/[\r\n]/g, '').trim();
+    if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+      cleaned = cleaned.slice(1, -1).replace(/""/g, '"');
+    }
+    return cleaned;
+  });
+};
+
+const renderPreviewText = (text, recipient, mappings, sender) => {
+  if (!text) return '';
+  let result = text;
+  Object.entries(mappings).forEach(([varName, col]) => {
+    const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
+    if (varName === 'sender_name') {
+      result = result.replace(regex, sender || 'Team');
+    } else if (recipient && col && recipient[col] !== undefined) {
+      result = result.replace(regex, String(recipient[col]));
+    } else {
+      result = result.replace(regex, `[MISSING: ${varName}]`);
+    }
+  });
+  return result;
+};
+
+// ✅ EXPORT TEMPLATES FOR API USE
+export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
 export default function FinalOptimalSalesMachine() {
   const [user, setUser] = useState(null);
