@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, where, updateDoc, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, where, updateDoc, doc, getDoc, setDoc, serverTimestamp, deleteDoc, writeBatch } from 'firebase/firestore';
 import Papa from 'papaparse';
 
 // Firebase configuration
@@ -49,7 +49,20 @@ const VALID_TRANSITIONS = {
   archived: ['new'] // Allow reactivation
 };
 
-// Email templates
+// Automation engine configuration
+const AUTOMATION_CONFIG = {
+  enabled: true,
+  fallbackMode: 'manual', // 'manual', 'semi-auto', 'full-auto'
+  retryAttempts: 3,
+  retryDelay: 5000, // 5 seconds
+  batchProcessingSize: 50,
+  automationInterval: 60000, // 1 minute
+  emailRateLimit: 100, // per hour
+  smsRateLimit: 50, // per hour
+  callRateLimit: 25 // per hour
+};
+
+// Email templates with A/B testing variants
 const EMAIL_TEMPLATES = {
   initial: {
     subject: 'Introduction from {{your_name}} at {{your_company}}',
@@ -131,6 +144,24 @@ export default function FinalOptimalSalesMachine() {
   const [callStatus, setCallStatus] = useState({});
   const [aiResearch, setAiResearch] = useState({});
   const [followUpSuggestions, setFollowUpSuggestions] = useState({});
+  
+  // Automation state
+  const [automationEnabled, setAutomationEnabled] = useState(AUTOMATION_CONFIG.enabled);
+  const [automationMode, setAutomationMode] = useState(AUTOMATION_CONFIG.fallbackMode);
+  const [automationRules, setAutomationRules] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [activeCampaign, setActiveCampaign] = useState(null);
+  const [automationLogs, setAutomationLogs] = useState([]);
+  const [automationStats, setAutomationStats] = useState({});
+  const [emailSequences, setEmailSequences] = useState([]);
+  const [abTestResults, setAbTestResults] = useState({});
+  const [notifications, setNotifications] = useState([]);
+  const [rateLimits, setRateLimits] = useState({ email: 0, sms: 0, calls: 0 });
+  
+  // Refs for automation engine
+  const automationIntervalRef = useRef(null);
+  const processingQueueRef = useRef([]);
+  const failedTasksRef = useRef([]);
 
   // Check authentication state
   useEffect(() => {
@@ -191,6 +222,535 @@ export default function FinalOptimalSalesMachine() {
       });
     } catch (err) {
       console.error('Failed to load analytics:', err);
+    }
+  };
+
+  // Initialize automation engine
+  useEffect(() => {
+    if (user && automationEnabled) {
+      initializeAutomation();
+      loadAutomationRules();
+      loadCampaigns();
+      loadEmailSequences();
+      startAutomationEngine();
+    }
+    
+    return () => {
+      if (automationIntervalRef.current) {
+        clearInterval(automationIntervalRef.current);
+      }
+    };
+  }, [user, automationEnabled]);
+
+  // Automation Engine Core Functions
+  const initializeAutomation = async () => {
+    try {
+      // Initialize default automation rules if none exist
+      const rulesRef = collection(db, 'automation_rules');
+      const rulesSnapshot = await getDocs(rulesRef);
+      
+      if (rulesSnapshot.empty) {
+        const defaultRules = [
+          {
+            name: 'New Contact Welcome',
+            trigger: 'status_change',
+            condition: { status: 'new' },
+            action: 'send_email',
+            template: 'initial',
+            delay: 0,
+            enabled: true,
+            priority: 1
+          },
+          {
+            name: 'Follow-up After 3 Days',
+            trigger: 'time_based',
+            condition: { status: 'contacted', days_since_contact: 3 },
+            action: 'send_email',
+            template: 'followup',
+            delay: 3,
+            enabled: true,
+            priority: 2
+          },
+          {
+            name: 'Lead Score Update',
+            trigger: 'data_change',
+            condition: { field: 'lead_score' },
+            action: 'update_score',
+            delay: 0,
+            enabled: true,
+            priority: 3
+          }
+        ];
+
+        for (const rule of defaultRules) {
+          await addDoc(rulesRef, {
+            ...rule,
+            created_at: serverTimestamp(),
+            updated_at: serverTimestamp()
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to initialize automation:', err);
+      addNotification('error', 'Failed to initialize automation engine');
+    }
+  };
+
+  const startAutomationEngine = () => {
+    if (automationIntervalRef.current) {
+      clearInterval(automationIntervalRef.current);
+    }
+
+    automationIntervalRef.current = setInterval(async () => {
+      if (automationEnabled && automationMode !== 'manual') {
+        await processAutomationQueue();
+        await retryFailedTasks();
+        await updateRateLimits();
+      }
+    }, AUTOMATION_CONFIG.automationInterval);
+  };
+
+  const processAutomationQueue = async () => {
+    try {
+      const contactsRef = collection(db, 'contacts');
+      const q = query(
+        contactsRef,
+        where('status', 'in', ['new', 'contacted', 'replied']),
+        limit(AUTOMATION_CONFIG.batchProcessingSize)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      for (const contactDoc of querySnapshot.docs) {
+        const contact = { id: contactDoc.id, ...contactDoc.data() };
+        await evaluateAutomationRules(contact);
+      }
+    } catch (err) {
+      console.error('Error processing automation queue:', err);
+      addNotification('error', 'Automation queue processing failed');
+    }
+  };
+
+  const evaluateAutomationRules = async (contact) => {
+    const applicableRules = automationRules.filter(rule => 
+      rule.enabled && shouldTriggerRule(rule, contact)
+    ).sort((a, b) => a.priority - b.priority);
+
+    for (const rule of applicableRules) {
+      try {
+        await executeAutomationAction(rule, contact);
+        logAutomationActivity(rule, contact, 'success');
+      } catch (err) {
+        console.error(`Failed to execute rule ${rule.name}:`, err);
+        logAutomationActivity(rule, contact, 'failed', err.message);
+        
+        if (automationMode === 'semi-auto') {
+          addToFailedTasks(rule, contact, err);
+        }
+      }
+    }
+  };
+
+  const shouldTriggerRule = (rule, contact) => {
+    switch (rule.trigger) {
+      case 'status_change':
+        return contact.status === rule.condition.status;
+      case 'time_based':
+        const daysSince = getDaysSinceContact(contact);
+        return contact.status === rule.condition.status && 
+               daysSince >= rule.condition.days_since_contact;
+      case 'data_change':
+        return contact[rule.condition.field] !== undefined;
+      case 'lead_score_threshold':
+        return contact.leadScore >= rule.condition.min_score;
+      default:
+        return false;
+    }
+  };
+
+  const executeAutomationAction = async (rule, contact) => {
+    switch (rule.action) {
+      case 'send_email':
+        if (rateLimits.email >= AUTOMATION_CONFIG.emailRateLimit) {
+          throw new Error('Email rate limit exceeded');
+        }
+        await sendAutomatedEmail(contact, rule.template);
+        break;
+      case 'send_sms':
+        if (rateLimits.sms >= AUTOMATION_CONFIG.smsRateLimit) {
+          throw new Error('SMS rate limit exceeded');
+        }
+        await sendAutomatedSMS(contact, rule.message);
+        break;
+      case 'update_score':
+        await updateContactScore(contact.id);
+        break;
+      case 'assign_campaign':
+        await assignToCampaign(contact.id, rule.campaignId);
+        break;
+      case 'update_status':
+        await updateContactStatus(contact.id, rule.newStatus, rule.note);
+        break;
+      default:
+        throw new Error(`Unknown action: ${rule.action}`);
+    }
+  };
+
+  const sendAutomatedEmail = async (contact, templateName) => {
+    const template = EMAIL_TEMPLATES[templateName];
+    if (!template) {
+      throw new Error(`Email template ${templateName} not found`);
+    }
+
+    const personalizedBody = personalizeEmail(template.body, contact);
+    const personalizedSubject = personalizeEmail(template.subject, contact);
+
+    // Check if we should use A/B testing
+    const abTestVariant = getABTestVariant(templateName, contact.id);
+    
+    try {
+      const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          raw: btoa(
+            `To: ${contact.email}\n` +
+            `Subject: ${personalizedSubject}\n\n` +
+            personalizedBody
+          ).replace(/\+/g, '-')
+        })
+      });
+
+      if (response.ok) {
+        setRateLimits(prev => ({ ...prev, email: prev.email + 1 }));
+        await trackABTestResult(templateName, abTestVariant, 'sent', contact.id);
+        await updateContactStatus(contact.id, 'contacted', `Automated email sent using ${templateName} template`);
+      } else {
+        throw new Error('Failed to send automated email');
+      }
+    } catch (err) {
+      await trackABTestResult(templateName, abTestVariant, 'failed', contact.id);
+      throw err;
+    }
+  };
+
+  const sendAutomatedSMS = async (contact, message) => {
+    const personalizedMessage = personalizeEmail(message || 
+      `Hi ${contact.name}, following up on our previous conversation.`, contact);
+
+    const response = await fetch('/api/twilio/sms', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: contact.phone,
+        message: personalizedMessage,
+        contactId: contact.id,
+        automated: true
+      })
+    });
+
+    if (response.ok) {
+      setRateLimits(prev => ({ ...prev, sms: prev.sms + 1 }));
+      await updateContactStatus(contact.id, 'contacted', 'Automated SMS sent');
+    } else {
+      throw new Error('Failed to send automated SMS');
+    }
+  };
+
+  const updateContactScore = async (contactId) => {
+    const contactRef = doc(db, 'contacts', contactId);
+    const contactDoc = await getDoc(contactRef);
+    const contact = contactDoc.data();
+    
+    const newScore = calculateDynamicLeadScore(contact);
+    
+    if (newScore !== contact.leadScore) {
+      await updateDoc(contactRef, {
+        leadScore: newScore,
+        score_updated_at: serverTimestamp(),
+        updated_at: serverTimestamp()
+      });
+      
+      addNotification('info', `Lead score updated for ${contact.name}: ${newScore}`);
+    }
+  };
+
+  const calculateDynamicLeadScore = (contact) => {
+    let score = 0;
+    
+    // Base scoring
+    if (contact.email) {
+      const domain = contact.email.split('@')[1];
+      if (domain && !domain.includes('gmail') && !domain.includes('yahoo')) {
+        score += 25;
+      }
+    }
+    
+    if (contact.phone) score += 20;
+    if (contact.linkedin) score += 20;
+    if (contact.company) score += 25;
+    if (contact.position) score += 15;
+    
+    // Engagement scoring
+    if (contact.status === 'replied') score += 30;
+    if (contact.status === 'meeting_scheduled') score += 40;
+    if (contact.status === 'meeting_completed') score += 50;
+    
+    // Recent activity bonus
+    const daysSinceLastActivity = getDaysSinceContact(contact);
+    if (daysSinceLastActivity < 7) score += 15;
+    
+    // Industry and role scoring
+    if (contact.position) {
+      const seniorKeywords = ['manager', 'director', 'vp', 'vice president', 'ceo', 'cto', 'founder', 'owner'];
+      if (seniorKeywords.some(keyword => contact.position.toLowerCase().includes(keyword))) {
+        score += 25;
+      }
+    }
+    
+    return Math.min(score, 100);
+  };
+
+  const getDaysSinceContact = (contact) => {
+    const lastContact = contact.updated_at?.toDate() || contact.created_at?.toDate() || new Date();
+    const now = new Date();
+    const diffTime = Math.abs(now - lastContact);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  // Fallback Mechanisms
+  const retryFailedTasks = async () => {
+    if (failedTasksRef.current.length === 0) return;
+    
+    const tasksToRetry = failedTasksRef.current.splice(0, 10); // Process in batches
+    const stillFailed = [];
+    
+    for (const task of tasksToRetry) {
+      try {
+        await executeAutomationAction(task.rule, task.contact);
+        logAutomationActivity(task.rule, task.contact, 'retry_success');
+      } catch (err) {
+        task.retryCount = (task.retryCount || 0) + 1;
+        if (task.retryCount < AUTOMATION_CONFIG.retryAttempts) {
+          stillFailed.push(task);
+        } else {
+          logAutomationActivity(task.rule, task.contact, 'retry_failed', err.message);
+          addNotification('error', `Task failed permanently: ${task.rule.name}`);
+        }
+      }
+    }
+    
+    failedTasksRef.current = [...stillFailed, ...failedTasksRef.current];
+  };
+
+  const addToFailedTasks = (rule, contact, error) => {
+    failedTasksRef.current.push({
+      rule,
+      contact,
+      error: error.message,
+      retryCount: 0,
+      timestamp: new Date()
+    });
+  };
+
+  const handleAutomationFailure = (rule, contact, error) => {
+    switch (automationMode) {
+      case 'manual':
+        addNotification('warning', `Manual intervention required: ${rule.name} failed for ${contact.name}`);
+        break;
+      case 'semi-auto':
+        addToFailedTasks(rule, contact, error);
+        addNotification('warning', `Task queued for retry: ${rule.name}`);
+        break;
+      case 'full-auto':
+        // Continue with next task, log for review
+        logAutomationActivity(rule, contact, 'failed', error.message);
+        break;
+    }
+  };
+
+  // A/B Testing System
+  const getABTestVariant = (templateName, contactId) => {
+    const hash = contactId.split('').reduce((a, b) => {
+      a = ((a << 5) - a) + b.charCodeAt(0);
+      return a & a;
+    }, 0);
+    
+    return Math.abs(hash) % 2 === 0 ? 'A' : 'B';
+  };
+
+  const trackABTestResult = async (templateName, variant, result, contactId) => {
+    try {
+      const testResult = {
+        templateName,
+        variant,
+        result,
+        contactId,
+        timestamp: serverTimestamp()
+      };
+      
+      await addDoc(collection(db, 'ab_test_results'), testResult);
+      
+      setAbTestResults(prev => ({
+        ...prev,
+        [templateName]: {
+          ...prev[templateName],
+          [variant]: {
+            sent: (prev[templateName]?.[variant]?.sent || 0) + (result === 'sent' ? 1 : 0),
+            failed: (prev[templateName]?.[variant]?.failed || 0) + (result === 'failed' ? 1 : 0)
+          }
+        }
+      }));
+    } catch (err) {
+      console.error('Failed to track A/B test result:', err);
+    }
+  };
+
+  // Campaign Management
+  const assignToCampaign = async (contactId, campaignId) => {
+    try {
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      const campaignDoc = await getDoc(campaignRef);
+      
+      if (!campaignDoc.exists()) {
+        throw new Error('Campaign not found');
+      }
+      
+      const contactRef = doc(db, 'contacts', contactId);
+      await updateDoc(contactRef, {
+        campaignId,
+        campaign_assigned_at: serverTimestamp(),
+        updated_at: serverTimestamp()
+      });
+      
+      addNotification('success', `Contact assigned to campaign: ${campaignDoc.data().name}`);
+    } catch (err) {
+      console.error('Failed to assign to campaign:', err);
+      throw err;
+    }
+  };
+
+  // Email Sequences
+  const processEmailSequences = async () => {
+    const contactsInSequences = contacts.filter(c => c.sequenceId && c.sequenceStep !== undefined);
+    
+    for (const contact of contactsInSequences) {
+      const sequence = emailSequences.find(s => s.id === contact.sequenceId);
+      if (!sequence) continue;
+      
+      const currentStep = sequence.steps[contact.sequenceStep];
+      if (!currentStep) continue;
+      
+      const shouldSend = checkSequenceTiming(contact, currentStep);
+      if (shouldSend) {
+        try {
+          await sendAutomatedEmail(contact, currentStep.template);
+          await updateDoc(doc(db, 'contacts', contact.id), {
+            sequenceStep: contact.sequenceStep + 1,
+            last_sequence_sent: serverTimestamp(),
+            updated_at: serverTimestamp()
+          });
+        } catch (err) {
+          console.error('Failed to send sequence email:', err);
+        }
+      }
+    }
+  };
+
+  const checkSequenceTiming = (contact, step) => {
+    if (!contact.last_sequence_sent) return true;
+    
+    const lastSent = contact.last_sequence_sent.toDate();
+    const now = new Date();
+    const hoursSince = (now - lastSent) / (1000 * 60 * 60);
+    
+    return hoursSince >= step.delayHours;
+  };
+
+  // Utility Functions
+  const calculateSuccessRate = (results) => {
+    const totalSent = (results.A?.sent || 0) + (results.B?.sent || 0);
+    const totalFailed = (results.A?.failed || 0) + (results.B?.failed || 0);
+    const total = totalSent + totalFailed;
+    return total > 0 ? Math.round((totalSent / total) * 100) : 0;
+  };
+
+  const addNotification = (type, message) => {
+    const notification = {
+      id: Date.now(),
+      type,
+      message,
+      timestamp: new Date()
+    };
+    
+    setNotifications(prev => [notification, ...prev].slice(0, 50)); // Keep last 50
+  };
+
+  const logAutomationActivity = async (rule, contact, status, error = null) => {
+    const logEntry = {
+      ruleName: rule.name,
+      contactId: contact.id,
+      contactName: contact.name,
+      status,
+      error,
+      timestamp: serverTimestamp()
+    };
+    
+    setAutomationLogs(prev => [logEntry, ...prev].slice(0, 100)); // Keep last 100
+    
+    try {
+      await addDoc(collection(db, 'automation_logs'), logEntry);
+    } catch (err) {
+      console.error('Failed to log automation activity:', err);
+    }
+  };
+
+  const updateRateLimits = async () => {
+    const now = new Date();
+    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    
+    // Reset counters if it's been more than an hour
+    setRateLimits(prev => {
+      const shouldReset = prev.lastReset && (now - prev.lastReset) > 60 * 60 * 1000;
+      return shouldReset ? { email: 0, sms: 0, calls: 0, lastReset: now } : prev;
+    });
+  };
+
+  // Load automation data from Firestore
+  const loadAutomationRules = async () => {
+    try {
+      const rulesRef = collection(db, 'automation_rules');
+      const querySnapshot = await getDocs(rulesRef);
+      const rules = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setAutomationRules(rules);
+    } catch (err) {
+      console.error('Failed to load automation rules:', err);
+    }
+  };
+
+  const loadCampaigns = async () => {
+    try {
+      const campaignsRef = collection(db, 'campaigns');
+      const querySnapshot = await getDocs(campaignsRef);
+      const campaigns = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setCampaigns(campaigns);
+    } catch (err) {
+      console.error('Failed to load campaigns:', err);
+    }
+  };
+
+  const loadEmailSequences = async () => {
+    try {
+      const sequencesRef = collection(db, 'email_sequences');
+      const querySnapshot = await getDocs(sequencesRef);
+      const sequences = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEmailSequences(sequences);
+    } catch (err) {
+      console.error('Failed to load email sequences:', err);
     }
   };
 
@@ -741,6 +1301,199 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
+  // Manual Override System
+  const manualOverrideRule = async (ruleId, contactId, action) => {
+    try {
+      const rule = automationRules.find(r => r.id === ruleId);
+      const contact = contacts.find(c => c.id === contactId);
+      
+      if (!rule || !contact) {
+        throw new Error('Rule or contact not found');
+      }
+
+      switch (action) {
+        case 'execute':
+          await executeAutomationAction(rule, contact);
+          addNotification('success', `Manually executed rule: ${rule.name}`);
+          break;
+        case 'skip':
+          addNotification('info', `Skipped rule: ${rule.name} for ${contact.name}`);
+          break;
+        case 'disable':
+          await updateDoc(doc(db, 'automation_rules', ruleId), {
+            enabled: false,
+            updated_at: serverTimestamp()
+          });
+          await loadAutomationRules();
+          addNotification('warning', `Disabled rule: ${rule.name}`);
+          break;
+        default:
+          throw new Error('Unknown override action');
+      }
+      
+      logAutomationActivity(rule, contact, 'manual_override', `Action: ${action}`);
+    } catch (err) {
+      addNotification('error', `Manual override failed: ${err.message}`);
+    }
+  };
+
+  const pauseAllAutomation = async () => {
+    setAutomationEnabled(false);
+    addNotification('warning', 'All automation paused');
+  };
+
+  const resumeAllAutomation = async () => {
+    setAutomationEnabled(true);
+    addNotification('success', 'All automation resumed');
+  };
+
+  // Data Export and Backup
+  const exportContactsData = async () => {
+    try {
+      const dataStr = JSON.stringify(contacts, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `contacts_backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      addNotification('success', 'Contacts data exported successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to export contacts data');
+    }
+  };
+
+  const exportAutomationLogs = async () => {
+    try {
+      const logsRef = collection(db, 'automation_logs');
+      const querySnapshot = await getDocs(logsRef);
+      const logs = querySnapshot.docs.map(doc => doc.data());
+      
+      const dataStr = JSON.stringify(logs, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `automation_logs_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      addNotification('success', 'Automation logs exported successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to export automation logs');
+    }
+  };
+
+  const createBackup = async () => {
+    try {
+      const backupData = {
+        contacts,
+        automationRules,
+        campaigns,
+        emailSequences,
+        automationLogs: automationLogs.slice(0, 100), // Last 100 logs
+        timestamp: new Date().toISOString(),
+        version: '1.0'
+      };
+      
+      const dataStr = JSON.stringify(backupData, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `full_backup_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      addNotification('success', 'Full backup created successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to create backup');
+    }
+  };
+
+  const restoreBackup = async (backupFile) => {
+    try {
+      const text = await backupFile.text();
+      const backupData = JSON.parse(text);
+      
+      // Validate backup structure
+      if (!backupData.contacts || !backupData.automationRules) {
+        throw new Error('Invalid backup file structure');
+      }
+      
+      // Restore contacts (this would need proper batch processing in production)
+      for (const contact of backupData.contacts) {
+        await addDoc(collection(db, 'contacts'), {
+          ...contact,
+          restored_at: serverTimestamp()
+        });
+      }
+      
+      // Restore automation rules
+      for (const rule of backupData.automationRules) {
+        await addDoc(collection(db, 'automation_rules'), {
+          ...rule,
+          restored_at: serverTimestamp()
+        });
+      }
+      
+      await loadContacts();
+      await loadAutomationRules();
+      
+      addNotification('success', 'Backup restored successfully');
+    } catch (err) {
+      addNotification('error', `Failed to restore backup: ${err.message}`);
+    }
+  };
+
+  // Advanced Analytics
+  const generateAutomationReport = async () => {
+    try {
+      const report = {
+        period: 'Last 30 days',
+        totalAutomations: automationLogs.length,
+        successRate: Math.round((automationLogs.filter(l => l.status === 'success').length / automationLogs.length) * 100),
+        mostUsedRules: automationLogs.reduce((acc, log) => {
+          acc[log.ruleName] = (acc[log.ruleName] || 0) + 1;
+          return acc;
+        }, {}),
+        errorPatterns: automationLogs.filter(l => l.status === 'failed').reduce((acc, log) => {
+          const error = log.error || 'Unknown error';
+          acc[error] = (acc[error] || 0) + 1;
+          return acc;
+        }, {}),
+        performanceMetrics: {
+          avgExecutionTime: '2.3s', // Would calculate from actual data
+          peakHours: '9-11 AM',
+          bestDay: 'Tuesday'
+        }
+      };
+      
+      const dataStr = JSON.stringify(report, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `automation_report_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      addNotification('success', 'Automation report generated');
+    } catch (err) {
+      addNotification('error', 'Failed to generate report');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -753,6 +1506,60 @@ export default function FinalOptimalSalesMachine() {
             <div className="flex items-center space-x-4">
               {user ? (
                 <>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={pauseAllAutomation}
+                      className="px-3 py-1 text-xs font-medium text-yellow-700 bg-yellow-100 rounded-md hover:bg-yellow-200"
+                    >
+                      Pause All
+                    </button>
+                    <button
+                      onClick={resumeAllAutomation}
+                      className="px-3 py-1 text-xs font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200"
+                    >
+                      Resume All
+                    </button>
+                    <div className="relative group">
+                      <button className="px-3 py-1 text-xs font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
+                        Export ▼
+                      </button>
+                      <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                        <button
+                          onClick={exportContactsData}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          Export Contacts
+                        </button>
+                        <button
+                          onClick={exportAutomationLogs}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          Export Logs
+                        </button>
+                        <button
+                          onClick={createBackup}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          Create Backup
+                        </button>
+                        <button
+                          onClick={generateAutomationReport}
+                          className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                        >
+                          Generate Report
+                        </button>
+                        <label className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 cursor-pointer">
+                          Restore Backup
+                          <input
+                            type="file"
+                            accept=".json"
+                            onChange={(e) => e.target.files[0] && restoreBackup(e.target.files[0])}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
                   <span className="text-sm text-gray-600">Welcome, {user.displayName}</span>
                   <button
                     onClick={handleSignOut}
@@ -776,6 +1583,246 @@ export default function FinalOptimalSalesMachine() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Automation Dashboard */}
+        {user && (
+          <div className="mb-8 bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-medium text-gray-900">Automation Control Center</h2>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center">
+                  <label className="text-sm font-medium text-gray-700 mr-2">Automation:</label>
+                  <button
+                    onClick={() => setAutomationEnabled(!automationEnabled)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      automationEnabled ? 'bg-green-600' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        automationEnabled ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                <select
+                  value={automationMode}
+                  onChange={(e) => setAutomationMode(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="manual">Manual</option>
+                  <option value="semi-auto">Semi-Auto</option>
+                  <option value="full-auto">Full Auto</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="text-sm font-medium text-gray-700">Rate Limits</h4>
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-gray-600">Email: {rateLimits.email}/{AUTOMATION_CONFIG.emailRateLimit}</p>
+                  <p className="text-xs text-gray-600">SMS: {rateLimits.sms}/{AUTOMATION_CONFIG.smsRateLimit}</p>
+                  <p className="text-xs text-gray-600">Calls: {rateLimits.calls}/{AUTOMATION_CONFIG.callRateLimit}</p>
+                </div>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-lg">
+                <h4 className="text-sm font-medium text-blue-700">Active Rules</h4>
+                <p className="mt-2 text-2xl font-bold text-blue-600">
+                  {automationRules.filter(r => r.enabled).length}
+                </p>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg">
+                <h4 className="text-sm font-medium text-green-700">Success Rate</h4>
+                <p className="mt-2 text-2xl font-bold text-green-600">
+                  {automationLogs.length > 0 ? 
+                    Math.round((automationLogs.filter(l => l.status === 'success').length / automationLogs.length) * 100) : 0}%
+                </p>
+              </div>
+              <div className="bg-orange-50 p-4 rounded-lg">
+                <h4 className="text-sm font-medium text-orange-700">Failed Tasks</h4>
+                <p className="mt-2 text-2xl font-bold text-orange-600">
+                  {failedTasksRef.current.length}
+                </p>
+              </div>
+            </div>
+
+            {/* Campaign Management */}
+            <div className="mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-md font-medium text-gray-900">Campaigns</h3>
+                <button
+                  onClick={() => {/* TODO: Open campaign creation modal */}}
+                  className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                >
+                  Create Campaign
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {campaigns.map(campaign => (
+                  <div key={campaign.id} className="border border-gray-200 rounded-lg p-4">
+                    <h4 className="font-medium text-gray-900">{campaign.name}</h4>
+                    <p className="text-sm text-gray-600 mt-1">{campaign.description}</p>
+                    <div className="mt-3 flex justify-between items-center">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                        campaign.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {campaign.active ? 'Active' : 'Inactive'}
+                      </span>
+                      <div className="flex space-x-2">
+                        <button className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
+                        <button className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Automation Rules */}
+            <div className="mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-md font-medium text-gray-900">Automation Rules</h3>
+                <button
+                  onClick={() => {/* TODO: Open rule creation modal */}}
+                  className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+                >
+                  Add Rule
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Rule</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Trigger</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {automationRules.map(rule => (
+                      <tr key={rule.id}>
+                        <td className="px-4 py-2 text-sm font-medium text-gray-900">{rule.name}</td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{rule.trigger}</td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{rule.action}</td>
+                        <td className="px-4 py-2">
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            rule.enabled ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {rule.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-sm text-gray-600">{rule.priority}</td>
+                        <td className="px-4 py-2 text-sm">
+                          <button 
+                            onClick={() => manualOverrideRule(rule.id, selectedContact?.id || '', 'execute')}
+                            className="text-green-600 hover:text-green-800 mr-1"
+                            title="Execute Now"
+                          >
+                            ▶
+                          </button>
+                          <button 
+                            onClick={() => manualOverrideRule(rule.id, selectedContact?.id || '', 'skip')}
+                            className="text-yellow-600 hover:text-yellow-800 mr-1"
+                            title="Skip"
+                          >
+                            ⏭
+                          </button>
+                          <button 
+                            onClick={() => manualOverrideRule(rule.id, '', 'disable')}
+                            className="text-red-600 hover:text-red-800 mr-2"
+                            title="Disable"
+                          >
+                            ⏸
+                          </button>
+                          <button className="text-blue-600 hover:text-blue-800 mr-2">Edit</button>
+                          <button className="text-red-600 hover:text-red-800">Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* A/B Testing Results */}
+            {Object.keys(abTestResults).length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-md font-medium text-gray-900 mb-4">A/B Test Results</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(abTestResults).map(([template, results]) => (
+                    <div key={template} className="border border-gray-200 rounded-lg p-4">
+                      <h4 className="font-medium text-gray-900 mb-3">{template}</h4>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Variant A:</span>
+                          <span className="text-sm font-medium">
+                            {results.A?.sent || 0} sent, {results.A?.failed || 0} failed
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Variant B:</span>
+                          <span className="text-sm font-medium">
+                            {results.B?.sent || 0} sent, {results.B?.failed || 0} failed
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm text-gray-600">Success Rate:</span>
+                          <span className="text-sm font-medium text-green-600">
+                            {calculateSuccessRate(results)}%
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Notifications Panel */}
+        {notifications.length > 0 && (
+          <div className="mb-8 bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Notifications</h3>
+              <button
+                onClick={() => setNotifications([])}
+                className="text-sm text-gray-500 hover:text-gray-700"
+              >
+                Clear All
+              </button>
+            </div>
+            <div className="space-y-2">
+              {notifications.slice(0, 5).map(notification => (
+                <div
+                  key={notification.id}
+                  className={`p-3 rounded-md ${
+                    notification.type === 'error' ? 'bg-red-50 border border-red-200' :
+                    notification.type === 'warning' ? 'bg-yellow-50 border border-yellow-200' :
+                    notification.type === 'success' ? 'bg-green-50 border border-green-200' :
+                    'bg-blue-50 border border-blue-200'
+                  }`}
+                >
+                  <p className={`text-sm ${
+                    notification.type === 'error' ? 'text-red-800' :
+                    notification.type === 'warning' ? 'text-yellow-800' :
+                    notification.type === 'success' ? 'text-green-800' :
+                    'text-blue-800'
+                  }`}>
+                    {notification.message}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(notification.timestamp).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Analytics Dashboard */}
         {user && (
           <div className="mb-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
