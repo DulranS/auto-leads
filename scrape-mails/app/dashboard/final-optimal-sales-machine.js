@@ -1175,6 +1175,11 @@ export default function FinalOptimalSalesMachine() {
 
   // Smart CSV processing functions
   const handleCSVUpload = useCallback(async (file) => {
+    if (!user?.uid) {
+      addNotification('error', 'Please sign in to upload CSV files');
+      return;
+    }
+    
     try {
       setCsvProcessing(prev => ({ ...prev, processing: true, progress: 0, errors: [] }));
       
@@ -1206,22 +1211,33 @@ export default function FinalOptimalSalesMachine() {
       
       setCsvProcessing(prev => ({ ...prev, progress: 50 }));
       
-      // Save to Firestore
+      // Save to Firestore with proper error handling
       const batch = writeBatch(db);
       const contactsRef = collection(db, 'users', user.uid, 'contacts');
       
       processedData.data.forEach(contact => {
         const docRef = doc(contactsRef);
-        batch.set(docRef, {
+        
+        // Clean data to prevent undefined values
+        const cleanData = {
           ...contact.processed,
           id: contact.id,
-          source: contact.source,
-          uploadDate: contact.uploadDate,
-          rawData: contact.rawData,
-          metadata: contact.metadata,
+          source: contact.source || 'csv_upload',
+          uploadDate: contact.uploadDate || new Date().toISOString(),
+          rawData: contact.rawData || {},
+          metadata: contact.metadata || {},
           createdAt: serverTimestamp(),
           lastUpdated: serverTimestamp()
+        };
+        
+        // Remove undefined values
+        Object.keys(cleanData).forEach(key => {
+          if (cleanData[key] === undefined) {
+            delete cleanData[key];
+          }
         });
+        
+        batch.set(docRef, cleanData);
       });
       
       await batch.commit();
@@ -1268,7 +1284,7 @@ export default function FinalOptimalSalesMachine() {
       }));
       addNotification('error', `CSV processing failed: ${error.message}`);
     }
-  }, [user, addNotification]);
+  }, [user, addNotification, loadContacts]);
 
   // Simple CSV parser fallback
   const parseCSVSimple = (text) => {
@@ -1297,6 +1313,11 @@ export default function FinalOptimalSalesMachine() {
 
   // Auto lead discovery
   const startAutoDiscovery = useCallback(async () => {
+    if (!user?.uid) {
+      addNotification('error', 'Please sign in to start lead discovery');
+      return;
+    }
+    
     try {
       setDiscoveryStatus(prev => ({ ...prev, discovering: true, results: [] }));
       
@@ -1306,23 +1327,34 @@ export default function FinalOptimalSalesMachine() {
       let totalNewLeads = 0;
       
       for (const discoveryResult of discoveries) {
-        // Save discovered leads to Firestore
+        // Save discovered leads to Firestore with proper error handling
         const batch = writeBatch(db);
         const contactsRef = collection(db, 'users', user.uid, 'contacts');
         
         discoveryResult.leads.forEach(lead => {
           const docRef = doc(contactsRef);
-          batch.set(docRef, {
+          
+          // Clean data to prevent undefined values
+          const cleanData = {
             ...lead.company,
             contact: lead.contact,
             id: lead.id,
-            source: lead.source,
-            discovered: lead.discovered,
-            confidence: lead.confidence,
-            qualification: lead.qualification,
+            source: lead.source || 'auto_discovery',
+            discovered: lead.discovered || new Date().toISOString(),
+            confidence: lead.confidence || 0,
+            qualification: lead.qualification || { qualified: false, score: 0, reasons: [] },
             createdAt: serverTimestamp(),
             lastUpdated: serverTimestamp()
+          };
+          
+          // Remove undefined values
+          Object.keys(cleanData).forEach(key => {
+            if (cleanData[key] === undefined) {
+              delete cleanData[key];
+            }
           });
+          
+          batch.set(docRef, cleanData);
         });
         
         await batch.commit();
@@ -1357,10 +1389,15 @@ export default function FinalOptimalSalesMachine() {
       setDiscoveryStatus(prev => ({ ...prev, discovering: false }));
       addNotification('error', `Lead discovery failed: ${error.message}`);
     }
-  }, [user, addNotification]);
+  }, [user, addNotification, loadContacts]);
 
   // Enhanced load contacts with smart filtering
   const loadContacts = useCallback(async () => {
+    if (!user?.uid) {
+      console.warn('Cannot load contacts: User not authenticated');
+      return;
+    }
+    
     try {
       setLoading(true);
       const contactsRef = collection(db, 'users', user.uid, 'contacts');
@@ -1389,7 +1426,20 @@ export default function FinalOptimalSalesMachine() {
         const batch = writeBatch(db);
         qualifiedLeads.forEach(contact => {
           const docRef = doc(db, 'users', user.uid, 'contacts', contact.id);
-          batch.update(docRef, { qualification: contact.qualification });
+          
+          // Clean qualification data
+          const cleanQualification = {
+            qualification: contact.qualification || { qualified: false, score: 0, reasons: [] }
+          };
+          
+          // Remove undefined values
+          Object.keys(cleanQualification.qualification).forEach(key => {
+            if (cleanQualification.qualification[key] === undefined) {
+              delete cleanQualification.qualification[key];
+            }
+          });
+          
+          batch.update(docRef, cleanQualification);
         });
         await batch.commit();
         
@@ -1696,62 +1746,6 @@ export default function FinalOptimalSalesMachine() {
       }));
       
     } catch (err) {
-      console.error('Cadence step failed:', err);
-      addNotification('error', 'Failed to process cadence step');
-    }
-  };
-
-  // Record response
-  const recordResponse = (leadId, responseType) => {
-    try {
-      const lead = campaign.in_sequence_leads.find(l => l.id === leadId);
-      if (!lead) {
-        addNotification('error', 'Lead not found');
-        return;
-      }
-
-      // Record response in engine
-      automationEngine.recordResponse(leadId, 'email1', responseType);
-
-      // Update lead status
-      let newStatus = 'replied';
-      if (responseType === 'meeting') {
-        newStatus = 'meeting_booked';
-        setKpis(prev => ({ ...prev, meetings_booked: prev.meetings_booked + 1 }));
-      } else if (responseType === 'reply') {
-        setKpis(prev => ({ ...prev, replies: prev.replies + 1 }));
-      }
-
-      const updatedLead = {
-        ...lead,
-        status: newStatus,
-        response_recorded: {
-          type: responseType,
-          timestamp: new Date()
-        }
-      };
-
-      // Move to completed
-      setCampaign(prev => ({
-        ...prev,
-        in_sequence_leads: prev.in_sequence_leads.filter(l => l.id !== leadId),
-        completed_leads: [...prev.completed_leads, updatedLead]
-      }));
-
-      addNotification('success', `Response recorded: ${responseType}`);
-      
-    } catch (err) {
-      console.error('Failed to record response:', err);
-      addNotification('error', 'Failed to record response');
-    }
-  };
-
-  // Move to nurture queue
-  const moveToNurture = (leadId) => {
-    try {
-      const lead = campaign.in_sequence_leads.find(l => l.id === leadId);
-      if (!lead) {
-        addNotification('error', 'Lead not found');
         return;
       }
 
@@ -1775,6 +1769,77 @@ export default function FinalOptimalSalesMachine() {
       addNotification('error', 'Failed to move to nurture');
     }
   };
+
+  // Compose manual email function
+  const composeManualEmail = useCallback((lead, templateType) => {
+    if (!lead) {
+      addNotification('error', 'Please select a lead first');
+      return;
+    }
+    
+    const template = automationEngine.getTemplate(templateType);
+    if (!template) {
+      addNotification('error', 'Template not found');
+      return;
+    }
+    
+    const personalizedEmail = automationEngine.personalizeEmail(template, lead);
+    
+    setManualEmailComposer({
+      lead,
+      templateType,
+      subject: personalizedEmail.subject,
+      body: personalizedEmail.body,
+      to: lead.contact?.email || lead.email || 'no-email@example.com'
+    });
+    
+    addNotification('info', `Composing ${templateType} email for ${lead.company?.name || lead.name || 'Lead'}`);
+  }, [addNotification]);
+  
+  // Record response function
+  const recordResponse = useCallback(async (leadId, responseType) => {
+    if (!user?.uid) {
+      addNotification('error', 'Please sign in to record responses');
+      return;
+    }
+    
+    try {
+      // Update lead status based on response
+      let newStatus = 'replied';
+      if (responseType === 'meeting') {
+        newStatus = 'demo_scheduled';
+      }
+      
+      // Update in Firestore
+      const leadRef = doc(db, 'users', user.uid, 'contacts', leadId);
+      await updateDoc(leadRef, {
+        status: newStatus,
+        lastResponse: responseType,
+        lastResponseDate: serverTimestamp(),
+        lastUpdated: serverTimestamp()
+      });
+      
+      // Update local state
+      setContacts(prev => prev.map(contact => 
+        contact.id === leadId 
+          ? { ...contact, status: newStatus, lastResponse: responseType }
+          : contact
+      ));
+      
+      // Update KPIs
+      if (responseType === 'reply') {
+        setKpis(prev => ({ ...prev, replies: prev.replies + 1 }));
+      } else if (responseType === 'meeting') {
+        setKpis(prev => ({ ...prev, meetings_booked: prev.meetings_booked + 1 }));
+      }
+      
+      addNotification('success', `Recorded ${responseType} for lead`);
+      
+    } catch (error) {
+      console.error('Failed to record response:', error);
+      addNotification('error', 'Failed to record response: ' + error.message);
+    }
+  }, [user, addNotification]);
 
   // Health monitoring
   const checkSystemHealth = async () => {
@@ -1808,8 +1873,24 @@ export default function FinalOptimalSalesMachine() {
       const script = document.createElement('script');
       script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js';
       script.async = true;
+      script.onerror = () => {
+        console.warn('Failed to load Papa Parse, using fallback parser');
+      };
       document.body.appendChild(script);
     }
+  }, []);
+  
+  // Add error boundary for network requests
+  useEffect(() => {
+    const handleAbortError = (event) => {
+      console.warn('Request aborted:', event);
+    };
+    
+    window.addEventListener('abort', handleAbortError);
+    
+    return () => {
+      window.removeEventListener('abort', handleAbortError);
+    };
   }, []);
 
   // Effects
@@ -1827,6 +1908,11 @@ export default function FinalOptimalSalesMachine() {
             startAutoDiscovery();
           }
         }, 2000);
+      } else {
+        // Clear data on sign out
+        setContacts([]);
+        setCsvProcessing({ processing: false, progress: 0, analysis: null, preview: null, errors: [] });
+        setDiscoveryStatus({ discovering: false, sources: Object.keys(LEAD_SOURCES), results: [], lastDiscovery: null });
       }
     });
     
@@ -1850,7 +1936,7 @@ export default function FinalOptimalSalesMachine() {
       clearInterval(healthInterval);
       clearInterval(kpiInterval);
     };
-  }, [contacts.length]);
+  }, [contacts.length, loadContacts, startAutoDiscovery]);
 
   // Auto-switch to manual mode on health failures
   useEffect(() => {
