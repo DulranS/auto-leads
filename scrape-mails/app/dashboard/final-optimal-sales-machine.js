@@ -1,166 +1,5 @@
 'use client';
 
-// Global error handling for React loading issues
-if (typeof window !== 'undefined') {
-  // Prevent infinite reload loops
-  let reloadCount = parseInt(sessionStorage.getItem('reactReloadCount') || '0');
-  let lastReloadTime = parseInt(sessionStorage.getItem('lastReloadTime') || '0');
-  const now = Date.now();
-  
-  // Reset count if it's been more than 30 seconds
-  if (now - lastReloadTime > 30000) {
-    reloadCount = 0;
-  }
-  
-  // Aggressive error filtering to prevent all extension interference
-  const originalErrorHandler = window.onerror;
-  const originalConsoleError = console.error;
-  
-  window.addEventListener('error', (event) => {
-    // Immediately block all browser extension errors
-    if (event.filename?.includes('webextension.js') ||
-        event.filename?.includes('dist.94abdbf1.js') ||
-        event.filename?.includes('frame_start.js') ||
-        event.filename?.includes('evmAsk.js') ||
-        event.filename?.includes('content-script.js') ||
-        event.message?.includes('TronWeb') ||
-        event.message?.includes('bybit') ||
-        event.message?.includes('ethereum') ||
-        event.message?.includes('Cannot read properties of null') ||
-        event.message?.includes('SES Removing unpermitted intrinsics') ||
-        event.message?.includes('webextension.js:26') ||
-        event.message?.includes('webextension.js:28')) {
-      
-      // Completely silence these errors
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      return false;
-    }
-    
-    // Handle React not defined errors with strict limits
-    if (event.message?.includes('React is not defined') ||
-        event.message?.includes('ReferenceError: React is not defined')) {
-      
-      // Prevent infinite reload loops
-      if (reloadCount >= 1) { // Reduced to 1 to be more aggressive
-        console.error('React loading failed, showing static error page');
-        sessionStorage.setItem('reactReloadCount', '999'); // Lock further reloads
-        
-        // Show a static error message instead of reloading
-        document.body.innerHTML = `
-          <div style="
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #111827;
-            color: white;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-family: system-ui;
-            z-index: 999999;
-          ">
-            <div style="
-              background: #1f2937;
-              padding: 2rem;
-              border-radius: 1rem;
-              border: 1px solid #374151;
-              max-width: 500px;
-              text-align: center;
-            ">
-              <h1 style="color: #f59e0b; margin-bottom: 1rem;">Application Loading Issue</h1>
-              <p style="margin-bottom: 1.5rem; line-height: 1.6;">
-                The application is having trouble loading due to browser extensions.
-                Please disable all browser extensions and refresh the page.
-              </p>
-              <div style="margin-bottom: 1.5rem;">
-                <strong style="color: #fbbf24;">Common problematic extensions:</strong><br>
-                TronLink, MetaMask, bybit, any crypto wallet extensions
-              </div>
-              <button onclick="sessionStorage.clear(); localStorage.clear(); window.location.reload()" style="
-                background: #dc2626;
-                color: white;
-                border: none;
-                padding: 0.75rem 1.5rem;
-                border-radius: 0.5rem;
-                cursor: pointer;
-                font-size: 1rem;
-                width: 100%;
-                margin-bottom: 0.5rem;
-              ">
-                Clear All Storage & Reload
-              </button>
-              <button onclick="window.location.reload()" style="
-                background: #3b82f6;
-                color: white;
-                border: none;
-                padding: 0.75rem 1.5rem;
-                border-radius: 0.5rem;
-                cursor: pointer;
-                font-size: 1rem;
-                width: 100%;
-              ">
-                Try Again
-              </button>
-            </div>
-          </div>
-        `;
-        return false;
-      }
-      
-      console.warn('React loading error detected, will retry...', `Attempt ${reloadCount + 1}`);
-      event.preventDefault();
-      
-      // Try to reload the page after a short delay
-      setTimeout(() => {
-        if (window.location && reloadCount < 1) {
-          reloadCount++;
-          sessionStorage.setItem('reactReloadCount', reloadCount.toString());
-          sessionStorage.setItem('lastReloadTime', now.toString());
-          console.log(`Reloading due to React loading failure... Attempt ${reloadCount}`);
-          window.location.reload();
-        }
-      }, 3000);
-      return false;
-    }
-    
-    // Handle module loading errors
-    if (event.message?.includes('module evaluation') ||
-        event.message?.includes('module error')) {
-      console.warn('Module loading error detected and ignored');
-      event.preventDefault();
-      return false;
-    }
-    
-    // Call original handler for other errors
-    if (originalErrorHandler) {
-      return originalErrorHandler(event);
-    }
-  }, true); // Use capture to catch all errors
-  
-  // Override console.error to filter extension errors
-  console.error = function(...args) {
-    const message = args[0];
-    if (typeof message === 'string' && (
-        message.includes('TronWeb') ||
-        message.includes('bybit') ||
-        message.includes('ethereum') ||
-        message.includes('webextension.js') ||
-        message.includes('Cannot read properties of null') ||
-        message.includes('SES Removing unpermitted intrinsics')
-    )) {
-      return; // Silently ignore
-    }
-    return originalConsoleError.apply(console, args);
-  };
-  
-  // Mark React as loaded when component mounts
-  window.reactLoaded = false;
-}
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, Timestamp, orderBy, limit, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
@@ -3223,119 +3062,95 @@ function FinalOptimalSalesMachine() {
   );
 }
 
-// Component-level error boundary to catch any remaining errors
-class ErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    console.error('Component error caught:', error, errorInfo);
-    
-    // Handle React not defined errors specifically
-    if (error.message?.includes('React is not defined') ||
-        error.message?.includes('ReferenceError: React is not defined')) {
+export default function FinalOptimalSalesMachine() {
+  // Clear any reload locks on successful mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Clear any reload counters that might exist
+      sessionStorage.removeItem('reactReloadCount');
+      sessionStorage.removeItem('componentReloadCount');
+      sessionStorage.removeItem('lastReloadTime');
       
-      // Prevent infinite reload loops in component boundary
-      const reloadCount = parseInt(sessionStorage.getItem('componentReloadCount') || '0');
-      if (reloadCount >= 1) {
-        console.error('Component boundary: Too many reload attempts, stopping to prevent infinite loop');
-        sessionStorage.setItem('componentReloadCount', '999'); // Lock further reloads
-        return;
-      }
-      
-      console.error('React loading error in component, attempting reload...');
-      sessionStorage.setItem('componentReloadCount', (reloadCount + 1).toString());
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-      return;
+      console.log('React component successfully mounted');
     }
-    
-    // Handle module evaluation errors
-    if (error.message?.includes('module evaluation') ||
-        error.message?.includes('module error')) {
-      console.warn('Module error in component, ignoring...');
-      return;
-    }
-    
-    // Ignore browser extension and external script errors
-    if (error.message?.includes('TronWeb') ||
-        error.message?.includes('bybit') ||
-        error.message?.includes('ethereum') ||
-        error.message?.includes('webextension.js') ||
-        error.message?.includes('removeChild') ||
-        error.message?.includes('Cannot access') ||
-        error.message?.includes('Cannot redefine property')) {
-      console.warn('Ignoring external script error in component');
-      return;
-    }
-  }
+  }, []);
+  
+  const [user, setUser] = useState(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const router = useRouter();
 
-  render() {
-    if (this.state.hasError) {
-      // Special handling for React loading errors
-      if (this.state.error?.message?.includes('React is not defined') ||
-          this.state.error?.message?.includes('ReferenceError: React is not defined')) {
-        return (
-          <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700">
-              <div className="text-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto mb-4"></div>
-                <h2 className="text-xl font-bold text-amber-400 mb-4">Loading Application...</h2>
-                <p className="text-gray-300 mb-4">
-                  React is loading. This may take a moment due to browser extensions.
-                </p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="w-full bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition"
-                >
-                  Reload Now
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      }
-      
-      return (
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-          <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700">
-            <h2 className="text-xl font-bold text-red-400 mb-4">Something went wrong</h2>
-            <p className="text-gray-300 mb-4">
-              The application encountered an error. This might be due to browser extensions or network issues.
-            </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition"
-            >
-              Reload Application
-            </button>
-            <button
-              onClick={() => this.setState({ hasError: false, error: null })}
-              className="w-full mt-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition"
-            >
-              Continue Anyway
-            </button>
-          </div>
-        </div>
-      );
+  // Initialize smart processors
+  const csvProcessor = useRef(new SmartCSVProcessor());
+  const leadDiscovery = useRef(new SmartLeadDiscovery());
+
+  // Core campaign state
+  const [campaign, setCampaign] = useState({
+    status: 'idle',
+    in_sequence_leads: [],
+    nurture_queue: [],
+    outreach_queue: [],
+    completed_leads: [],
+    daily_stats: {
+      emails_sent: 0,
+      replies: 0,
+      meetings_booked: 0,
+      unsubscribes: 0
     }
+  });
 
-    return this.props.children;
-  }
-}
+  // Sales workflow and general states
+  const [salesPipeline, setSalesPipeline] = useState({
+    discovery: { leads: [], active: false },
+    qualification: { leads: [], active: false },
+    outreach: { leads: [], active: false },
+    followup: { leads: [], active: false },
+    conversion: { leads: [], active: false }
+  });
+  
+  const [manualMode, setManualMode] = useState(false);
+  const [kpis, setKpis] = useState({
+    leads_discovered: 0,
+    leads_qualified: 0,
+    emails_sent: 0,
+    replies: 0,
+    meetings_booked: 0,
+    reply_rate: 0,
+    meeting_rate: 0,
+    bounce_rate: 0,
+    unsubscribe_rate: 0
+  });
+  
+  const [contacts, setContacts] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [manualEmailComposer, setManualEmailComposer] = useState(null);
+  const [csvProcessing, setCsvProcessing] = useState({ processing: false, progress: 0, analysis: null, preview: null, errors: [] });
+  const [discoveryStatus, setDiscoveryStatus] = useState({ discovering: false, sources: Object.keys(LEAD_SOURCES), results: [], lastDiscovery: null });
+  const [systemHealth, setSystemHealth] = useState({ status: 'healthy', last_check: null, failures: [], token_valid: true, firestore_connected: true });
+  
+  // Notification management
+  const addNotification = useCallback((type, message) => {
+    const id = Date.now();
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  }, []);
 
-// Wrap the main component with error boundary
-export default function FinalOptimalSalesMachineWithErrorBoundary() {
-  return (
-    <ErrorBoundary>
-      <FinalOptimalSalesMachine />
-    </ErrorBoundary>
-  );
-}
+  // Authentication handlers
+  const signIn = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error('Sign in error:', error);
+      addNotification('error', 'Failed to sign in');
+    }
+  };
+
+  const signOutUser = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Sign out error:', error);
+    }
+  };
