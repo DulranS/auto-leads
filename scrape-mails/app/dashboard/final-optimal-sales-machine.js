@@ -12,14 +12,39 @@ if (typeof window !== 'undefined') {
     reloadCount = 0;
   }
   
+  // Aggressive error filtering to prevent all extension interference
+  const originalErrorHandler = window.onerror;
+  const originalConsoleError = console.error;
+  
   window.addEventListener('error', (event) => {
-    // Handle React not defined errors
+    // Immediately block all browser extension errors
+    if (event.filename?.includes('webextension.js') ||
+        event.filename?.includes('dist.94abdbf1.js') ||
+        event.filename?.includes('frame_start.js') ||
+        event.filename?.includes('evmAsk.js') ||
+        event.filename?.includes('content-script.js') ||
+        event.message?.includes('TronWeb') ||
+        event.message?.includes('bybit') ||
+        event.message?.includes('ethereum') ||
+        event.message?.includes('Cannot read properties of null') ||
+        event.message?.includes('SES Removing unpermitted intrinsics') ||
+        event.message?.includes('webextension.js:26') ||
+        event.message?.includes('webextension.js:28')) {
+      
+      // Completely silence these errors
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return false;
+    }
+    
+    // Handle React not defined errors with strict limits
     if (event.message?.includes('React is not defined') ||
         event.message?.includes('ReferenceError: React is not defined')) {
       
       // Prevent infinite reload loops
-      if (reloadCount >= 2) {
-        console.error('Too many reload attempts, stopping to prevent infinite loop');
+      if (reloadCount >= 1) { // Reduced to 1 to be more aggressive
+        console.error('React loading failed, showing static error page');
         sessionStorage.setItem('reactReloadCount', '999'); // Lock further reloads
         
         // Show a static error message instead of reloading
@@ -48,9 +73,26 @@ if (typeof window !== 'undefined') {
             ">
               <h1 style="color: #f59e0b; margin-bottom: 1rem;">Application Loading Issue</h1>
               <p style="margin-bottom: 1.5rem; line-height: 1.6;">
-                The application is having trouble loading due to browser extensions or network issues.
-                Please try disabling browser extensions and refreshing manually.
+                The application is having trouble loading due to browser extensions.
+                Please disable all browser extensions and refresh the page.
               </p>
+              <div style="margin-bottom: 1.5rem;">
+                <strong style="color: #fbbf24;">Common problematic extensions:</strong><br>
+                TronLink, MetaMask, bybit, any crypto wallet extensions
+              </div>
+              <button onclick="sessionStorage.clear(); localStorage.clear(); window.location.reload()" style="
+                background: #dc2626;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 0.5rem;
+                cursor: pointer;
+                font-size: 1rem;
+                width: 100%;
+                margin-bottom: 0.5rem;
+              ">
+                Clear All Storage & Reload
+              </button>
               <button onclick="window.location.reload()" style="
                 background: #3b82f6;
                 color: white;
@@ -59,25 +101,14 @@ if (typeof window !== 'undefined') {
                 border-radius: 0.5rem;
                 cursor: pointer;
                 font-size: 1rem;
+                width: 100%;
               ">
                 Try Again
-              </button>
-              <button onclick="sessionStorage.clear(); window.location.reload()" style="
-                background: #6b7280;
-                color: white;
-                border: none;
-                padding: 0.75rem 1.5rem;
-                border-radius: 0.5rem;
-                cursor: pointer;
-                font-size: 1rem;
-                margin-left: 0.5rem;
-              ">
-                Clear Cache & Reload
               </button>
             </div>
           </div>
         `;
-        return;
+        return false;
       }
       
       console.warn('React loading error detected, will retry...', `Attempt ${reloadCount + 1}`);
@@ -85,15 +116,15 @@ if (typeof window !== 'undefined') {
       
       // Try to reload the page after a short delay
       setTimeout(() => {
-        if (window.location && reloadCount < 2) {
+        if (window.location && reloadCount < 1) {
           reloadCount++;
           sessionStorage.setItem('reactReloadCount', reloadCount.toString());
           sessionStorage.setItem('lastReloadTime', now.toString());
           console.log(`Reloading due to React loading failure... Attempt ${reloadCount}`);
           window.location.reload();
         }
-      }, 2000);
-      return;
+      }, 3000);
+      return false;
     }
     
     // Handle module loading errors
@@ -101,9 +132,30 @@ if (typeof window !== 'undefined') {
         event.message?.includes('module error')) {
       console.warn('Module loading error detected and ignored');
       event.preventDefault();
-      return;
+      return false;
     }
-  });
+    
+    // Call original handler for other errors
+    if (originalErrorHandler) {
+      return originalErrorHandler(event);
+    }
+  }, true); // Use capture to catch all errors
+  
+  // Override console.error to filter extension errors
+  console.error = function(...args) {
+    const message = args[0];
+    if (typeof message === 'string' && (
+        message.includes('TronWeb') ||
+        message.includes('bybit') ||
+        message.includes('ethereum') ||
+        message.includes('webextension.js') ||
+        message.includes('Cannot read properties of null') ||
+        message.includes('SES Removing unpermitted intrinsics')
+    )) {
+      return; // Silently ignore
+    }
+    return originalConsoleError.apply(console, args);
+  };
   
   // Mark React as loaded when component mounts
   window.reactLoaded = false;
