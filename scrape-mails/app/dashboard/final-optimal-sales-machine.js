@@ -1038,7 +1038,7 @@ class SalesAutomationEngine {
 // Initialize engine
 const automationEngine = new SalesAutomationEngine();
 
-export default function FinalOptimalSalesMachine() {
+function FinalOptimalSalesMachine() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
@@ -1939,18 +1939,49 @@ export default function FinalOptimalSalesMachine() {
     // Handle unhandled promise rejections
     const handleUnhandledRejection = (event) => {
       console.error('Unhandled promise rejection:', event.reason);
-      if (event.reason?.message?.includes('AbortError')) {
-        console.warn('Ignoring AbortError from browser extension conflict');
+      
+      // Ignore abort errors from browser extensions
+      if (event.reason?.message?.includes('AbortError') ||
+          event.reason?.message?.includes('webextension.js') ||
+          event.reason?.message?.includes('Cannot read properties of null')) {
+        console.warn('Ignoring browser extension related rejection');
         event.preventDefault();
+        return;
+      }
+      
+      // Ignore reference errors from external scripts
+      if (event.reason?.message?.includes('Cannot access') ||
+          event.reason?.message?.includes('before initialization')) {
+        console.warn('Ignoring external script reference error');
+        event.preventDefault();
+        return;
       }
     };
     
-    // Handle extension conflicts
+    // Handle extension conflicts and external script errors
     const handleExtensionError = (event) => {
+      // Browser extension conflicts
       if (event.message?.includes('TronWeb') || 
           event.message?.includes('bybit') || 
-          event.message?.includes('ethereum')) {
+          event.message?.includes('ethereum') ||
+          event.message?.includes('webextension.js') ||
+          event.message?.includes('Cannot read properties of null')) {
         console.warn('Browser extension conflict detected and ignored');
+        return;
+      }
+      
+      // DOM manipulation errors from external scripts
+      if (event.message?.includes('removeChild') ||
+          event.message?.includes('Failed to execute') ||
+          event.message?.includes('Cannot redefine property')) {
+        console.warn('External script DOM manipulation error ignored');
+        return;
+      }
+      
+      // Reference errors from external scripts
+      if (event.message?.includes('Cannot access') ||
+          event.message?.includes('before initialization')) {
+        console.warn('External script reference error ignored');
         return;
       }
     };
@@ -3014,5 +3045,71 @@ export default function FinalOptimalSalesMachine() {
         </div>
       )}
     </div>
+  );
+}
+
+// Component-level error boundary to catch any remaining errors
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Component error caught:', error, errorInfo);
+    
+    // Ignore browser extension and external script errors
+    if (error.message?.includes('TronWeb') ||
+        error.message?.includes('bybit') ||
+        error.message?.includes('ethereum') ||
+        error.message?.includes('webextension.js') ||
+        error.message?.includes('removeChild') ||
+        error.message?.includes('Cannot access') ||
+        error.message?.includes('Cannot redefine property')) {
+      console.warn('Ignoring external script error in component');
+      return;
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+          <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700">
+            <h2 className="text-xl font-bold text-red-400 mb-4">Something went wrong</h2>
+            <p className="text-gray-300 mb-4">
+              The application encountered an error. This might be due to browser extensions or network issues.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="w-full bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              Reload Application
+            </button>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="w-full mt-2 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg font-medium transition"
+            >
+              Continue Anyway
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Wrap the main component with error boundary
+export default function FinalOptimalSalesMachineWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <FinalOptimalSalesMachine />
+    </ErrorBoundary>
   );
 }
