@@ -296,6 +296,91 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
+  // Enhanced Error Recovery System
+  const handleCriticalFailure = async (error) => {
+    // Log critical error
+    console.error('Critical automation failure:', error);
+    
+    // Switch to manual mode automatically
+    setAutomationEnabled(false);
+    setAutomationMode('manual');
+    
+    // Create emergency notification
+    addNotification('error', `Critical failure detected: ${error.message}. System switched to manual mode for safety.`);
+    
+    // Log to emergency backup
+    try {
+      const emergencyLog = {
+        timestamp: serverTimestamp(),
+        error: error.message,
+        stack: error.stack,
+        systemState: {
+          automationEnabled: false,
+          automationMode: 'manual',
+          failedTasks: failedTasksRef.current.length,
+          rateLimits
+        }
+      };
+      
+      await addDoc(collection(db, 'emergency_logs'), emergencyLog);
+    } catch (logErr) {
+      console.error('Failed to log emergency:', logErr);
+    }
+  };
+
+  const validateSystemHealth = async () => {
+    const healthChecks = [
+      {
+        name: 'firebase',
+        check: async () => {
+          try {
+            await getDocs(query(collection(db, 'contacts'), limit(1)));
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      },
+      {
+        name: 'googleToken',
+        check: () => !!googleToken
+      },
+      {
+        name: 'rateLimits',
+        check: () => rateLimits.email < AUTOMATION_CONFIG.emailRateLimit * 0.9
+      },
+      {
+        name: 'failedTasks',
+        check: () => failedTasksRef.current.length < 100
+      }
+    ];
+
+    const results = await Promise.all(
+      healthChecks.map(async hc => ({
+        name: hc.name,
+        status: await hc.check()
+      }))
+    );
+
+    // Update system health state
+    const healthState = {};
+    results.forEach(result => {
+      healthState[result.name] = result.status;
+    });
+    healthState.lastCheck = new Date();
+    
+    setSystemHealth(healthState);
+
+    const failedChecks = results.filter(r => !r.status);
+    
+    if (failedChecks.length > 0) {
+      await handleCriticalFailure(new Error(`Health checks failed: ${failedChecks.map(c => c.name).join(', ')}`));
+    }
+
+    return results;
+  };
+
+  // Enhanced Automation Engine with Health Monitoring
   const startAutomationEngine = () => {
     if (automationIntervalRef.current) {
       clearInterval(automationIntervalRef.current);
@@ -303,11 +388,30 @@ export default function FinalOptimalSalesMachine() {
 
     automationIntervalRef.current = setInterval(async () => {
       if (automationEnabled && automationMode !== 'manual') {
-        await processAutomationQueue();
-        await retryFailedTasks();
-        await updateRateLimits();
+        try {
+          // Pre-execution health check
+          const health = await validateSystemHealth();
+          const criticalFailures = health.filter(h => !h.status);
+          
+          if (criticalFailures.length === 0) {
+            await processAutomationQueue();
+            await processEmailSequences();
+            await retryFailedTasks();
+            await updateRateLimits();
+            await loadAnalytics();
+          }
+        } catch (err) {
+          await handleCriticalFailure(err);
+        }
       }
     }, AUTOMATION_CONFIG.automationInterval);
+
+    // Additional health monitoring every 5 minutes
+    setInterval(async () => {
+      if (automationEnabled) {
+        await validateSystemHealth();
+      }
+    }, 5 * 60 * 1000);
   };
 
   const processAutomationQueue = async () => {
@@ -368,27 +472,49 @@ export default function FinalOptimalSalesMachine() {
   };
 
   const executeAutomationAction = async (rule, contact) => {
+    // Update execution counters
+    const ruleRef = doc(db, 'automation_rules', rule.id);
+    await updateDoc(ruleRef, {
+      executionCount: (rule.executionCount || 0) + 1,
+      lastExecuted: serverTimestamp()
+    });
+
     switch (rule.action) {
       case 'send_email':
         if (rateLimits.email >= AUTOMATION_CONFIG.emailRateLimit) {
           throw new Error('Email rate limit exceeded');
         }
         await sendAutomatedEmail(contact, rule.template);
+        await updateDoc(ruleRef, {
+          successCount: (rule.successCount || 0) + 1
+        });
         break;
       case 'send_sms':
         if (rateLimits.sms >= AUTOMATION_CONFIG.smsRateLimit) {
           throw new Error('SMS rate limit exceeded');
         }
         await sendAutomatedSMS(contact, rule.message);
+        await updateDoc(ruleRef, {
+          successCount: (rule.successCount || 0) + 1
+        });
         break;
       case 'update_score':
         await updateContactScore(contact.id);
+        await updateDoc(ruleRef, {
+          successCount: (rule.successCount || 0) + 1
+        });
         break;
       case 'assign_campaign':
         await assignToCampaign(contact.id, rule.campaignId);
+        await updateDoc(ruleRef, {
+          successCount: (rule.successCount || 0) + 1
+        });
         break;
       case 'update_status':
         await updateContactStatus(contact.id, rule.newStatus, rule.note);
+        await updateDoc(ruleRef, {
+          successCount: (rule.successCount || 0) + 1
+        });
         break;
       default:
         throw new Error(`Unknown action: ${rule.action}`);
@@ -1301,6 +1427,208 @@ export default function FinalOptimalSalesMachine() {
     }
   };
 
+  // System Health State
+  const [systemHealth, setSystemHealth] = useState({
+    firebase: true,
+    googleToken: false,
+    rateLimits: true,
+    failedTasks: true,
+    lastCheck: new Date()
+  });
+
+  // State for modals
+  const [campaignModalOpen, setCampaignModalOpen] = useState(false);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [newCampaign, setNewCampaign] = useState({
+    name: '',
+    description: '',
+    active: true,
+    targetAudience: '',
+    budget: '',
+    startDate: '',
+    endDate: ''
+  });
+  const [newRule, setNewRule] = useState({
+    name: '',
+    trigger: 'status_change',
+    condition: { status: 'new' },
+    action: 'send_email',
+    template: 'initial',
+    delay: 0,
+    enabled: true,
+    priority: 1
+  });
+
+  // Campaign Management Functions
+  const createCampaign = async () => {
+    try {
+      const campaignData = {
+        ...newCampaign,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        contactsCount: 0,
+        sentEmails: 0,
+        replies: 0,
+        conversionRate: 0
+      };
+
+      await addDoc(collection(db, 'campaigns'), campaignData);
+      await loadCampaigns();
+      setCampaignModalOpen(false);
+      setNewCampaign({
+        name: '',
+        description: '',
+        active: true,
+        targetAudience: '',
+        budget: '',
+        startDate: '',
+        endDate: ''
+      });
+      addNotification('success', 'Campaign created successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to create campaign');
+    }
+  };
+
+  const updateCampaign = async (campaignId, updates) => {
+    try {
+      const campaignRef = doc(db, 'campaigns', campaignId);
+      await updateDoc(campaignRef, {
+        ...updates,
+        updated_at: serverTimestamp()
+      });
+      await loadCampaigns();
+      addNotification('success', 'Campaign updated successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to update campaign');
+    }
+  };
+
+  const deleteCampaign = async (campaignId) => {
+    try {
+      await deleteDoc(doc(db, 'campaigns', campaignId));
+      await loadCampaigns();
+      addNotification('success', 'Campaign deleted successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to delete campaign');
+    }
+  };
+
+  // Rule Management Functions
+  const createRule = async () => {
+    try {
+      const ruleData = {
+        ...newRule,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        executionCount: 0,
+        successCount: 0,
+        failureCount: 0
+      };
+
+      await addDoc(collection(db, 'automation_rules'), ruleData);
+      await loadAutomationRules();
+      setRuleModalOpen(false);
+      setNewRule({
+        name: '',
+        trigger: 'status_change',
+        condition: { status: 'new' },
+        action: 'send_email',
+        template: 'initial',
+        delay: 0,
+        enabled: true,
+        priority: 1
+      });
+      addNotification('success', 'Automation rule created successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to create automation rule');
+    }
+  };
+
+  const updateRule = async (ruleId, updates) => {
+    try {
+      const ruleRef = doc(db, 'automation_rules', ruleId);
+      await updateDoc(ruleRef, {
+        ...updates,
+        updated_at: serverTimestamp()
+      });
+      await loadAutomationRules();
+      addNotification('success', 'Rule updated successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to update rule');
+    }
+  };
+
+  const deleteRule = async (ruleId) => {
+    try {
+      await deleteDoc(doc(db, 'automation_rules', ruleId));
+      await loadAutomationRules();
+      addNotification('success', 'Rule deleted successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to delete rule');
+    }
+  };
+
+  // Email Sequence Management
+  const createEmailSequence = async (sequenceData) => {
+    try {
+      const sequence = {
+        ...sequenceData,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        activeContacts: 0,
+        completedContacts: 0
+      };
+
+      await addDoc(collection(db, 'email_sequences'), sequence);
+      await loadEmailSequences();
+      addNotification('success', 'Email sequence created successfully');
+    } catch (err) {
+      addNotification('error', 'Failed to create email sequence');
+    }
+  };
+
+  // Advanced Analytics Functions
+  const getDetailedAnalytics = async () => {
+    try {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const logsRef = collection(db, 'automation_logs');
+      const q = query(logsRef, where('timestamp', '>=', thirtyDaysAgo));
+      const querySnapshot = await getDocs(q);
+      const logs = querySnapshot.docs.map(doc => doc.data());
+
+      const analytics = {
+        totalExecutions: logs.length,
+        successRate: (logs.filter(l => l.status === 'success').length / logs.length * 100).toFixed(1),
+        errorRate: (logs.filter(l => l.status === 'failed').length / logs.length * 100).toFixed(1),
+        topRules: Object.entries(
+          logs.reduce((acc, log) => {
+            acc[log.ruleName] = (acc[log.ruleName] || 0) + 1;
+            return acc;
+          }, {})
+        ).sort(([,a], [,b]) => b - a).slice(0, 5),
+        commonErrors: Object.entries(
+          logs.filter(l => l.error).reduce((acc, log) => {
+            acc[log.error] = (acc[log.error] || 0) + 1;
+            return acc;
+          }, {})
+        ).sort(([,a], [,b]) => b - a).slice(0, 5),
+        hourlyDistribution: logs.reduce((acc, log) => {
+          const hour = new Date(log.timestamp.toDate()).getHours();
+          acc[hour] = (acc[hour] || 0) + 1;
+          return acc;
+        }, {})
+      };
+
+      return analytics;
+    } catch (err) {
+      console.error('Failed to get detailed analytics:', err);
+      return null;
+    }
+  };
+
   // Manual Override System
   const manualOverrideRule = async (ruleId, contactId, action) => {
     try {
@@ -1583,6 +1911,83 @@ export default function FinalOptimalSalesMachine() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* System Health Dashboard */}
+        {user && (
+          <div className="mb-8 bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-lg font-medium text-gray-900">System Health</h2>
+              <button
+                onClick={validateSystemHealth}
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+              >
+                Run Health Check
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className={`p-4 rounded-lg border ${
+                systemHealth.firebase ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+              }`}>
+                <div className="flex items-center">
+                  <div className={`w-3 h-3 rounded-full mr-3 ${
+                    systemHealth.firebase ? 'bg-green-500' : 'bg-red-500'
+                  }`} />
+                  <h4 className="text-sm font-medium text-gray-900">Database</h4>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  {systemHealth.firebase ? 'Connected' : 'Disconnected'}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-lg border ${
+                systemHealth.googleToken ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'
+              }`}>
+                <div className="flex items-center">
+                  <div className={`w-3 h-3 rounded-full mr-3 ${
+                    systemHealth.googleToken ? 'bg-green-500' : 'bg-yellow-500'
+                  }`} />
+                  <h4 className="text-sm font-medium text-gray-900">Google API</h4>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  {systemHealth.googleToken ? 'Authenticated' : 'Not Authenticated'}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-lg border ${
+                systemHealth.rateLimits ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'
+              }`}>
+                <div className="flex items-center">
+                  <div className={`w-3 h-3 rounded-full mr-3 ${
+                    systemHealth.rateLimits ? 'bg-green-500' : 'bg-orange-500'
+                  }`} />
+                  <h4 className="text-sm font-medium text-gray-900">Rate Limits</h4>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  {systemHealth.rateLimits ? 'Normal' : 'Near Limit'}
+                </p>
+              </div>
+              
+              <div className={`p-4 rounded-lg border ${
+                systemHealth.failedTasks ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+              }`}>
+                <div className="flex items-center">
+                  <div className={`w-3 h-3 rounded-full mr-3 ${
+                    systemHealth.failedTasks ? 'bg-green-500' : 'bg-red-500'
+                  }`} />
+                  <h4 className="text-sm font-medium text-gray-900">Failed Tasks</h4>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  {systemHealth.failedTasks ? 'Low' : 'High'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 text-xs text-gray-500">
+              Last check: {systemHealth.lastCheck.toLocaleString()}
+            </div>
+          </div>
+        )}
+
         {/* Automation Dashboard */}
         {user && (
           <div className="mb-8 bg-white p-6 rounded-lg shadow">
@@ -1651,7 +2056,7 @@ export default function FinalOptimalSalesMachine() {
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-md font-medium text-gray-900">Campaigns</h3>
                 <button
-                  onClick={() => {/* TODO: Open campaign creation modal */}}
+                  onClick={() => setCampaignModalOpen(true)}
                   className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
                 >
                   Create Campaign
@@ -1669,8 +2074,18 @@ export default function FinalOptimalSalesMachine() {
                         {campaign.active ? 'Active' : 'Inactive'}
                       </span>
                       <div className="flex space-x-2">
-                        <button className="text-blue-600 hover:text-blue-800 text-sm">Edit</button>
-                        <button className="text-red-600 hover:text-red-800 text-sm">Delete</button>
+                        <button 
+                          onClick={() => updateCampaign(campaign.id, { active: !campaign.active })}
+                          className="text-blue-600 hover:text-blue-800 text-sm"
+                        >
+                          {campaign.active ? 'Pause' : 'Activate'}
+                        </button>
+                        <button 
+                          onClick={() => deleteCampaign(campaign.id)}
+                          className="text-red-600 hover:text-red-800 text-sm"
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1683,7 +2098,7 @@ export default function FinalOptimalSalesMachine() {
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-md font-medium text-gray-900">Automation Rules</h3>
                 <button
-                  onClick={() => {/* TODO: Open rule creation modal */}}
+                  onClick={() => setRuleModalOpen(true)}
                   className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
                 >
                   Add Rule
@@ -1737,8 +2152,18 @@ export default function FinalOptimalSalesMachine() {
                           >
                             ⏸
                           </button>
-                          <button className="text-blue-600 hover:text-blue-800 mr-2">Edit</button>
-                          <button className="text-red-600 hover:text-red-800">Delete</button>
+                          <button 
+                            onClick={() => updateRule(rule.id, { enabled: !rule.enabled })}
+                            className="text-blue-600 hover:text-blue-800 mr-2"
+                          >
+                            {rule.enabled ? 'Disable' : 'Enable'}
+                          </button>
+                          <button 
+                            onClick={() => deleteRule(rule.id)}
+                            className="text-red-600 hover:text-red-800"
+                          >
+                            Delete
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1780,6 +2205,89 @@ export default function FinalOptimalSalesMachine() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Emergency Recovery Section */}
+        {user && !automationEnabled && (
+          <div className="mb-8 bg-red-50 border border-red-200 p-6 rounded-lg">
+            <div className="flex items-center mb-4">
+              <div className="w-4 h-4 bg-red-500 rounded-full mr-3 animate-pulse"></div>
+              <h2 className="text-lg font-medium text-red-900">Automation System Offline</h2>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-white p-4 rounded-lg border">
+                <h4 className="font-medium text-gray-900 mb-2">Manual Email</h4>
+                <p className="text-sm text-gray-600 mb-3">Send emails manually when automation is down</p>
+                <button
+                  onClick={() => {
+                    if (selectedContact) {
+                      setEmailModalOpen(true);
+                      addNotification('info', 'Opening manual email composer');
+                    } else {
+                      addNotification('warning', 'Please select a contact first');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+                >
+                  Compose Email
+                </button>
+              </div>
+              
+              <div className="bg-white p-4 rounded-lg border">
+                <h4 className="font-medium text-gray-900 mb-2">Manual SMS</h4>
+                <p className="text-sm text-gray-600 mb-3">Send SMS messages manually</p>
+                <button
+                  onClick={() => {
+                    if (selectedContact) {
+                      setSmsModalOpen(true);
+                      addNotification('info', 'Opening manual SMS composer');
+                    } else {
+                      addNotification('warning', 'Please select a contact first');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
+                >
+                  Send SMS
+                </button>
+              </div>
+              
+              <div className="bg-white p-4 rounded-lg border">
+                <h4 className="font-medium text-gray-900 mb-2">Status Update</h4>
+                <p className="text-sm text-gray-600 mb-3">Manually update contact status</p>
+                <button
+                  onClick={() => {
+                    if (selectedContact) {
+                      setStatusModalOpen(true);
+                      addNotification('info', 'Opening status update');
+                    } else {
+                      addNotification('warning', 'Please select a contact first');
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700"
+                >
+                  Update Status
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center">
+              <div className="text-sm text-red-800">
+                <p>⚠️ Automation has been disabled due to system issues</p>
+                <p>All manual operations remain fully functional</p>
+              </div>
+              <button
+                onClick={() => {
+                  setAutomationEnabled(true);
+                  setAutomationMode('manual');
+                  addNotification('success', 'Automation re-enabled in manual mode');
+                }}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded-md hover:bg-red-700"
+              >
+                Re-enable Automation
+              </button>
+            </div>
           </div>
         )}
 
@@ -2422,6 +2930,215 @@ export default function FinalOptimalSalesMachine() {
                     className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
                   >
                     Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Campaign Creation Modal */}
+        {campaignModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Create New Campaign</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Campaign Name</label>
+                  <input
+                    type="text"
+                    value={newCampaign.name}
+                    onChange={(e) => setNewCampaign(prev => ({ ...prev, name: e.target.value }))}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Enter campaign name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea
+                    value={newCampaign.description}
+                    onChange={(e) => setNewCampaign(prev => ({ ...prev, description: e.target.value }))}
+                    rows={3}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Describe your campaign"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Target Audience</label>
+                  <input
+                    type="text"
+                    value={newCampaign.targetAudience}
+                    onChange={(e) => setNewCampaign(prev => ({ ...prev, targetAudience: e.target.value }))}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="e.g., Tech companies, 50-200 employees"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Budget</label>
+                    <input
+                      type="text"
+                      value={newCampaign.budget}
+                      onChange={(e) => setNewCampaign(prev => ({ ...prev, budget: e.target.value }))}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                      placeholder="e.g., $5000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+                    <input
+                      type="date"
+                      value={newCampaign.startDate}
+                      onChange={(e) => setNewCampaign(prev => ({ ...prev, startDate: e.target.value }))}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setCampaignModalOpen(false);
+                      setNewCampaign({
+                        name: '',
+                        description: '',
+                        active: true,
+                        targetAudience: '',
+                        budget: '',
+                        startDate: '',
+                        endDate: ''
+                      });
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createCampaign}
+                    disabled={!newCampaign.name}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    Create Campaign
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Rule Creation Modal */}
+        {ruleModalOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Create Automation Rule</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rule Name</label>
+                  <input
+                    type="text"
+                    value={newRule.name}
+                    onChange={(e) => setNewRule(prev => ({ ...prev, name: e.target.value }))}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Enter rule name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Trigger</label>
+                  <select
+                    value={newRule.trigger}
+                    onChange={(e) => setNewRule(prev => ({ ...prev, trigger: e.target.value }))}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="status_change">Status Change</option>
+                    <option value="time_based">Time Based</option>
+                    <option value="data_change">Data Change</option>
+                    <option value="lead_score_threshold">Lead Score Threshold</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Action</label>
+                  <select
+                    value={newRule.action}
+                    onChange={(e) => setNewRule(prev => ({ ...prev, action: e.target.value }))}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="send_email">Send Email</option>
+                    <option value="send_sms">Send SMS</option>
+                    <option value="update_score">Update Score</option>
+                    <option value="assign_campaign">Assign Campaign</option>
+                    <option value="update_status">Update Status</option>
+                  </select>
+                </div>
+                {newRule.action === 'send_email' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Email Template</label>
+                    <select
+                      value={newRule.template}
+                      onChange={(e) => setNewRule(prev => ({ ...prev, template: e.target.value }))}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                    >
+                      <option value="initial">Initial Introduction</option>
+                      <option value="followup">Follow Up</option>
+                      <option value="meeting">Meeting Confirmation</option>
+                    </select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Delay (hours)</label>
+                    <input
+                      type="number"
+                      value={newRule.delay}
+                      onChange={(e) => setNewRule(prev => ({ ...prev, delay: parseInt(e.target.value) || 0 }))}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+                    <input
+                      type="number"
+                      value={newRule.priority}
+                      onChange={(e) => setNewRule(prev => ({ ...prev, priority: parseInt(e.target.value) || 1 }))}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                      min="1"
+                      max="10"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  <input
+                    type="checkbox"
+                    checked={newRule.enabled}
+                    onChange={(e) => setNewRule(prev => ({ ...prev, enabled: e.target.checked }))}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  />
+                  <label className="ml-2 block text-sm text-gray-900">Enable this rule</label>
+                </div>
+                <div className="flex justify-end space-x-3">
+                  <button
+                    onClick={() => {
+                      setRuleModalOpen(false);
+                      setNewRule({
+                        name: '',
+                        trigger: 'status_change',
+                        condition: { status: 'new' },
+                        action: 'send_email',
+                        template: 'initial',
+                        delay: 0,
+                        enabled: true,
+                        priority: 1
+                      });
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createRule}
+                    disabled={!newRule.name}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Create Rule
                   </button>
                 </div>
               </div>
