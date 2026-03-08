@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, where, updateDoc, doc, getDoc, setDoc, serverTimestamp, deleteDoc, writeBatch } from 'firebase/firestore';
-import Papa from 'papaparse';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -852,10 +851,76 @@ export default function FinalOptimalSalesMachine() {
       const rulesRef = collection(db, 'automation_rules');
       const querySnapshot = await getDocs(rulesRef);
       const rules = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setAutomationRules(rules);
+      
+      // If no rules exist, create default rules
+      if (rules.length === 0) {
+        await createDefaultRules();
+        // Reload rules after creating defaults
+        const newSnapshot = await getDocs(rulesRef);
+        const newRules = newSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAutomationRules(newRules);
+      } else {
+        setAutomationRules(rules);
+      }
     } catch (err) {
       console.error('Failed to load automation rules:', err);
+      addNotification('error', 'Failed to load automation rules');
     }
+  };
+
+  const createDefaultRules = async () => {
+    const defaultRules = [
+      {
+        name: 'New Contact Welcome',
+        trigger: 'status_change',
+        condition: { status: 'new' },
+        action: 'send_email',
+        template: 'initial',
+        delay: 0,
+        enabled: true,
+        priority: 1,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        executionCount: 0,
+        successCount: 0,
+        failureCount: 0
+      },
+      {
+        name: 'Lead Score Update',
+        trigger: 'data_change',
+        condition: { field: 'email' },
+        action: 'update_score',
+        delay: 0,
+        enabled: true,
+        priority: 3,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        executionCount: 0,
+        successCount: 0,
+        failureCount: 0
+      },
+      {
+        name: 'Follow-up After 3 Days',
+        trigger: 'time_based',
+        condition: { status: 'contacted', days_since_contact: 3 },
+        action: 'send_email',
+        template: 'followup',
+        delay: 72,
+        enabled: true,
+        priority: 2,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        executionCount: 0,
+        successCount: 0,
+        failureCount: 0
+      }
+    ];
+
+    for (const rule of defaultRules) {
+      await addDoc(collection(db, 'automation_rules'), rule);
+    }
+
+    addNotification('success', 'Default automation rules created');
   };
 
   const loadCampaigns = async () => {
@@ -936,81 +1001,123 @@ export default function FinalOptimalSalesMachine() {
     setLoading(true);
     setUploadProgress(0);
 
-    Papa.parse(csvFile, {
-      header: true,
-      complete: async (results) => {
-        try {
-          const validContacts = [];
-          const invalidContacts = [];
-
-          for (let i = 0; i < results.data.length; i++) {
-            const row = results.data[i];
-            setUploadProgress(Math.round((i / results.data.length) * 100));
-
-            // Validate required fields
-            if (!row.email || !row.name) {
-              invalidContacts.push({ row: i + 2, data: row, reason: 'Missing email or name' });
-              continue;
-            }
-
-            // Validate email format
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(row.email)) {
-              invalidContacts.push({ row: i + 2, data: row, reason: 'Invalid email format' });
-              continue;
-            }
-
-            // Validate phone if provided
-            if (row.phone && !/^[\d\s\-\+\(\)]+$/.test(row.phone)) {
-              invalidContacts.push({ row: i + 2, data: row, reason: 'Invalid phone format' });
-              continue;
-            }
-
-            // Score lead quality
-            const leadScore = calculateLeadScore(row);
-            
-            validContacts.push({
-              name: row.name.trim(),
-              email: row.email.trim().toLowerCase(),
-              phone: row.phone?.trim() || '',
-              company: row.company?.trim() || '',
-              position: row.position?.trim() || '',
-              linkedin: row.linkedin?.trim() || '',
-              source: row.source?.trim() || 'CSV Upload',
-              status: 'new',
-              leadScore,
-              created_at: serverTimestamp(),
-              updated_at: serverTimestamp(),
-              statusHistory: [{
-                status: 'new',
-                timestamp: serverTimestamp(),
-                note: 'Contact imported from CSV'
-              }]
-            });
-          }
-
-          // Save valid contacts to Firestore
-          for (const contact of validContacts) {
-            await addDoc(collection(db, 'contacts'), contact);
-          }
-
-          await loadContacts();
-          await loadAnalytics();
-          
-          setSuccess(`Successfully imported ${validContacts.length} contacts. ${invalidContacts.length} invalid entries were skipped.`);
-          setCsvFile(null);
-          setUploadProgress(0);
-        } catch (err) {
-          setError('Failed to process CSV: ' + err.message);
-        } finally {
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split('\n').filter(line => line.trim());
+        
+        if (lines.length < 2) {
+          setError('CSV file is empty or invalid');
           setLoading(false);
+          return;
         }
-      },
-      error: (err) => {
-        setError('Failed to parse CSV: ' + err.message);
+
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        const validContacts = [];
+        const invalidContacts = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          const row = {};
+          
+          // Map values to headers
+          headers.forEach((header, index) => {
+            row[header] = values[index] || '';
+          });
+
+          setUploadProgress(Math.round((i / lines.length) * 100));
+
+          // Skip empty rows
+          if (!row.name && !row.email) continue;
+
+          // Validate required fields
+          if (!row.email || !row.name) {
+            invalidContacts.push({ row: i + 1, data: row, reason: 'Missing email or name' });
+            continue;
+          }
+
+          // Validate email format
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          if (!emailRegex.test(row.email)) {
+            invalidContacts.push({ row: i + 1, data: row, reason: 'Invalid email format' });
+            continue;
+          }
+
+          // Validate phone if provided
+          if (row.phone && !/^[\d\s\-\+\(\)]+$/.test(row.phone)) {
+            invalidContacts.push({ row: i + 1, data: row, reason: 'Invalid phone format' });
+            continue;
+          }
+
+          // Score lead quality
+          const leadScore = calculateLeadScore(row);
+          
+          validContacts.push({
+            name: row.name.trim(),
+            email: row.email.trim().toLowerCase(),
+            phone: row.phone?.trim() || '',
+            company: row.company?.trim() || '',
+            position: row.position?.trim() || '',
+            linkedin: row.linkedin?.trim() || '',
+            source: row.source?.trim() || 'CSV Upload',
+            status: 'new',
+            leadScore,
+            created_at: serverTimestamp(),
+            updated_at: serverTimestamp(),
+            statusHistory: [{
+              status: 'new',
+              timestamp: serverTimestamp(),
+              note: 'Contact imported from CSV'
+            }]
+          });
+        }
+
+        // Save valid contacts to Firestore in batches
+        const batchSize = 10;
+        for (let i = 0; i < validContacts.length; i += batchSize) {
+          const batch = writeBatch(db);
+          const batchContacts = validContacts.slice(i, i + batchSize);
+          
+          batchContacts.forEach(contact => {
+            const docRef = doc(collection(db, 'contacts'));
+            batch.set(docRef, contact);
+          });
+          
+          await batch.commit();
+        }
+
+        await loadContacts();
+        await loadAnalytics();
+        
+        setSuccess(`Successfully imported ${validContacts.length} contacts. ${invalidContacts.length} invalid entries were skipped.`);
+        setCsvFile(null);
+        setUploadProgress(0);
+        
+        // Log import activity
+        await addDoc(collection(db, 'import_logs'), {
+          timestamp: serverTimestamp(),
+          fileName: csvFile.name,
+          totalRows: lines.length - 1,
+          validContacts: validContacts.length,
+          invalidContacts: invalidContacts.length,
+          userId: user?.uid
+        });
+
+      } catch (err) {
+        console.error('CSV processing error:', err);
+        setError('Failed to process CSV file: ' + err.message);
+      } finally {
         setLoading(false);
       }
-    });
+    };
+
+    reader.onerror = () => {
+      setError('Failed to read CSV file');
+      setLoading(false);
+    };
+
+    reader.readAsText(csvFile);
   };
 
   // Calculate lead quality score
