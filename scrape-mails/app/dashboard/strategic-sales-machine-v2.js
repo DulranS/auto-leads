@@ -6,7 +6,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, u
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import Head from 'next/head';
 
-// Firebase configuration
+// Firebase configuration with validation
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,6 +15,24 @@ const firebaseConfig = {
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
   measurementId: process.env.FIREBASE_MEASUREMENT_ID
+};
+
+// Check Firebase configuration
+const validateFirebaseConfig = () => {
+  const missingVars = [];
+  if (!firebaseConfig.apiKey) missingVars.push('NEXT_PUBLIC_FIREBASE_API_KEY');
+  if (!firebaseConfig.authDomain) missingVars.push('NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN');
+  if (!firebaseConfig.projectId) missingVars.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID');
+  if (!firebaseConfig.appId) missingVars.push('NEXT_PUBLIC_FIREBASE_APP_ID');
+  
+  if (missingVars.length > 0) {
+    console.error('❌ Firebase configuration missing:', missingVars);
+    console.log('📝 Please set up your .env.local file. See FIREBASE_SETUP.md');
+    return false;
+  }
+  
+  console.log('✅ Firebase configuration validated');
+  return true;
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -653,6 +671,9 @@ class BusinessIntelligenceEngine {
 }
 
 export default function StrategicSalesMachine() {
+  // Check Firebase configuration first
+  const [firebaseConfigured, setFirebaseConfigured] = useState(false);
+  
   // Core state
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -736,6 +757,7 @@ export default function StrategicSalesMachine() {
       });
       
       setContacts(loadedContacts);
+      console.log(`✅ Loaded ${loadedContacts.length} contacts from Firestore`);
       addNotification('success', `Loaded ${loadedContacts.length} contacts`);
       
     } catch (error) {
@@ -798,13 +820,17 @@ export default function StrategicSalesMachine() {
           ...contact,
           qualification,
           personalizationData,
-          status: 'new',
+          status: 'researched', // Auto-mark as researched for immediate campaign use
           createdAt: new Date(),
           lastUpdated: new Date(),
           statusHistory: [{
             status: 'new',
             timestamp: new Date(),
             note: 'Imported via CSV - Qualified lead'
+          }, {
+            status: 'researched',
+            timestamp: new Date(),
+            note: 'Auto-marked as researched - Ready for outreach'
           }],
           notes: [],
           source: 'csv_upload'
@@ -883,14 +909,51 @@ export default function StrategicSalesMachine() {
     
     try {
       // Get qualified contacts (limit to 50 as per strategy)
-      const targetContacts = contacts.filter(c => 
-        c.status === 'researched' && 
-        c.qualification?.qualified &&
-        c.email
-      ).slice(0, 50);
+      const targetContacts = contacts.filter(c => {
+        const hasValidStatus = c.status === 'researched' || c.status === 'new';
+        const isQualified = c.qualification?.qualified;
+        const hasEmail = c.email && isValidEmail(c.email);
+        
+        console.log(`Contact ${c.company_name}:`, {
+          status: c.status,
+          qualified: isQualified,
+          hasEmail: hasEmail,
+          score: c.qualification?.score
+        });
+        
+        return hasValidStatus && isQualified && hasEmail;
+      }).slice(0, 50);
       
       if (targetContacts.length === 0) {
-        addNotification('warning', 'No qualified contacts ready for outreach');
+        // Debug information
+        const statusCounts = {};
+        const qualifiedCount = contacts.filter(c => c.qualification?.qualified).length;
+        const emailCount = contacts.filter(c => c.email && isValidEmail(c.email)).length;
+        
+        contacts.forEach(c => {
+          statusCounts[c.status] = (statusCounts[c.status] || 0) + 1;
+        });
+        
+        console.log('Debug info:', {
+          totalContacts: contacts.length,
+          statusCounts,
+          qualifiedCount,
+          emailCount,
+          contacts: contacts.map(c => ({
+            company: c.company_name,
+            status: c.status,
+            qualified: c.qualification?.qualified,
+            score: c.qualification?.score,
+            hasEmail: !!c.email
+          }))
+        });
+        
+        addNotification('warning', 
+          `No qualified contacts ready for outreach\n` +
+          `Total: ${contacts.length}, Qualified: ${qualifiedCount}, With Email: ${emailCount}\n` +
+          `Status breakdown: ${Object.entries(statusCounts).map(([k,v]) => `${k}: ${v}`).join(', ')}\n` +
+          `Try importing more contacts or marking some as 'researched'`
+        );
         setCampaignStatus('idle');
         return;
       }
@@ -957,56 +1020,49 @@ export default function StrategicSalesMachine() {
     if (!user?.uid) return;
     
     try {
-      const contactsRef = collection(db, 'users', user.uid, 'contacts');
-      const q = query(contactsRef);
-      const snapshot = await getDocs(q);
+      const contactRef = doc(db, 'users', user.uid, 'contacts', contactId);
+      const contactDoc = await getDoc(contactRef);
       
-      let updated = false;
-      snapshot.forEach(doc => {
-        if (doc.id === contactId) {
-          const contactData = doc.data();
-          const currentStatus = contactData.status || 'new';
-          
-          // Validate transition
-          if (!STATUS_TRANSITIONS[currentStatus]?.includes(newStatus) && currentStatus !== 'archived') {
-            throw new Error(`Invalid status transition: ${currentStatus} → ${newStatus}`);
-          }
-          
-          // Update status
-          const historyEntry = {
-            status: newStatus,
-            timestamp: new Date(),
-            note: note || `Status changed from ${currentStatus} to ${newStatus}`,
-            userId: user.uid
-          };
-          
-          updateDoc(doc.ref, {
-            status: newStatus,
-            lastUpdated: serverTimestamp(),
-            statusHistory: [...(contactData.statusHistory || []), historyEntry]
-          });
-          
-          // Update local state
-          setContacts(prev => prev.map(c => 
-            c.id === contactId 
-              ? { 
-                  ...c, 
-                  status: newStatus, 
-                  lastUpdated: new Date(),
-                  statusHistory: [...(c.statusHistory || []), historyEntry]
-                }
-              : c
-          ));
-          
-          updated = true;
-        }
+      if (!contactDoc.exists()) {
+        throw new Error(`Contact ${contactId} not found in Firestore`);
+      }
+      
+      const contactData = contactDoc.data();
+      const currentStatus = contactData.status || 'new';
+      
+      // Validate transition
+      if (!STATUS_TRANSITIONS[currentStatus]?.includes(newStatus) && currentStatus !== 'archived') {
+        throw new Error(`Invalid status transition: ${currentStatus} → ${newStatus}`);
+      }
+      
+      // Update status
+      const historyEntry = {
+        status: newStatus,
+        timestamp: new Date(),
+        note: note || `Status changed from ${currentStatus} to ${newStatus}`,
+        userId: user.uid
+      };
+      
+      await updateDoc(contactRef, {
+        status: newStatus,
+        lastUpdated: serverTimestamp(),
+        statusHistory: [...(contactData.statusHistory || []), historyEntry]
       });
       
-      if (updated) {
-        addNotification('success', `Status updated to ${newStatus}`);
-      } else {
-        throw new Error('Contact not found');
-      }
+      // Update local state
+      setContacts(prev => prev.map(c => 
+        c.id === contactId 
+          ? { 
+              ...c, 
+              status: newStatus, 
+              lastUpdated: new Date(),
+              statusHistory: [...(c.statusHistory || []), historyEntry]
+            }
+          : c
+      ));
+      
+      console.log(`✅ Updated contact ${contactId} status to ${newStatus}`);
+      addNotification('success', `Status updated to ${newStatus}`);
       
     } catch (error) {
       console.error('Status update error:', error);
@@ -1077,6 +1133,15 @@ export default function StrategicSalesMachine() {
 
   // Authentication state listener
   useEffect(() => {
+    // Check Firebase configuration first
+    const isConfigured = validateFirebaseConfig();
+    setFirebaseConfigured(isConfigured);
+    
+    if (!isConfigured) {
+      setLoadingAuth(false);
+      return;
+    }
+    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
       setLoadingAuth(false);
@@ -1097,6 +1162,42 @@ export default function StrategicSalesMachine() {
           <h1 className="text-white text-3xl font-bold mb-2">Syndicate Solutions</h1>
           <p className="text-gray-300 text-lg">Strategic Sales Machine</p>
           <p className="text-gray-500 text-sm mt-2">Initializing secure connection...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Firebase configuration error
+  if (!firebaseConfigured) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-center max-w-2xl">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h1 className="text-white text-3xl font-bold mb-4">Firebase Configuration Required</h1>
+          <p className="text-gray-300 text-lg mb-6">Please set up your Firebase environment variables to continue</p>
+          
+          <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 text-left">
+            <h2 className="text-white text-xl font-semibold mb-4">📋 Setup Instructions:</h2>
+            <ol className="text-gray-300 space-y-2">
+              <li>1. Create a <code className="bg-gray-700 px-2 py-1 rounded">.env.local</code> file in the root directory</li>
+              <li>2. Add your Firebase configuration variables</li>
+              <li>3. Restart the development server</li>
+            </ol>
+            
+            <div className="mt-4 p-3 bg-gray-700 rounded-lg">
+              <p className="text-blue-400 text-sm font-medium mb-2">Required Variables:</p>
+              <code className="text-xs text-gray-300">
+                NEXT_PUBLIC_FIREBASE_API_KEY<br/>
+                NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN<br/>
+                NEXT_PUBLIC_FIREBASE_PROJECT_ID<br/>
+                NEXT_PUBLIC_FIREBASE_APP_ID
+              </code>
+            </div>
+            
+            <p className="text-gray-400 text-sm mt-4">
+              📝 See <code className="bg-gray-700 px-2 py-1 rounded">FIREBASE_SETUP.md</code> for detailed instructions
+            </p>
+          </div>
         </div>
       </div>
     );
