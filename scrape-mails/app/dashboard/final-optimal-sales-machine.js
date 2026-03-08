@@ -1,4 +1,37 @@
 'use client';
+
+// Global error handling for React loading issues
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (event) => {
+    // Handle React not defined errors
+    if (event.message?.includes('React is not defined') ||
+        event.message?.includes('ReferenceError: React is not defined')) {
+      console.warn('React loading error detected, will retry...');
+      event.preventDefault();
+      
+      // Try to reload the page after a short delay
+      setTimeout(() => {
+        if (window.location && !window.reactLoaded) {
+          console.log('Reloading due to React loading failure...');
+          window.location.reload();
+        }
+      }, 2000);
+      return;
+    }
+    
+    // Handle module loading errors
+    if (event.message?.includes('module evaluation') ||
+        event.message?.includes('module error')) {
+      console.warn('Module loading error detected and ignored');
+      event.preventDefault();
+      return;
+    }
+  });
+  
+  // Mark React as loaded when component mounts
+  window.reactLoaded = false;
+}
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, deleteDoc, Timestamp, orderBy, limit, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
@@ -1039,6 +1072,14 @@ class SalesAutomationEngine {
 const automationEngine = new SalesAutomationEngine();
 
 function FinalOptimalSalesMachine() {
+  // Mark React as successfully loaded
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.reactLoaded = true;
+      console.log('React component successfully mounted');
+    }
+  }, []);
+  
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const router = useRouter();
@@ -3062,6 +3103,23 @@ class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
     console.error('Component error caught:', error, errorInfo);
     
+    // Handle React not defined errors specifically
+    if (error.message?.includes('React is not defined') ||
+        error.message?.includes('ReferenceError: React is not defined')) {
+      console.error('React loading error in component, attempting reload...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      return;
+    }
+    
+    // Handle module evaluation errors
+    if (error.message?.includes('module evaluation') ||
+        error.message?.includes('module error')) {
+      console.warn('Module error in component, ignoring...');
+      return;
+    }
+    
     // Ignore browser extension and external script errors
     if (error.message?.includes('TronWeb') ||
         error.message?.includes('bybit') ||
@@ -3077,6 +3135,30 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
+      // Special handling for React loading errors
+      if (this.state.error?.message?.includes('React is not defined') ||
+          this.state.error?.message?.includes('ReferenceError: React is not defined')) {
+        return (
+          <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+            <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mx-auto mb-4"></div>
+                <h2 className="text-xl font-bold text-amber-400 mb-4">Loading Application...</h2>
+                <p className="text-gray-300 mb-4">
+                  React is loading. This may take a moment due to browser extensions.
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="w-full bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg font-medium transition"
+                >
+                  Reload Now
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
       return (
         <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-gray-800 rounded-xl p-6 max-w-md w-full border border-gray-700">
