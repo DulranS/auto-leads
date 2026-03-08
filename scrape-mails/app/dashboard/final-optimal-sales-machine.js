@@ -21,6 +21,20 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
+// ✅ AUTOMATION ENGINE CONFIGURATION
+const AUTOMATION_CONFIG = {
+  enabled: true,
+  fallbackMode: 'manual', // manual, semi-auto, full-auto
+  automationInterval: 60000, // 1 minute
+  batchProcessingSize: 50,
+  emailRateLimit: 100,
+  smsRateLimit: 50,
+  callRateLimit: 25,
+  retryAttempts: 3,
+  retryDelay: 300000, // 5 minutes
+  maxFailedTasks: 100
+};
+
 // ✅ STRATEGIC SALES METHODOLOGY CONFIGURATION
 const SALES_STRATEGY = {
   // Tight ICP Definition
