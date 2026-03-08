@@ -45,6 +45,17 @@ if (typeof window !== 'undefined' && firebaseConfig.apiKey) {
   }
 }
 
+// ✅ UTILITY FUNCTIONS - All with safety checks
+const safeString = (value, fallback = '') => {
+  if (value === null || value === undefined) return fallback;
+  return String(value);
+};
+
+const safeNumber = (value, fallback = 0) => {
+  if (value === null || value === undefined || isNaN(value)) return fallback;
+  return Number(value);
+};
+
 // ✅ TIGHT ICP DEFINITION - Laser-Focused Targeting
 const ICP_DEFINITION = {
   industry: 'Digital Agencies & SaaS Companies',
@@ -182,7 +193,8 @@ const parseCSV = (text) => {
     
     const row = {};
     headers.forEach((header, index) => {
-      row[header.toLowerCase().replace(/\s+/g, '_')] = values[index] || '';
+      const headerValue = header || '';
+      row[headerValue.toLowerCase().replace(/\s+/g, '_')] = values[index] || '';
     });
     data.push(row);
   }
@@ -194,10 +206,10 @@ const personalizeTemplate = (template, contact, senderName) => {
   let personalized = template;
   
   // Replace template variables
-  personalized = personalized.replace(/\{\{company_name\}\}/g, contact.company_name || contact.company || 'your company');
-  personalized = personalized.replace(/\{\{first_name\}\}/g, contact.first_name || (contact.name ? contact.name.split(' ')[0] : undefined) || 'there');
-  personalized = personalized.replace(/\{\{sender_name\}\}/g, senderName || 'Dulran Samarasinghe');
-  personalized = personalized.replace(/\{\{industry\}\}/g, (contact.industry && contact.industry.toString()) || 'your industry');
+  personalized = personalized.replace(/\{\{company_name\}\}/g, (contact.company_name || contact.company || 'your company').toString());
+  personalized = personalized.replace(/\{\{first_name\}\}/g, (contact.first_name || (contact.name ? contact.name.split(' ')[0] : undefined) || 'there').toString());
+  personalized = personalized.replace(/\{\{sender_name\}\}/g, (senderName || 'Dulran Samarasinghe').toString());
+  personalized = personalized.replace(/\{\{industry\}\}/g, (contact.industry ? contact.industry.toString() : 'your industry'));
   personalized = personalized.replace(/\{\{similar_company\}\}/g, 'a similar agency');
   
   return personalized;
@@ -210,12 +222,17 @@ const qualifyLead = (contact) => {
   let disqualification_reasons = [];
   
   // Industry match (30 points)
-  if (contact.industry && (contact.industry.toString().toLowerCase().includes('agency') || 
-      contact.industry.toString().toLowerCase().includes('software') || 
-      contact.industry.toString().toLowerCase().includes('technology'))) {
-    score += 30;
+  if (contact.industry) {
+    const industryStr = contact.industry.toString().toLowerCase();
+    if (industryStr.includes('agency') || 
+        industryStr.includes('software') || 
+        industryStr.includes('technology')) {
+      score += 30;
+    } else {
+      disqualification_reasons.push('Not in target industry');
+    }
   } else {
-    disqualification_reasons.push('Not in target industry');
+    disqualification_reasons.push('Industry not specified');
   }
   
   // Company size (20 points)
@@ -234,12 +251,12 @@ const qualifyLead = (contact) => {
   }
   
   // Website presence (15 points)
-  if (contact.website && contact.website.toString().startsWith('http')) {
+  if (contact.website && safeString(contact.website).startsWith('http')) {
     score += 15;
   }
   
   // Phone number (15 points)
-  if (contact.phone && contact.phone.toString().length > 5) {
+  if (contact.phone && safeString(contact.phone).length > 5) {
     score += 15;
   }
   
@@ -322,7 +339,7 @@ class CampaignManager {
     const personalizedBody = personalizeTemplate(template.body, contact, personalizationData.senderName);
     
     console.log('📤 Sending email:', {
-      to: contact.email ? contact.email.toString() : 'No email',
+      to: safeString(contact.email || 'No email'),
       subject: personalizedSubject,
       body: personalizedBody.substring(0, 100) + '...'
     });
@@ -963,9 +980,9 @@ export default function StrategicSalesSystem() {
   // Filter targets
   const filteredTargets = targets.filter(target => {
     const matchesSearch = !searchQuery || 
-      target.company_name?.toString().toLowerCase().includes(searchQuery.toLowerCase()) ||
-      target.email?.toString().toLowerCase().includes(searchQuery.toLowerCase()) ||
-      target.first_name?.toString().toLowerCase().includes(searchQuery.toLowerCase());
+      (target.company_name && target.company_name.toString().toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (target.email && target.email.toString().toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (target.first_name && target.first_name.toString().toLowerCase().includes(searchQuery.toLowerCase()));
     
     const matchesStatus = statusFilter === 'all' || target.status === statusFilter;
     
