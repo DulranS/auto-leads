@@ -47,7 +47,7 @@
 
 import dynamic from 'next/dynamic';
 
-const StrategicSalesSystem = dynamic(() => import('./strategic-sales-system'), {
+const ManualFirstSalesMachine = dynamic(() => import('./manual-first-sales-machine'), {
   ssr: false,
   loading: () => (
     <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
@@ -62,5 +62,5 @@ const StrategicSalesSystem = dynamic(() => import('./strategic-sales-system'), {
 });
 
 export default function Home() {
-  return <StrategicSalesSystem />;
+  return <ManualFirstSalesMachine />;
 }
