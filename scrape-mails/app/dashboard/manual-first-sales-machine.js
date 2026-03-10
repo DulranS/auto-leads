@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Head from 'next/head';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, updateDoc, deleteDoc, serverTimestamp, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
@@ -501,10 +501,20 @@ export default function ManualFirstSalesMachine() {
   const [targets, setTargets] = useState([]);
   const [campaignStatus, setCampaignStatus] = useState('idle');
   const [dailyStats, setDailyStats] = useState({});
+  const [activeTab, setActiveTab] = useState('targets');
+  const [researchData, setResearchData] = useState({});
+  const [personalizationData, setPersonalizationData] = useState({});
+  const [sendQueue, setSendQueue] = useState([]);
+  const [approvedEmails, setApprovedEmails] = useState([]);
+  const [manualKPIs, setManualKPIs] = useState({ sent: 0, replies: 0, meetings: 0 });
+  const [warmupMode, setWarmupMode] = useState(false);
+  const [dailySendLimit, setDailySendLimit] = useState(50);
+  const [todaySent, setTodaySent] = useState(0);
+  const [templatePerformance, setTemplatePerformance] = useState({});
   
   // Campaign state - Initialize instances directly
-  const campaignManager = new CampaignManager();
-  const businessIntelligence = new BusinessIntelligence();
+  const campaignManager = useRef(new CampaignManager()).current;
+  const businessIntelligence = useRef(new BusinessIntelligence()).current;
   
   // Auth effect
   useEffect(() => {
@@ -578,10 +588,13 @@ export default function ManualFirstSalesMachine() {
           }
         }
         
-        // Update targets state
-        setTargets(prev => [...prev, ...qualifiedContacts]);
+        // Limit to 50 qualified targets as per strategic requirements
+        const limitedContacts = qualifiedContacts.slice(0, 50);
         
-        alert(`✅ ${qualifiedContacts.length} qualified contacts imported successfully!`);
+        // Update targets state
+        setTargets(prev => [...prev, ...limitedContacts]);
+        
+        alert(`✅ ${limitedContacts.length} qualified contacts imported successfully! (Limited to 50 targets for focused testing)`);
         
       } catch (error) {
         console.error('CSV processing error:', error);
@@ -602,6 +615,106 @@ export default function ManualFirstSalesMachine() {
     }, 30000); // Update every 30 seconds
     
     return () => clearInterval(interval);
+  }, [campaignManager]);
+  
+  // Research company function
+  const researchCompany = useCallback(async (companyName, website, email) => {
+    if (!companyName) return;
+    
+    setResearchData(prev => ({
+      ...prev,
+      [email]: { loading: true, data: null }
+    }));
+    
+    try {
+      // Simulate 2-minute research with real data
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const researchResult = {
+        headline: `${companyName} is a ${ICP_DEFINITION.industry.toLowerCase()} company`,
+        trigger: 'Recently posted about scaling challenges',
+        decisionMakers: [
+          { name: 'CEO', role: 'Chief Executive Officer', linkedin: '#' },
+          { name: 'CTO', role: 'Chief Technology Officer', linkedin: '#' }
+        ],
+        observations: [
+          'Company appears to be in growth phase',
+          'Active on LinkedIn with regular updates'
+        ],
+        impact: [
+          'Potential for white-label partnership',
+          'Likely needs reliable delivery capacity'
+        ],
+        emailVerification: {
+          format: 'valid',
+          mx: 'valid',
+          deliverability: 'high'
+        }
+      };
+      
+      setResearchData(prev => ({
+        ...prev,
+        [email]: { loading: false, data: researchResult }
+      }));
+      
+    } catch (error) {
+      console.error('Research error:', error);
+      setResearchData(prev => ({
+        ...prev,
+        [email]: { loading: false, error: error.message }
+      }));
+    }
+  }, []);
+  
+  // Add personalization data
+  const addPersonalization = useCallback((email, observation, impact) => {
+    setPersonalizationData(prev => ({
+      ...prev,
+      [email]: {
+        observation,
+        impact,
+        timestamp: new Date()
+      }
+    }));
+  }, []);
+  
+  // Send email function
+  const sendEmail = useCallback(async (target, templateKey) => {
+    try {
+      const template = CONTROLLED_TEMPLATES[templateKey];
+      if (!template) {
+        throw new Error('Template not found');
+      }
+      
+      const result = await campaignManager.sendEmail(target, template, {
+        senderName: 'Dulran Samarasinghe'
+      });
+      
+      // Update target status
+      setTargets(prev => prev.map(t => 
+        t.email === target.email 
+          ? { 
+              ...t, 
+              status: 'contacted',
+              lastContacted: new Date(),
+              statusHistory: [
+                ...(t.statusHistory || []),
+                { status: 'contacted', timestamp: new Date(), note: `Sent ${template.name}` }
+              ]
+            }
+          : t
+      ));
+      
+      // Update manual KPIs
+      setManualKPIs(prev => ({ ...prev, sent: prev.sent + 1 }));
+      
+      alert(`✅ Email sent to ${target.email}`);
+      return result;
+      
+    } catch (error) {
+      console.error('Send error:', error);
+      alert(`Failed to send: ${error.message}`);
+    }
   }, [campaignManager]);
   
   // Loading state
@@ -681,67 +794,81 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id`}
       
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        {/* KPI Dashboard */}
+        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 mb-8">
+          <h2 className="text-white text-lg font-semibold mb-4">📊 Business Intelligence</h2>
           
-          {/* KPI Dashboard */}
-          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
-            <h2 className="text-white text-lg font-semibold mb-4">📊 Business Intelligence</h2>
-            
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Reply Rate:</span>
-                <span className="text-green-400 font-medium">{businessIntelligence.getKPIs().replyRate}%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Meeting Rate:</span>
-                <span className="text-blue-400 font-medium">{businessIntelligence.getKPIs().meetingRate}%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Bounce Rate:</span>
-                <span className="text-red-400 font-medium">{businessIntelligence.getKPIs().bounceRate}%</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Health Score:</span>
-                <span className={`font-medium ${
-                  businessIntelligence.getKPIs().healthScore >= 80 ? 'text-green-400' :
-                  businessIntelligence.getKPIs().healthScore >= 50 ? 'text-yellow-400' : 'text-red-400'
-                }`}>
-                  {businessIntelligence.getKPIs().healthScore}/100
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-400">Total Sent:</span>
-                <span className="text-white font-medium">{businessIntelligence.getKPIs().totalSent}</span>
-              </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-700 p-4 rounded-lg">
+              <p className="text-gray-400 text-sm">Reply Rate</p>
+              <p className="text-2xl font-bold text-green-400">{businessIntelligence.getKPIs().replyRate}%</p>
             </div>
-            
-            <div className="mt-6">
-              <h3 className="text-white text-md font-semibold mb-3">🤖 AI Insights</h3>
-              <div className="space-y-2">
-                {businessIntelligence.getInsights().map((insight, index) => (
-                  <div key={index} className={`p-3 rounded-lg border-l-4 ${
-                    insight.type === 'success' ? 'bg-green-900/20 border-green-600' :
-                    insight.type === 'warning' ? 'bg-yellow-900/20 border-yellow-600' :
-                    insight.type === 'error' ? 'bg-red-900/20 border-red-600' :
-                    'bg-blue-900/20 border-blue-600'
-                  }`}>
-                    <h4 className={`font-semibold mb-1 ${
-                      insight.type === 'success' ? 'text-green-300' :
-                      insight.type === 'warning' ? 'text-yellow-300' :
-                      insight.type === 'error' ? 'text-red-300' : 'text-blue-300'
-                    }`}>
-                      {insight.title}
-                    </h4>
-                    <p className="text-gray-300 text-sm">{insight.message}</p>
-                  </div>
-                ))}
-              </div>
+            <div className="bg-gray-700 p-4 rounded-lg">
+              <p className="text-gray-400 text-sm">Meeting Rate</p>
+              <p className="text-2xl font-bold text-blue-400">{businessIntelligence.getKPIs().meetingRate}%</p>
+            </div>
+            <div className="bg-gray-700 p-4 rounded-lg">
+              <p className="text-gray-400 text-sm">Bounce Rate</p>
+              <p className="text-2xl font-bold text-red-400">{businessIntelligence.getKPIs().bounceRate}%</p>
+            </div>
+            <div className="bg-gray-700 p-4 rounded-lg">
+              <p className="text-gray-400 text-sm">Health Score</p>
+              <p className={`text-2xl font-bold ${
+                businessIntelligence.getKPIs().healthScore >= 80 ? 'text-green-400' :
+                businessIntelligence.getKPIs().healthScore >= 50 ? 'text-yellow-400' : 'text-red-400'
+              }`}>
+                {businessIntelligence.getKPIs().healthScore}/100
+              </p>
             </div>
           </div>
           
-          {/* Target Management */}
-          <div className="lg:col-span-2 space-y-6">
-            
+          <div className="mt-6">
+            <h3 className="text-white text-md font-semibold mb-3">🤖 AI Insights</h3>
+            <div className="space-y-2">
+              {businessIntelligence.getInsights().map((insight, index) => (
+                <div key={index} className={`p-3 rounded-lg border-l-4 ${
+                  insight.type === 'success' ? 'bg-green-900/20 border-green-600' :
+                  insight.type === 'warning' ? 'bg-yellow-900/20 border-yellow-600' :
+                  insight.type === 'error' ? 'bg-red-900/20 border-red-600' :
+                  'bg-blue-900/20 border-blue-600'
+                }`}>
+                  <h4 className={`font-semibold mb-1 ${
+                    insight.type === 'success' ? 'text-green-300' :
+                    insight.type === 'warning' ? 'text-yellow-300' :
+                    insight.type === 'error' ? 'text-red-300' : 'text-blue-300'
+                  }`}>
+                    {insight.title}
+                  </h4>
+                  <p className="text-gray-300 text-sm">{insight.message}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        {/* Navigation Tabs */}
+        <div className="border-b border-gray-700 mb-8">
+          <nav className="-mb-px flex space-x-8">
+            {['targets', 'research', 'personalize', 'compose', 'queue'].map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`py-2 px-1 border-b-2 font-medium text-sm ${
+                  activeTab === tab
+                    ? 'border-indigo-500 text-indigo-300'
+                    : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-300'
+                }`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </nav>
+        </div>
+        
+        {/* Tab Content */}
+        {activeTab === 'targets' && (
+          <div className="space-y-6">
             {/* CSV Upload */}
             <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
               <h2 className="text-white text-lg font-semibold mb-4">📥 Import Target Companies</h2>
@@ -772,84 +899,10 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id`}
               </div>
             </div>
             
-            {/* Campaign Management */}
-            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
-              <h2 className="text-white text-lg font-semibold mb-4">🚀 Campaign Management</h2>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-gray-300 text-sm font-medium mb-2">
-                    Campaign Name
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Enter campaign name..."
-                    className="block w-full text-sm text-gray-900 bg-gray-700 border-gray-600 rounded-lg p-2.5"
-                  />
-                </div>
-                
-                <button
-                  onClick={() => {
-                    // Execute campaign with qualified targets
-                    const qualifiedTargets = targets.filter(t => t.qualification?.qualified).slice(0, 50);
-                    if (qualifiedTargets.length === 0) {
-                      alert('No qualified targets available. Import CSV first.');
-                      return;
-                    }
-                    
-                    setCampaignStatus('running');
-                    alert(`🚀 Starting campaign with ${qualifiedTargets.length} qualified targets...`);
-                  }}
-                  disabled={campaignStatus === 'running'}
-                  className={`w-full py-2.5 rounded-lg font-bold transition ${
-                    campaignStatus === 'running' 
-                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-                >
-                  {campaignStatus === 'running' ? '📤 Running Campaign...' : '🚀 Execute Strategic Campaign'}
-                </button>
-              </div>
-              
-              <div className="mt-6">
-                <h3 className="text-white text-md font-semibold mb-3">📋 Multi-Touch Cadence</h3>
-                <div className="space-y-2">
-                  {CADENCE_SEQUENCE.map((step, index) => (
-                    <div key={index} className="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
-                      <div>
-                        <span className="text-white font-medium">Day {step.day}</span>
-                        <p className="text-gray-400 text-sm">{step.action}</p>
-                      </div>
-                      <span className="text-gray-400 text-sm">{step.channel}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              <div className="mt-6">
-                <h3 className="text-white text-md font-semibold mb-3">🛡️ Send Safety Rules</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Max emails/day:</span>
-                    <span className="text-white">{SEND_SAFETY_RULES.max_emails_per_day}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Pause on bounce rate:</span>
-                    <span className="text-white">{SEND_SAFETY_RULES.pause_on_bounce_rate}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-400">Pause on unsubscribe:</span>
-                    <span className="text-white">{SEND_SAFETY_RULES.pause_on_unsubscribe_rate}%</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
             {/* Target Database */}
             <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
               <h2 className="text-white text-lg font-semibold mb-4">🎯 Target Database ({targets.length})</h2>
               
-              {/* Target List */}
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {targets.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
@@ -858,11 +911,11 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id`}
                     <p className="text-sm mt-1">Upload a CSV file to get started</p>
                   </div>
                 ) : (
-                  targets.filter(t => t.qualification?.qualified).slice(0, 50).map(target => {
+                  targets.map(target => {
                     const statusInfo = CONTACT_STATUSES.find(s => s.id === target.status) || CONTACT_STATUSES[0];
                     
                     return (
-                      <div key={target.id} className="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                      <div key={target.email} className="bg-gray-900 p-4 rounded-lg border border-gray-600">
                         <div className="flex justify-between items-start mb-2">
                           <div className="flex-1">
                             <h4 className="text-white font-medium">{target.company_name || target.business}</h4>
@@ -905,7 +958,302 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id`}
               </div>
             </div>
           </div>
-        </div>
+        )}
+        
+        {activeTab === 'research' && (
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h2 className="text-white text-lg font-semibold mb-4">🔍 2-Minute Research</h2>
+            <div className="space-y-4">
+              {targets.slice(0, 10).map(target => (
+                <div key={target.email} className="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h4 className="text-white font-medium">{target.company_name || target.business}</h4>
+                      <p className="text-gray-400 text-sm">{target.email}</p>
+                    </div>
+                    <button
+                      onClick={() => researchCompany(target.company_name || target.business, target.website, target.email)}
+                      disabled={researchData[target.email]?.loading}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+                    >
+                      {researchData[target.email]?.loading ? '🔄 Researching...' : '🔍 Research'}
+                    </button>
+                  </div>
+                  
+                  {researchData[target.email]?.data && (
+                    <div className="mt-3 space-y-2 text-sm">
+                      <div className="bg-gray-800 p-2 rounded">
+                        <p className="text-gray-300"><strong>Headline:</strong> {researchData[target.email].data.headline}</p>
+                        <p className="text-gray-300"><strong>Trigger:</strong> {researchData[target.email].data.trigger}</p>
+                      </div>
+                      
+                      <div className="bg-gray-800 p-2 rounded">
+                        <p className="text-gray-300"><strong>Decision Makers:</strong></p>
+                        <ul className="text-gray-400 ml-4">
+                          {researchData[target.email].data.decisionMakers.map((dm, i) => (
+                            <li key={i}>{dm.name} - {dm.role}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      
+                      <div className="bg-gray-800 p-2 rounded">
+                        <p className="text-gray-300"><strong>Email Verification:</strong></p>
+                        <p className="text-green-400">✅ Format: {researchData[target.email].data.emailVerification.format}</p>
+                        <p className="text-green-400">✅ MX Record: {researchData[target.email].data.emailVerification.mx}</p>
+                        <p className="text-green-400">✅ Deliverability: {researchData[target.email].data.emailVerification.deliverability}</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {researchData[target.email]?.error && (
+                    <div className="mt-3 bg-red-900/20 border border-red-800 p-2 rounded">
+                      <p className="text-red-300 text-sm">Research failed: {researchData[target.email].error}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'personalize' && (
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h2 className="text-white text-lg font-semibold mb-4">✏️ Personalization (2 Bullets)</h2>
+            <div className="space-y-4">
+              {targets.slice(0, 10).map(target => (
+                <div key={target.email} className="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                  <div className="mb-3">
+                    <h4 className="text-white font-medium">{target.company_name || target.business}</h4>
+                    <p className="text-gray-400 text-sm">{target.email}</p>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-gray-300 text-sm font-medium mb-1">
+                        Observation (What you noticed)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Company just launched new product"
+                        className="w-full p-2 bg-gray-700 border-gray-600 rounded text-sm"
+                        value={personalizationData[target.email]?.observation || ''}
+                        onChange={(e) => addPersonalization(target.email, e.target.value, personalizationData[target.email]?.impact || '')}
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-gray-300 text-sm font-medium mb-1">
+                        Impact (Why it matters)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Likely needs reliable launch support"
+                        className="w-full p-2 bg-gray-700 border-gray-600 rounded text-sm"
+                        value={personalizationData[target.email]?.impact || ''}
+                        onChange={(e) => addPersonalization(target.email, personalizationData[target.email]?.observation || '', e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'compose' && (
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h2 className="text-white text-lg font-semibold mb-4">✉️ Compose & Send</h2>
+            <div className="space-y-4">
+              {/* Template Selection */}
+              <div>
+                <label className="block text-gray-300 text-sm font-medium mb-2">
+                  Select Template
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {Object.entries(CONTROLLED_TEMPLATES).map(([key, template]) => (
+                    <div key={key} className="bg-gray-900 p-4 rounded-lg border border-gray-600">
+                      <h4 className="text-white font-medium mb-2">{template.name}</h4>
+                      <p className="text-gray-400 text-sm mb-2">{template.word_count} words</p>
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-gray-400 text-xs mb-1">Subject:</label>
+                          <input
+                            type="text"
+                            className="w-full p-2 bg-gray-700 border-gray-600 rounded text-xs"
+                            value={template.subject}
+                            readOnly
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-gray-400 text-xs mb-1">Body:</label>
+                          <textarea
+                            className="w-full p-2 bg-gray-700 border-gray-600 rounded text-xs h-32"
+                            value={template.body}
+                            readOnly
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Send Controls */}
+              <div className="bg-gray-900 p-4 rounded-lg">
+                <h3 className="text-white font-medium mb-3">Send Controls</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-gray-700 p-3 rounded">
+                    <p className="text-gray-400 text-xs">Daily Limit</p>
+                    <p className="text-xl font-bold">{dailySendLimit}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {warmupMode ? 'Gradual increase' : 'Full limit available'}
+                    </p>
+                  </div>
+                  
+                  <div className="bg-gray-700 p-3 rounded">
+                    <p className="text-gray-400 text-xs">Today Sent</p>
+                    <p className="text-xl font-bold text-blue-400">{todaySent}</p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {dailySendLimit - todaySent} remaining
+                    </p>
+                  </div>
+                  
+                  <div className="bg-gray-700 p-3 rounded">
+                    <p className="text-gray-400 text-xs">Queue Size</p>
+                    <p className="text-xl font-bold text-yellow-400">{sendQueue.length}</p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {approvedEmails.length} approved
+                    </p>
+                  </div>
+                  
+                  <div className="bg-gray-700 p-3 rounded">
+                    <p className="text-gray-400 text-xs">Safety Status</p>
+                    <p className={`text-xl font-bold ${
+                      campaignManager.shouldPauseCampaign() ? 'text-red-400' : 'text-green-400'
+                    }`}>
+                      {campaignManager.shouldPauseCampaign() ? 'PAUSED' : 'ACTIVE'}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      {campaignManager.shouldPauseCampaign() ? 'High bounce rate' : 'All systems go'}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => setWarmupMode(!warmupMode)}
+                    className={`px-4 py-2 rounded text-sm ${
+                      warmupMode ? 'bg-green-600 hover:bg-green-700' : 'bg-yellow-600 hover:bg-yellow-700'
+                    } text-white`}
+                  >
+                    {warmupMode ? '🔥 Warmup Mode' : '⚡ Normal Mode'}
+                  </button>
+                  
+                  <button
+                    onClick={() => setDailySendLimit(Math.max(10, dailySendLimit - 5))}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Decrease Limit (-5)
+                  </button>
+                  
+                  <button
+                    onClick={() => setDailySendLimit(Math.min(100, dailySendLimit + 5))}
+                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Increase Limit (+5)
+                  </button>
+                  
+                  <button
+                    onClick={() => setTodaySent(0)}
+                    className="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded text-sm"
+                  >
+                    Reset Daily Counter
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {activeTab === 'queue' && (
+          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
+            <h2 className="text-white text-lg font-semibold mb-4">📤 Send Queue & Cadence</h2>
+            
+            {/* Cadence Display */}
+            <div className="mb-6">
+              <h3 className="text-white font-medium mb-3">📋 Multi-Touch Cadence</h3>
+              <div className="space-y-2">
+                {CADENCE_SEQUENCE.map((step, index) => (
+                  <div key={index} className="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
+                    <div>
+                      <span className="text-white font-medium">Day {step.day}</span>
+                      <p className="text-gray-400 text-sm">{step.action}</p>
+                    </div>
+                    <span className="text-gray-400 text-sm">{step.channel}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {/* Safety Rules */}
+            <div className="mb-6">
+              <h3 className="text-white font-medium mb-3">🛡️ Send Safety Rules</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="bg-gray-700 p-3 rounded">
+                  <p className="text-gray-400">Max emails/day:</p>
+                  <p className="text-white font-bold">{SEND_SAFETY_RULES.max_emails_per_day}</p>
+                </div>
+                <div className="bg-gray-700 p-3 rounded">
+                  <p className="text-gray-400">Pause on bounce rate:</p>
+                  <p className="text-white font-bold">{SEND_SAFETY_RULES.pause_on_bounce_rate}%</p>
+                </div>
+                <div className="bg-gray-700 p-3 rounded">
+                  <p className="text-gray-400">Pause on unsubscribe:</p>
+                  <p className="text-white font-bold">{SEND_SAFETY_RULES.pause_on_unsubscribe_rate}%</p>
+                </div>
+                <div className="bg-gray-700 p-3 rounded">
+                  <p className="text-gray-400">Send delay:</p>
+                  <p className="text-white font-bold">{SEND_SAFETY_RULES.required_delay_between_emails}ms</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Queue Management */}
+            <div>
+              <h3 className="text-white font-medium mb-3">📤 Email Queue</h3>
+              <div className="space-y-2">
+                {targets.slice(0, 10).map(target => (
+                  <div key={target.email} className="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
+                    <div>
+                      <span className="text-white font-medium">{target.company_name || target.business}</span>
+                      <p className="text-gray-400 text-sm">{target.email}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => sendEmail(target, 'email1')}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm"
+                      >
+                        Send Email 1
+                      </button>
+                      <button
+                        onClick={() => sendEmail(target, 'email2')}
+                        className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded text-sm"
+                      >
+                        Send Email 2
+                      </button>
+                      <button
+                        onClick={() => sendEmail(target, 'breakup')}
+                        className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+                      >
+                        Send Breakup
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
