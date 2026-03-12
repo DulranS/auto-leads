@@ -1290,96 +1290,191 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id`}
         )}
         
         {activeTab === 'queue' && (
-          <div className="bg-gray-800 p-6 rounded-xl border border-gray-700">
-            <h2 className="text-white text-lg font-semibold mb-4">📤 Send Queue & Cadence</h2>
+          <div className="bg-gray-800 p-4 md:p-6 rounded-xl border border-gray-700">
+            <h2 className="text-white text-lg md:text-xl font-semibold mb-4 md:mb-6">📤 Send Queue & Cadence</h2>
             
-            {/* Cadence Display */}
-            <div className="mb-6">
-              <h3 className="text-white font-medium mb-3">📋 Multi-Touch Cadence</h3>
-              <div className="space-y-2">
+            {/* Cadence Display - Mobile Responsive */}
+            <div className="mb-6 md:mb-8">
+              <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">📋 Multi-Touch Cadence</h3>
+              <div className="space-y-2 md:space-y-3">
                 {CADENCE_SEQUENCE.map((step, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
-                    <div>
-                      <span className="text-white font-medium">Day {step.day}</span>
-                      <p className="text-gray-400 text-sm">{step.action}</p>
+                  <div key={index} className="bg-gray-900 rounded-lg p-3 md:p-4 border border-gray-700">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-bold text-sm md:text-base">Day {step.day}</span>
+                          <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs md:text-sm">
+                            {step.channel}
+                          </span>
+                        </div>
+                        <p className="text-gray-400 text-xs md:text-sm">{step.action}</p>
+                      </div>
                     </div>
-                    <span className="text-gray-400 text-sm">{step.channel}</span>
                   </div>
                 ))}
               </div>
             </div>
             
-            {/* Safety Rules */}
-            <div className="mb-6">
-              <h3 className="text-white font-medium mb-3">🛡️ Send Safety Rules</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div className="bg-gray-700 p-3 rounded">
-                  <p className="text-gray-400">Max emails/day:</p>
-                  <p className="text-white font-bold">{SEND_SAFETY_RULES.max_emails_per_day}</p>
+            {/* Safety Rules - Mobile Responsive Grid */}
+            <div className="mb-6 md:mb-8">
+              <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">🛡️ Send Safety Rules</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
+                  <p className="text-gray-400 text-xs md:text-sm mb-1">Max emails/day:</p>
+                  <p className="text-white font-bold text-lg md:text-xl">{SEND_SAFETY_RULES.max_emails_per_day}</p>
                 </div>
-                <div className="bg-gray-700 p-3 rounded">
-                  <p className="text-gray-400">Pause on bounce rate:</p>
-                  <p className="text-white font-bold">{SEND_SAFETY_RULES.pause_on_bounce_rate}%</p>
+                <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
+                  <p className="text-gray-400 text-xs md:text-sm mb-1">Pause on bounce rate:</p>
+                  <p className="text-white font-bold text-lg md:text-xl">{SEND_SAFETY_RULES.pause_on_bounce_rate}%</p>
                 </div>
-                <div className="bg-gray-700 p-3 rounded">
-                  <p className="text-gray-400">Pause on unsubscribe:</p>
-                  <p className="text-white font-bold">{SEND_SAFETY_RULES.pause_on_unsubscribe_rate}%</p>
+                <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
+                  <p className="text-gray-400 text-xs md:text-sm mb-1">Pause on unsubscribe:</p>
+                  <p className="text-white font-bold text-lg md:text-xl">{SEND_SAFETY_RULES.pause_on_unsubscribe_rate}%</p>
                 </div>
-                <div className="bg-gray-700 p-3 rounded">
-                  <p className="text-gray-400">Send delay:</p>
-                  <p className="text-white font-bold">{SEND_SAFETY_RULES.required_delay_between_emails}ms</p>
+                <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
+                  <p className="text-gray-400 text-xs md:text-sm mb-1">Send delay:</p>
+                  <p className="text-white font-bold text-lg md:text-xl">{SEND_SAFETY_RULES.required_delay_between_emails}ms</p>
                 </div>
               </div>
             </div>
             
-            {/* Queue Management */}
+            {/* Queue Management - Mobile Responsive */}
             <div>
-              <h3 className="text-white font-medium mb-3">📤 Email Queue</h3>
-              <div className="space-y-2">
-                {targets.slice(0, 10).map(target => (
-                  <div key={target.email} className="flex items-center justify-between p-3 bg-gray-900 rounded-lg">
-                    <div>
-                      <span className="text-white font-medium">{target.company_name || target.business}</span>
-                      <p className="text-gray-400 text-sm">{target.email}</p>
+              <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">📤 Email Queue</h3>
+              <div className="space-y-3 md:space-y-4">
+                {getSortedTargets().slice(0, 10).map(target => {
+                  const contactStatus = getContactStatus(target.email);
+                  const alreadySent = campaignManager.hasEmailBeenSent(target.email);
+                  const isSuppressed = campaignManager.isEmailSuppressed(target.email);
+                  
+                  return (
+                    <div key={target.email} className="bg-gray-900 rounded-lg p-4 md:p-5 border border-gray-700">
+                      {/* Contact Info - Mobile Responsive */}
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-white font-medium text-sm md:text-base mb-1 truncate">
+                            {target.company_name || target.business}
+                          </h4>
+                          <p className="text-gray-400 text-xs md:text-sm truncate">{target.email}</p>
+                          
+                          {/* Status Indicators */}
+                          <div className="flex flex-wrap gap-1 mt-2">
+                            {alreadySent && (
+                              <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs">
+                                📧 Sent
+                              </span>
+                            )}
+                            {isSuppressed && (
+                              <span className="px-2 py-1 bg-red-900/50 text-red-300 rounded text-xs">
+                                🚫 Blocked
+                              </span>
+                            )}
+                            {contactStatus.contacted && (
+                              <span className="px-2 py-1 bg-orange-900/50 text-orange-300 rounded text-xs">
+                                📞 Contacted
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">
+                            Score: {target.qualification?.score || 0}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Email Send Buttons - Mobile Responsive */}
+                      <div className="space-y-2">
+                        {/* Primary Email */}
+                        <button
+                          onClick={() => sendEmail(target, 'email1')}
+                          disabled={campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed}
+                          className={`w-full sm:w-auto px-4 py-2 md:px-5 md:py-2.5 rounded-lg text-sm font-medium transition-all ${
+                            campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed
+                              ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'
+                          }`}
+                        >
+                          {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 
+                           alreadySent ? '📧 Already Sent' :
+                           isSuppressed ? '🚫 Blocked' :
+                           '📧 Send Initial Email'}
+                        </button>
+                        
+                        {/* Secondary Actions - Horizontal on Desktop, Vertical on Mobile */}
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <button
+                            onClick={() => sendEmail(target, 'email2')}
+                            disabled={campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed}
+                            className={`w-full sm:w-auto px-4 py-2 md:px-4 md:py-2 rounded-lg text-sm font-medium transition-all ${
+                              campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed
+                                ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                                : 'bg-purple-600 hover:bg-purple-700 text-white active:scale-95'
+                            }`}
+                          >
+                            {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 
+                             alreadySent ? '📧 Already Sent' :
+                             isSuppressed ? '🚫 Blocked' :
+                             '📧 Follow-up Email'}
+                          </button>
+                          
+                          <button
+                            onClick={() => sendEmail(target, 'breakup')}
+                            disabled={campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed}
+                            className={`w-full sm:w-auto px-4 py-2 md:px-4 md:py-2 rounded-lg text-sm font-medium transition-all ${
+                              campaignManager.shouldPauseCampaign() || alreadySent || isSuppressed
+                                ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
+                                : 'bg-red-600 hover:bg-red-700 text-white active:scale-95'
+                            }`}
+                          >
+                            {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 
+                             alreadySent ? '📧 Already Sent' :
+                             isSuppressed ? '🚫 Blocked' :
+                             '🚪 Breakup Email'}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Contact Management - Mobile Responsive */}
+                      <div className="mt-4 pt-4 border-t border-gray-700">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            {!contactStatus.contacted ? (
+                              <button
+                                onClick={() => markAsContacted(target.email, 'manual', 'Manually marked as contacted from queue')}
+                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-all active:scale-95"
+                              >
+                                📞 Mark Contacted
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => unmarkAsContacted(target.email)}
+                                className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-xs font-medium transition-all active:scale-95"
+                              >
+                                ↩️ Undo Contact
+                              </button>
+                            )}
+                          </div>
+                          
+                          <div className="text-xs text-gray-500">
+                            {alreadySent ? 'Email already sent' : 'Ready to send'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => sendEmail(target, 'email1')}
-                        disabled={campaignManager.shouldPauseCampaign()}
-                        className={`px-3 py-1 rounded text-sm ${
-                          campaignManager.shouldPauseCampaign() 
-                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                        }`}
-                      >
-                        {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 'Send Email 1'}
-                      </button>
-                      <button
-                        onClick={() => sendEmail(target, 'email2')}
-                        disabled={campaignManager.shouldPauseCampaign()}
-                        className={`px-3 py-1 rounded text-sm ${
-                          campaignManager.shouldPauseCampaign() 
-                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                            : 'bg-purple-600 hover:bg-purple-700 text-white'
-                        }`}
-                      >
-                        {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 'Send Email 2'}
-                      </button>
-                      <button
-                        onClick={() => sendEmail(target, 'breakup')}
-                        disabled={campaignManager.shouldPauseCampaign()}
-                        className={`px-3 py-1 rounded text-sm ${
-                          campaignManager.shouldPauseCampaign() 
-                            ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                            : 'bg-red-600 hover:bg-red-700 text-white'
-                        }`}
-                      >
-                        {campaignManager.shouldPauseCampaign() ? '⚠️ PAUSED' : 'Send Breakup'}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+              
+              {/* Empty State */}
+              {targets.length === 0 && (
+                <div className="text-center py-12">
+                  <div className="text-4xl md:text-5xl mb-4">📥</div>
+                  <h3 className="text-lg font-medium text-gray-300 mb-2">No Targets in Queue</h3>
+                  <p className="text-gray-500 text-sm">Import CSV files to add targets to the send queue</p>
+                </div>
+              )}
             </div>
           </div>
         )}

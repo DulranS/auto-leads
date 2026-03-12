@@ -1,7 +1,7 @@
 'use client';
 
-import EnterpriseMarketingAutomation from './ENTERPRISE_MARKETING_AUTOMATION';
+import ManualFirstSalesMachine from './manual-first-sales-machine';
 
 export default function DashboardPage() {
-  return <EnterpriseMarketingAutomation />;
+  return <ManualFirstSalesMachine />;
 }

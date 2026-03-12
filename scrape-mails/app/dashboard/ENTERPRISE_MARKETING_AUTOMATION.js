@@ -241,7 +241,7 @@ class LeadQualificationEngine {
   }
 }
 
-// CAMPAIGN AUTOMATION ENGINE - Robust Business Logic with Safety & Duplicate Prevention
+// CAMPAIGN AUTOMATION ENGINE - Robust Business Logic with Safety
 class CampaignAutomationEngine {
   constructor() {
     this.state = {
@@ -274,12 +274,6 @@ class CampaignAutomationEngine {
     this.queue = [];
     this.history = [];
     this.rules = ENTERPRISE_CONFIG.campaign.safety;
-    
-    // 🛡️ DUPLICATE PREVENTION & CONTACT TRACKING
-    this.sentEmails = new Set(); // Track email addresses already sent
-    this.contactHistory = new Map(); // Track full contact history {email: {sentDate, templates, status, contacted}}
-    this.suppressionList = new Set(); // Global suppression list for bounced/unsubscribed
-    this.contactedEmails = new Set(); // Track manually contacted emails
   }
   
   canSend() {
@@ -355,115 +349,6 @@ class CampaignAutomationEngine {
     };
   }
   
-  // 🛡️ INTELLIGENT DUPLICATE PREVENTION
-  hasEmailBeenSent(email) {
-    return this.sentEmails.has(email.toLowerCase());
-  }
-  
-  isEmailSuppressed(email) {
-    return this.suppressionList.has(email.toLowerCase());
-  }
-  
-  isContacted(email) {
-    return this.contactedEmails.has(email.toLowerCase());
-  }
-  
-  canSendEmail(email, templateKey = null) {
-    const normalizedEmail = email.toLowerCase();
-    
-    // Check if email was already sent
-    if (this.hasEmailBeenSent(normalizedEmail)) {
-      return { canSend: false, reason: `Email already sent to ${email}`, duplicate: true };
-    }
-    
-    // Check if email is in suppression list
-    if (this.isEmailSuppressed(normalizedEmail)) {
-      return { canSend: false, reason: `Email ${email} is in suppression list`, suppressed: true };
-    }
-    
-    // Check if this specific template was already sent to this contact
-    if (templateKey && this.contactHistory.has(normalizedEmail)) {
-      const history = this.contactHistory.get(normalizedEmail);
-      if (history.templates && history.templates.includes(templateKey)) {
-        return { canSend: false, reason: `Template ${templateKey} already sent to ${email}`, templateDuplicate: true };
-      }
-    }
-    
-    // Apply standard safety rules
-    const standardCheck = this.canSend();
-    return { 
-      canSend: standardCheck.allowed, 
-      reason: standardCheck.reason,
-      duplicate: false,
-      suppressed: false,
-      templateDuplicate: false
-    };
-  }
-  
-  // 📞 CONTACT MANAGEMENT
-  markAsContacted(email, contactMethod = 'manual', notes = '') {
-    const normalizedEmail = email.toLowerCase();
-    this.contactedEmails.add(normalizedEmail);
-    
-    // Update contact history
-    if (!this.contactHistory.has(normalizedEmail)) {
-      this.contactHistory.set(normalizedEmail, {
-        sentDate: null,
-        templates: [],
-        status: 'contacted',
-        contacted: true,
-        contactMethod: contactMethod,
-        contactDate: new Date(),
-        notes: notes
-      });
-    } else {
-      const history = this.contactHistory.get(normalizedEmail);
-      history.contacted = true;
-      history.contactMethod = contactMethod;
-      history.contactDate = new Date();
-      history.notes = notes;
-    }
-    
-    console.log(`📞 Marked ${email} as contacted via ${contactMethod}`);
-  }
-  
-  unmarkAsContacted(email) {
-    const normalizedEmail = email.toLowerCase();
-    this.contactedEmails.delete(normalizedEmail);
-    
-    if (this.contactHistory.has(normalizedEmail)) {
-      const history = this.contactHistory.get(normalizedEmail);
-      history.contacted = false;
-      history.contactMethod = null;
-      history.contactDate = null;
-    }
-    
-    console.log(`🔄 Unmarked ${email} as contacted`);
-  }
-  
-  getContactStatus(email) {
-    const normalizedEmail = email.toLowerCase();
-    return {
-      sent: this.hasEmailBeenSent(normalizedEmail),
-      contacted: this.isContacted(normalizedEmail),
-      suppressed: this.isEmailSuppressed(normalizedEmail),
-      history: this.contactHistory.get(normalizedEmail) || null
-    };
-  }
-  
-  // 🚫 SUPPRESSION LIST MANAGEMENT
-  addToSuppressionList(email, reason = 'bounce') {
-    const normalizedEmail = email.toLowerCase();
-    this.suppressionList.add(normalizedEmail);
-    console.log(`🚫 Added ${email} to suppression list: ${reason}`);
-  }
-  
-  removeFromSuppressionList(email) {
-    const normalizedEmail = email.toLowerCase();
-    this.suppressionList.delete(normalizedEmail);
-    console.log(`✅ Removed ${email} from suppression list`);
-  }
-  
   async executeCampaign(targets, templates) {
     console.log('🚀 Starting enterprise campaign execution...');
     
@@ -473,14 +358,6 @@ class CampaignAutomationEngine {
       
       for (let i = 0; i < targets.length; i++) {
         const target = targets[i];
-        const templateKey = i === 0 ? 'introduction' : 'socialProof';
-        
-        // 🛡️ INTELLIGENT DUPLICATE PREVENTION CHECK
-        const emailCheck = this.canSendEmail(target.email, templateKey);
-        if (!emailCheck.canSend) {
-          console.log(`⚠️ Email not sent to ${target.email}: ${emailCheck.reason}`);
-          continue; // Skip this target and continue with others
-        }
         
         // Check safety before each send
         const safetyCheck = this.canSend();
@@ -491,7 +368,7 @@ class CampaignAutomationEngine {
         }
         
         try {
-          await this.sendEmail(target, templates, templateKey);
+          await this.sendEmail(target, templates, i === 0 ? 'introduction' : 'socialProof');
           this.state.safety.lastSendTime = Date.now();
           
           // Simulate delivery tracking
@@ -524,32 +401,9 @@ class CampaignAutomationEngine {
     
     console.log(`📧 Sending ${template.name} to: ${target.email}`);
     
-    // 🛡️ TRACK EMAIL AS SENT (DUPLICATE PREVENTION)
-    const normalizedEmail = target.email.toLowerCase();
-    this.sentEmails.add(normalizedEmail);
-    
-    // Update contact history
-    if (!this.contactHistory.has(normalizedEmail)) {
-      this.contactHistory.set(normalizedEmail, {
-        sentDate: new Date(),
-        templates: [templateKey],
-        status: 'sent',
-        contacted: false,
-        contactMethod: null,
-        contactDate: null,
-        notes: ''
-      });
-    } else {
-      const history = this.contactHistory.get(normalizedEmail);
-      history.sentDate = new Date();
-      history.templates = [...(history.templates || []), templateKey];
-      history.status = 'sent';
-    }
-    
     // Update stats
     this.state.dailyStats.sent++;
     this.state.totalStats.sent++;
-    this.state.safety.lastSendTime = Date.now();
     
     // Simulate personalization
     const personalizedSubject = this.personalizeTemplate(template.subject, target);
@@ -566,11 +420,6 @@ class CampaignAutomationEngine {
       personalization: {
         subject: personalizedSubject,
         body: personalizedBody
-      },
-      duplicatePrevention: {
-        emailTracked: true,
-        templateTracked: true,
-        contactHistoryUpdated: true
       }
     };
   }
@@ -915,10 +764,6 @@ export default function EnterpriseMarketingAutomation() {
   const [insights, setInsights] = useState([]);
   const [predictions, setPredictions] = useState({});
   
-  // 📞 CONTACT MANAGEMENT STATE
-  const [contactedEmails, setContactedEmails] = useState(new Set());
-  const [contactNotes, setContactNotes] = useState({});
-  
   // Initialize engines with proper business logic
   const qualificationEngine = useRef(new LeadQualificationEngine()).current;
   const campaignEngine = useRef(new CampaignAutomationEngine()).current;
@@ -997,72 +842,6 @@ export default function EnterpriseMarketingAutomation() {
     
     reader.readAsText(file);
   }, [qualificationEngine, campaignEngine, biEngine]);
-  
-  // 📞 CONTACT MANAGEMENT FUNCTIONS
-  const markAsContacted = useCallback((email, method = 'manual', notes = '') => {
-    const normalizedEmail = email.toLowerCase();
-    
-    // Update local state
-    setContactedEmails(prev => new Set([...prev, normalizedEmail]));
-    setContactNotes(prev => ({
-      ...prev,
-      [normalizedEmail]: { method, notes, date: new Date().toISOString() }
-    }));
-    
-    // Update campaign engine
-    campaignEngine.markAsContacted(normalizedEmail, method, notes);
-    
-    console.log(`📞 Marked ${email} as contacted via ${method}`);
-  }, [campaignEngine]);
-  
-  const unmarkAsContacted = useCallback((email) => {
-    const normalizedEmail = email.toLowerCase();
-    
-    // Update local state
-    setContactedEmails(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(normalizedEmail);
-      return newSet;
-    });
-    setContactNotes(prev => {
-      const newNotes = { ...prev };
-      delete newNotes[normalizedEmail];
-      return newNotes;
-    });
-    
-    // Update campaign engine
-    campaignEngine.unmarkAsContacted(normalizedEmail);
-    
-    console.log(`🔄 Unmarked ${email} as contacted`);
-  }, [campaignEngine]);
-  
-  const getContactStatus = useCallback((email) => {
-    const normalizedEmail = email.toLowerCase();
-    return {
-      contacted: contactedEmails.has(normalizedEmail),
-      notes: contactNotes[normalizedEmail] || null,
-      campaignStatus: campaignEngine.getContactStatus(normalizedEmail)
-    };
-  }, [contactedEmails, contactNotes, campaignEngine]);
-  
-  // 📋 SMART TARGET SORTING - Contacted at bottom
-  const getSortedTargets = useCallback(() => {
-    if (!targets.length) return [];
-    
-    return [...targets].sort((a, b) => {
-      const aContacted = getContactStatus(a.email).contacted;
-      const bContacted = getContactStatus(b.email).contacted;
-      
-      // Non-contacted contacts first
-      if (aContacted && !bContacted) return 1;
-      if (!aContacted && bContacted) return -1;
-      
-      // Then by qualification score (highest first)
-      const aScore = a.qualification?.score || 0;
-      const bScore = b.qualification?.score || 0;
-      return bScore - aScore;
-    });
-  }, [targets, getContactStatus]);
   
   // Manual Campaign Execution with Business Intelligence
   const executeManualCampaign = useCallback(async () => {
@@ -1449,135 +1228,74 @@ export default function EnterpriseMarketingAutomation() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700">
-                    {getSortedTargets().map((lead, index) => {
-                      const contactStatus = getContactStatus(lead.email);
-                      const alreadySent = campaignEngine.hasEmailBeenSent(lead.email);
-                      const isSuppressed = campaignEngine.isEmailSuppressed(lead.email);
-                      
-                      return (
-                        <tr key={index} className={`hover:bg-gray-700/50 transition-colors ${
-                          contactStatus.contacted ? 'opacity-75' : ''
-                        }`}>
-                          <td className="py-3 px-4">
-                            <div>
-                              <p className="font-medium text-white">{lead.company_name || lead.company || 'Unknown'}</p>
-                              <p className="text-xs text-gray-400">{lead.employees || lead.company_size || 'Unknown'} employees</p>
-                              
-                              {/* 🛡️ DUPLICATE PREVENTION INDICATORS */}
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {alreadySent && (
-                                  <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs">
-                                    📧 Sent
-                                  </span>
-                                )}
-                                {isSuppressed && (
-                                  <span className="px-2 py-1 bg-red-900/50 text-red-300 rounded text-xs">
-                                    🚫 Blocked
-                                  </span>
-                                )}
-                                {contactStatus.contacted && (
-                                  <span className="px-2 py-1 bg-orange-900/50 text-orange-300 rounded text-xs">
-                                    📞 Contacted
-                                  </span>
-                                )}
-                              </div>
+                    {targets.map((lead, index) => (
+                      <tr key={index} className="hover:bg-gray-700/50 transition-colors">
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="font-medium text-white">{lead.company_name || lead.company || 'Unknown'}</p>
+                            <p className="text-xs text-gray-400">{lead.employees || lead.company_size || 'Unknown'} employees</p>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div>
+                            <p className="text-white">{lead.first_name} {lead.last_name || ''}</p>
+                            <p className="text-xs text-blue-400">{lead.email}</p>
+                            {lead.website && (
+                              <p className="text-xs text-gray-400 truncate max-w-[150px]">{lead.website}</p>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-gray-300">{lead.industry || 'Unknown'}</span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-white">{lead.qualification?.score || 0}</span>
+                            <div className="w-16 bg-gray-700 rounded-full h-2">
+                              <div 
+                                className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
+                                style={{ width: `${lead.qualification?.score || 0}%` }}
+                              />
                             </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div>
-                              <p className="text-white">{lead.first_name} {lead.last_name || ''}</p>
-                              <p className="text-xs text-blue-400">{lead.email}</p>
-                              {lead.website && (
-                                <p className="text-xs text-gray-400 truncate max-w-[150px]">{lead.website}</p>
-                              )}
-                              
-                              {/* 📞 CONTACT NOTES DISPLAY */}
-                              {contactStatus.notes && (
-                                <div className="mt-1 p-1 bg-gray-800 rounded text-xs">
-                                  <p className="text-blue-300">📞 {contactStatus.notes.method}</p>
-                                  <p className="text-gray-400 truncate">{contactStatus.notes.notes}</p>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="text-sm text-gray-300">{lead.industry || 'Unknown'}</span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-white">{lead.qualification?.score || 0}</span>
-                              <div className="w-16 bg-gray-700 rounded-full h-2">
-                                <div 
-                                  className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full"
-                                  style={{ width: `${lead.qualification?.score || 0}%` }}
-                                />
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              lead.qualification?.tier?.name?.includes('A') ? 'bg-green-900/50 text-green-300 border border-green-700' :
-                              lead.qualification?.tier?.name?.includes('B') ? 'bg-blue-900/50 text-blue-300 border border-blue-700' :
-                              lead.qualification?.tier?.name?.includes('C') ? 'bg-yellow-900/50 text-yellow-300 border border-yellow-700' :
-                              'bg-red-900/50 text-red-300 border border-red-700'
-                            }`}>
-                              {lead.qualification?.tier?.name || 'Unknown'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className="text-sm font-medium text-green-400">
-                              {lead.qualification?.estimatedValue || '< $500'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              lead.status === 'new' ? 'bg-gray-700 text-gray-300' :
-                              lead.status === 'contacted' ? 'bg-blue-700 text-blue-300' :
-                              lead.status === 'replied' ? 'bg-green-700 text-green-300' :
-                              'bg-gray-700 text-gray-300'
-                            }`}>
-                              {lead.status || 'new'}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <div className="flex flex-col gap-2">
-                              {/* 📞 CONTACT MANAGEMENT CONTROLS */}
-                              <div className="flex gap-1">
-                                {!contactStatus.contacted ? (
-                                  <button
-                                    onClick={() => markAsContacted(lead.email, 'manual', 'Manually marked as contacted from leads table')}
-                                    className="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs transition-colors"
-                                    title="Mark as contacted"
-                                  >
-                                    📞 Contact
-                                  </button>
-                                ) : (
-                                  <button
-                                    onClick={() => unmarkAsContacted(lead.email)}
-                                    className="bg-gray-600 hover:bg-gray-700 px-2 py-1 rounded text-xs transition-colors"
-                                    title="Unmark as contacted"
-                                  >
-                                    ↩️ Undo
-                                  </button>
-                                )}
-                                
-                                <button className="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-xs transition-colors">
-                                  Details
-                                </button>
-                              </div>
-                              
-                              {/* 📧 EMAIL STATUS */}
-                              {alreadySent && (
-                                <p className="text-xs text-purple-400">Email already sent</p>
-                              )}
-                              {isSuppressed && (
-                                <p className="text-xs text-red-400">Email suppressed</p>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            lead.qualification?.tier?.name?.includes('A') ? 'bg-green-900/50 text-green-300 border border-green-700' :
+                            lead.qualification?.tier?.name?.includes('B') ? 'bg-blue-900/50 text-blue-300 border border-blue-700' :
+                            lead.qualification?.tier?.name?.includes('C') ? 'bg-yellow-900/50 text-yellow-300 border border-yellow-700' :
+                            'bg-red-900/50 text-red-300 border border-red-700'
+                          }`}>
+                            {lead.qualification?.tier?.name || 'Unknown'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm font-medium text-green-400">
+                            {lead.qualification?.estimatedValue || '< $500'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            lead.status === 'new' ? 'bg-gray-700 text-gray-300' :
+                            lead.status === 'contacted' ? 'bg-blue-700 text-blue-300' :
+                            lead.status === 'replied' ? 'bg-green-700 text-green-300' :
+                            'bg-gray-700 text-gray-300'
+                          }`}>
+                            {lead.status || 'new'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            <button className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-xs transition-colors">
+                              Contact
+                            </button>
+                            <button className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs transition-colors">
+                              Details
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -1729,214 +1447,6 @@ export default function EnterpriseMarketingAutomation() {
                     </div>
                   </div>
                 ))}
-              </div>
-            </div>
-            
-            {/* 📱 MOBILE-RESPONSIVE MULTI-CHANNEL OUTREACH */}
-            <div className="bg-gray-800 p-4 md:p-6 rounded-xl border border-gray-700">
-              <h2 className="text-xl font-semibold mb-4 md:mb-6">📤 Multi-Channel Outreach</h2>
-              
-              {/* Cadence Display - Mobile Responsive */}
-              <div className="mb-6 md:mb-8">
-                <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">📋 Multi-Touch Cadence</h3>
-                <div className="space-y-2 md:space-y-3">
-                  {ENTERPRISE_CONFIG.campaign.touchpoints.map((step, index) => (
-                    <div key={index} className="bg-gray-900 rounded-lg p-3 md:p-4 border border-gray-700">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-white font-bold text-sm md:text-base">Day {step.day}</span>
-                            <span className="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs md:text-sm">
-                              {step.channel}
-                            </span>
-                          </div>
-                          <p className="text-gray-400 text-xs md:text-sm">{step.template} template</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              
-              {/* Safety Rules - Mobile Responsive Grid */}
-              <div className="mb-6 md:mb-8">
-                <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">🛡️ Safety Rules</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                  <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
-                    <p className="text-gray-400 text-xs md:text-sm mb-1">Max emails/day:</p>
-                    <p className="text-white font-bold text-lg md:text-xl">{ENTERPRISE_CONFIG.campaign.dailySendLimit}</p>
-                  </div>
-                  <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
-                    <p className="text-gray-400 text-xs md:text-sm mb-1">Pause on bounce rate:</p>
-                    <p className="text-white font-bold text-lg md:text-xl">{ENTERPRISE_CONFIG.campaign.safety.maxBounceRate}%</p>
-                  </div>
-                  <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
-                    <p className="text-gray-400 text-xs md:text-sm mb-1">Pause on unsubscribe:</p>
-                    <p className="text-white font-bold text-lg md:text-xl">{ENTERPRISE_CONFIG.campaign.safety.maxUnsubscribeRate}%</p>
-                  </div>
-                  <div className="bg-gray-700 p-3 md:p-4 rounded-lg border border-gray-600">
-                    <p className="text-gray-400 text-xs md:text-sm mb-1">Send delay:</p>
-                    <p className="text-white font-bold text-lg md:text-xl">{ENTERPRISE_CONFIG.campaign.safety.sendDelay}ms</p>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Queue Management - Mobile Responsive */}
-              <div>
-                <h3 className="text-white font-medium mb-3 md:mb-4 text-base md:text-lg">📤 Email Queue</h3>
-                <div className="space-y-3 md:space-y-4">
-                  {getSortedTargets().slice(0, 10).map(target => {
-                    const contactStatus = getContactStatus(target.email);
-                    const alreadySent = campaignEngine.hasEmailBeenSent(target.email);
-                    const isSuppressed = campaignEngine.isEmailSuppressed(target.email);
-                    
-                    return (
-                      <div key={target.email} className="bg-gray-900 rounded-lg p-4 md:p-5 border border-gray-700">
-                        {/* Contact Info - Mobile Responsive */}
-                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-                          <div className="flex-1 min-w-0">
-                            <h4 className="text-white font-medium text-sm md:text-base mb-1 truncate">
-                              {target.company_name || target.company || 'Unknown'}
-                            </h4>
-                            <p className="text-gray-400 text-xs md:text-sm truncate">{target.email}</p>
-                            
-                            {/* Status Indicators */}
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {alreadySent && (
-                                <span className="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-xs">
-                                  📧 Sent
-                                </span>
-                              )}
-                              {isSuppressed && (
-                                <span className="px-2 py-1 bg-red-900/50 text-red-300 rounded text-xs">
-                                  🚫 Blocked
-                                </span>
-                              )}
-                              {contactStatus.contacted && (
-                                <span className="px-2 py-1 bg-orange-900/50 text-orange-300 rounded text-xs">
-                                  📞 Contacted
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500">
-                              Score: {target.qualification?.score || 0}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        {/* Email Send Buttons - Mobile Responsive */}
-                        <div className="space-y-2">
-                          {/* Primary Email */}
-                          <button
-                            onClick={() => {
-                              const emailCheck = campaignEngine.canSendEmail(target.email, 'introduction');
-                              if (!emailCheck.canSend) {
-                                alert(`⚠️ Cannot send: ${emailCheck.reason}`);
-                                return;
-                              }
-                              // Send email logic would go here
-                              console.log('📧 Sending introduction email to:', target.email);
-                            }}
-                            disabled={alreadySent || isSuppressed}
-                            className={`w-full sm:w-auto px-4 py-2 md:px-5 md:py-2.5 rounded-lg text-sm font-medium transition-all ${
-                              alreadySent || isSuppressed
-                                ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                                : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'
-                            }`}
-                          >
-                            {alreadySent ? '📧 Already Sent' :
-                             isSuppressed ? '🚫 Blocked' :
-                             '📧 Send Introduction'}
-                          </button>
-                          
-                          {/* Secondary Actions - Horizontal on Desktop, Vertical on Mobile */}
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <button
-                              onClick={() => {
-                                const emailCheck = campaignEngine.canSendEmail(target.email, 'socialProof');
-                                if (!emailCheck.canSend) {
-                                  alert(`⚠️ Cannot send: ${emailCheck.reason}`);
-                                  return;
-                                }
-                                console.log('📧 Sending social proof email to:', target.email);
-                              }}
-                              disabled={alreadySent || isSuppressed}
-                              className={`w-full sm:w-auto px-4 py-2 md:px-4 md:py-2 rounded-lg text-sm font-medium transition-all ${
-                                alreadySent || isSuppressed
-                                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                                  : 'bg-purple-600 hover:bg-purple-700 text-white active:scale-95'
-                              }`}
-                            >
-                              {alreadySent ? '📧 Already Sent' :
-                               isSuppressed ? '🚫 Blocked' :
-                               '📧 Social Proof'}
-                            </button>
-                            
-                            <button
-                              onClick={() => {
-                                const emailCheck = campaignEngine.canSendEmail(target.email, 'breakup');
-                                if (!emailCheck.canSend) {
-                                  alert(`⚠️ Cannot send: ${emailCheck.reason}`);
-                                  return;
-                                }
-                                console.log('🚪 Sending breakup email to:', target.email);
-                              }}
-                              disabled={alreadySent || isSuppressed}
-                              className={`w-full sm:w-auto px-4 py-2 md:px-4 md:py-2 rounded-lg text-sm font-medium transition-all ${
-                                alreadySent || isSuppressed
-                                  ? 'bg-gray-600 text-gray-400 cursor-not-allowed' 
-                                  : 'bg-red-600 hover:bg-red-700 text-white active:scale-95'
-                              }`}
-                            >
-                              {alreadySent ? '📧 Already Sent' :
-                               isSuppressed ? '🚫 Blocked' :
-                               '🚪 Breakup Email'}
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {/* Contact Management - Mobile Responsive */}
-                        <div className="mt-4 pt-4 border-t border-gray-700">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              {!contactStatus.contacted ? (
-                                <button
-                                  onClick={() => markAsContacted(target.email, 'manual', 'Manually marked as contacted from outreach queue')}
-                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-all active:scale-95"
-                                >
-                                  📞 Mark Contacted
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => unmarkAsContacted(target.email)}
-                                  className="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-xs font-medium transition-all active:scale-95"
-                                >
-                                  ↩️ Undo Contact
-                                </button>
-                              )}
-                            </div>
-                            
-                            <div className="text-xs text-gray-500">
-                              {alreadySent ? 'Email already sent' : 'Ready to send'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                
-                {/* Empty State */}
-                {targets.length === 0 && (
-                  <div className="text-center py-12">
-                    <div className="text-4xl md:text-5xl mb-4">📥</div>
-                    <h3 className="text-lg font-medium text-gray-300 mb-2">No Targets in Queue</h3>
-                    <p className="text-gray-500 text-sm">Import CSV files to add targets to the send queue</p>
-                  </div>
-                )}
               </div>
             </div>
           </div>
