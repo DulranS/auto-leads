@@ -1,12 +1,15 @@
 // app/dashboard/page.js
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
 import Head from 'next/head';
 import { useRouter } from 'next/navigation';
 
+// ============================================================================
+// FIREBASE CONFIGURATION
+// ============================================================================
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -21,7 +24,9 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// ✅ YOUR ACTUAL INITIAL PITCH
+// ============================================================================
+// EMAIL TEMPLATES - YOUR ACTUAL PITCH
+// ============================================================================
 const DEFAULT_TEMPLATE_A = {
   subject: 'Quick question for {{business_name}}',
   body: `Hi {{business_name}}, 😊👋🏻
@@ -50,7 +55,9 @@ Founder – Syndicate Solutions
 `
 };
 
-// ✅ FOLLOW-UP TEMPLATES
+// ============================================================================
+// FOLLOW-UP TEMPLATES
+// ============================================================================
 const FOLLOW_UP_1 = {
   subject: 'Quick question for {{business_name}}',
   body: `Hi {{business_name}},
@@ -92,6 +99,9 @@ WhatsApp: 0741143323
 
 const DEFAULT_TEMPLATE_B = FOLLOW_UP_1;
 
+// ============================================================================
+// MULTI-CHANNEL TEMPLATES
+// ============================================================================
 const DEFAULT_WHATSAPP_TEMPLATE = `Hi {{business_name}} 👋😊
 Hope you're doing well.
 I'm {{sender_name}} from Sri Lanka – I run a small digital mini-agency supporting businesses with websites, content, and AI automation.
@@ -104,9 +114,24 @@ This is {{sender_name}} from Syndicate Solutions.
 Quick question – are you currently working on any digital work that's delayed or not giving results?
 Reply YES or NO.`;
 
-// --- UTILITY FUNCTIONS ---
+const DEFAULT_INSTAGRAM_TEMPLATE = `Hi {{business_name}} 👋
+I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
+Would you be open to a quick chat about how we can help?
+No pressure at all.`;
+
+const DEFAULT_TWITTER_TEMPLATE = `Hi {{business_name}} 👋
+I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
+Would you be open to a quick chat?`;
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+/**
+ * Format phone number for international dialing (Sri Lanka format)
+ */
 function formatForDialing(raw) {
-  if (!raw || raw === 'N/A') return null;
+  if (!raw || raw === 'N/A' || raw === '') return null;
   let cleaned = raw.toString().replace(/\D/g, '');
   if (cleaned.startsWith('0') && cleaned.length >= 9) {
     cleaned = '94' + cleaned.slice(1);
@@ -114,12 +139,18 @@ function formatForDialing(raw) {
   return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
 }
 
+/**
+ * Extract template variables from text (e.g., {{business_name}})
+ */
 const extractTemplateVariables = (text) => {
   if (!text) return [];
   const matches = text.match(/\{\{\s*([^}]+?)\s*\}\}/g) || [];
   return [...new Set(matches.map(m => m.replace(/\{\{\s*|\s*\}\}/g, '').trim()))];
 };
 
+/**
+ * Validate email address with strict rules
+ */
 const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
   let cleaned = email.trim()
@@ -148,6 +179,9 @@ const isValidEmail = (email) => {
   return true;
 };
 
+/**
+ * Parse CSV row with proper quote handling
+ */
 const parseCsvRow = (str) => {
   const result = [];
   let current = '';
@@ -174,6 +208,9 @@ const parseCsvRow = (str) => {
   });
 };
 
+/**
+ * Render template text with variable substitution
+ */
 const renderPreviewText = (text, recipient, mappings, sender) => {
   if (!text) return '';
   let result = text;
@@ -190,44 +227,110 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
   return result;
 };
 
+/**
+ * Generate social media handle from business name
+ */
+const generateSocialHandle = (businessName, platform) => {
+  if (!businessName) return null;
+  let handle = businessName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_')
+    .substring(0, 30);
+  return handle;
+};
+
+/**
+ * Copy text to clipboard
+ */
+const copyToClipboard = (text, label) => {
+  navigator.clipboard.writeText(text);
+  alert(`✅ Copied ${label}: ${text}`);
+};
+
+// ============================================================================
+// EXPORT TEMPLATES FOR API USE
+// ============================================================================
 export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
 
+// ============================================================================
+// MAIN DASHBOARD COMPONENT
+// ============================================================================
 export default function Dashboard() {
+  // ============================================================================
+  // AUTH & LOADING STATES
+  // ============================================================================
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
   const router = useRouter();
+
+  // ============================================================================
+  // CSV & LEAD DATA STATES
+  // ============================================================================
   const [csvContent, setCsvContent] = useState('');
   const [csvHeaders, setCsvHeaders] = useState([]);
+  const [whatsappLinks, setWhatsappLinks] = useState([]);
+  const [leadScores, setLeadScores] = useState({});
+  const [validEmails, setValidEmails] = useState(0);
+  const [validWhatsApp, setValidWhatsApp] = useState(0);
+  const [leadQualityFilter, setLeadQualityFilter] = useState('HOT');
+  const [previewRecipient, setPreviewRecipient] = useState(null);
+  const [fieldMappings, setFieldMappings] = useState({});
+
+  // ============================================================================
+  // SENDER & TEMPLATE STATES
+  // ============================================================================
   const [senderName, setSenderName] = useState('');
   const [abTestMode, setAbTestMode] = useState(false);
   const [templateA, setTemplateA] = useState(DEFAULT_TEMPLATE_A);
   const [templateB, setTemplateB] = useState(DEFAULT_TEMPLATE_B);
   const [whatsappTemplate, setWhatsappTemplate] = useState(DEFAULT_WHATSAPP_TEMPLATE);
   const [smsTemplate, setSmsTemplate] = useState(DEFAULT_SMS_TEMPLATE);
-  const [fieldMappings, setFieldMappings] = useState({});
-  const [previewRecipient, setPreviewRecipient] = useState(null);
-  const [validEmails, setValidEmails] = useState(0);
-  const [validWhatsApp, setValidWhatsApp] = useState(0);
-  const [leadQualityFilter, setLeadQualityFilter] = useState('HOT');
-  const [whatsappLinks, setWhatsappLinks] = useState([]);
-  const [leadScores, setLeadScores] = useState({});
-  
-  // ✅ ENHANCED: Multi-channel tracking states
+  const [instagramTemplate, setInstagramTemplate] = useState(DEFAULT_INSTAGRAM_TEMPLATE);
+  const [twitterTemplate, setTwitterTemplate] = useState(DEFAULT_TWITTER_TEMPLATE);
+  const [emailImages, setEmailImages] = useState([]);
+  const [smsConsent, setSmsConsent] = useState(true);
+
+  // ============================================================================
+  // ✅ MULTI-CHANNEL TRACKING STATES (WHATSAPP, SMS, CALL, EMAIL)
+  // ============================================================================
   const [lastSent, setLastSent] = useState({}); // Email tracking
   const [lastWhatsAppSent, setLastWhatsAppSent] = useState({}); // WhatsApp tracking
   const [lastSMSSent, setLastSMSSent] = useState({}); // SMS tracking
   const [lastCallMade, setLastCallMade] = useState({}); // Call tracking
   const [contactedChannels, setContactedChannels] = useState({}); // Track which channels used per contact
-  
+
+  // ============================================================================
+  // ANALYTICS & METRICS STATES
+  // ============================================================================
   const [clickStats, setClickStats] = useState({});
-  const [emailImages, setEmailImages] = useState([]);
   const [dealStage, setDealStage] = useState({});
   const [pipelineValue, setPipelineValue] = useState(0);
+  const [abResults, setAbResults] = useState({ a: { opens: 0, clicks: 0, sent: 0 }, b: { opens: 0, clicks: 0, sent: 0 } });
+  const [dailyEmailCount, setDailyEmailCount] = useState(0);
+  const [dailyWhatsAppCount, setDailyWhatsAppCount] = useState(0);
+  const [loadingDailyCount, setLoadingDailyCount] = useState(false);
+  const [advancedMetrics, setAdvancedMetrics] = useState({
+    avgDaysToFirstReply: 0,
+    conversionFunnel: [],
+    channelPerformance: {},
+    leadVelocity: 0,
+    churnRisk: [],
+    recommendedFollowUpTime: 'afternoon',
+    bestPerformingTemplate: null,
+    estimatedMonthlyRevenue: 0
+  });
+
+  // ============================================================================
+  // SEND & STATUS STATES
+  // ============================================================================
   const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
-  const [smsConsent, setSmsConsent] = useState(true);
-  const [abResults, setAbResults] = useState({ a: { opens: 0, clicks: 0, sent: 0 }, b: { opens: 0, clicks: 0, sent: 0 } });
-  const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
+
+  // ============================================================================
+  // FOLLOW-UP STATES
+  // ============================================================================
   const [repliedLeads, setRepliedLeads] = useState({});
   const [followUpLeads, setFollowUpLeads] = useState({});
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
@@ -243,56 +346,6 @@ export default function Dashboard() {
     awaitingReply: 0,
     interestedLeads: 0
   });
-  const [researchingCompany, setResearchingCompany] = useState(null);
-  const [researchResults, setResearchResults] = useState({});
-  const [showResearchModal, setShowResearchModal] = useState(false);
-  const [interestedLeadsList, setInterestedLeadsList] = useState([]);
-  const [sendTimeOptimization, setSendTimeOptimization] = useState(null);
-  const [predictiveScores, setPredictiveScores] = useState({});
-  const [sentimentAnalysis, setSentimentAnalysis] = useState({});
-  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
-  const [smartFollowUpSuggestions, setSmartFollowUpSuggestions] = useState({});
-  const [followUpTemplate, setFollowUpTemplate] = useState('auto');
-  const [followUpTargeting, setFollowUpTargeting] = useState('ready');
-  const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
-  const [scheduledTime, setScheduledTime] = useState('');
-  const [batchSize, setBatchSize] = useState(50);
-  const [followUpAnalytics, setFollowUpAnalytics] = useState({
-    totalFollowUpsSent: 0,
-    avgReplyRate: 0,
-    bestTemplate: 'auto',
-    bestTimeToSend: 'afternoon'
-  });
-  const [callHistory, setCallHistory] = useState([]);
-  const [loadingCallHistory, setLoadingCallHistory] = useState(false);
-  const [showCallHistoryModal, setShowCallHistoryModal] = useState(false);
-  const [activeCallStatus, setActiveCallStatus] = useState(null);
-  const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
-  const [isMultiChannelFullscreen, setIsMultiChannelFullscreen] = useState(false);
-  const [dailyEmailCount, setDailyEmailCount] = useState(0);
-  const [dailyWhatsAppCount, setDailyWhatsAppCount] = useState(0);
-  const [loadingDailyCount, setLoadingDailyCount] = useState(false);
-  const [advancedMetrics, setAdvancedMetrics] = useState({
-    avgDaysToFirstReply: 0,
-    conversionFunnel: [],
-    channelPerformance: {},
-    leadVelocity: 0,
-    churnRisk: [],
-    recommendedFollowUpTime: 'afternoon',
-    bestPerformingTemplate: null,
-    estimatedMonthlyRevenue: 0
-  });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [contactFilter, setContactFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('score');
-  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
-  const [instagramTemplate, setInstagramTemplate] = useState(`Hi {{business_name}} 👋
-I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
-Would you be open to a quick chat about how we can help?
-No pressure at all.`);
-  const [twitterTemplate, setTwitterTemplate] = useState(`Hi {{business_name}} 👋
-I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
-Would you be open to a quick chat?`);
   const [followUpTemplates, setFollowUpTemplates] = useState([
     {
       id: 'followup_1',
@@ -323,34 +376,90 @@ Would you be open to a quick chat?`);
     }
   ]);
 
-  // ✅ ENHANCED: Check if contact was reached on any channel
-  const isContactedOnAnyChannel = (contact) => {
+  // ============================================================================
+  // AI & ADVANCED FEATURES STATES
+  // ============================================================================
+  const [researchingCompany, setResearchingCompany] = useState(null);
+  const [researchResults, setResearchResults] = useState({});
+  const [showResearchModal, setShowResearchModal] = useState(false);
+  const [interestedLeadsList, setInterestedLeadsList] = useState([]);
+  const [sendTimeOptimization, setSendTimeOptimization] = useState(null);
+  const [predictiveScores, setPredictiveScores] = useState({});
+  const [sentimentAnalysis, setSentimentAnalysis] = useState({});
+  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
+  const [smartFollowUpSuggestions, setSmartFollowUpSuggestions] = useState({});
+  const [followUpTemplate, setFollowUpTemplate] = useState('auto');
+  const [followUpTargeting, setFollowUpTargeting] = useState('ready');
+  const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [batchSize, setBatchSize] = useState(50);
+  const [followUpAnalytics, setFollowUpAnalytics] = useState({
+    totalFollowUpsSent: 0,
+    avgReplyRate: 0,
+    bestTemplate: 'auto',
+    bestTimeToSend: 'afternoon'
+  });
+
+  // ============================================================================
+  // CALL TRACKING STATES
+  // ============================================================================
+  const [callHistory, setCallHistory] = useState([]);
+  const [loadingCallHistory, setLoadingCallHistory] = useState(false);
+  const [showCallHistoryModal, setShowCallHistoryModal] = useState(false);
+  const [activeCallStatus, setActiveCallStatus] = useState(null);
+
+  // ============================================================================
+  // MULTI-CHANNEL MODAL STATES
+  // ============================================================================
+  const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
+  const [isMultiChannelFullscreen, setIsMultiChannelFullscreen] = useState(false);
+
+  // ============================================================================
+  // SEARCH & FILTER STATES
+  // ============================================================================
+  const [searchQuery, setSearchQuery] = useState('');
+  const [contactFilter, setContactFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('score');
+  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
+
+  // ============================================================================
+  // ✅ HELPER: Check if contact was reached on ANY channel
+  // ============================================================================
+  const isContactedOnAnyChannel = useCallback((contact) => {
+    if (!contact) return false;
     const key = contact.email || contact.phone;
+    if (!key) return false;
     return !!(
       lastSent[key] ||
       lastWhatsAppSent[key] ||
       lastSMSSent[key] ||
       lastCallMade[key] ||
-      contactedChannels[key]?.length > 0
+      (contactedChannels[key] && contactedChannels[key].length > 0)
     );
-  };
+  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels]);
 
-  // ✅ ENHANCED: Get all contact attempts for a contact
-  const getContactHistory = (contact) => {
+  // ============================================================================
+  // ✅ HELPER: Get all contact attempts for a contact
+  // ============================================================================
+  const getContactHistory = useCallback((contact) => {
+    if (!contact) return { email: null, whatsapp: null, sms: null, call: null, channels: [] };
     const key = contact.email || contact.phone;
-    const history = {
+    return {
       email: lastSent[key] ? new Date(lastSent[key]) : null,
       whatsapp: lastWhatsAppSent[key] ? new Date(lastWhatsAppSent[key]) : null,
       sms: lastSMSSent[key] ? new Date(lastSMSSent[key]) : null,
       call: lastCallMade[key] ? new Date(lastCallMade[key]) : null,
       channels: contactedChannels[key] || []
     };
-    return history;
-  };
+  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels]);
 
-  // ✅ ENHANCED: Check if safe to contact on specific channel
-  const isSafeToContactOnChannel = (contact, channel, minDaysBetween = 2) => {
+  // ============================================================================
+  // ✅ HELPER: Check if safe to contact on specific channel
+  // ============================================================================
+  const isSafeToContactOnChannel = useCallback((contact, channel, minDaysBetween = 2) => {
+    if (!contact) return true;
     const key = contact.email || contact.phone;
+    if (!key) return true;
     const now = new Date();
     let lastContactDate = null;
     
@@ -363,10 +472,20 @@ Would you be open to a quick chat?`);
     
     const daysSince = (now - new Date(lastContactDate)) / (1000 * 60 * 60 * 24);
     return daysSince >= minDaysBetween;
-  };
+  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade]);
 
-  // ✅ ENHANCED: Get recommended channel based on engagement
-  const getRecommendedChannel = (contact) => {
+  // ============================================================================
+  // ✅ HELPER: Check if phone is a 077 priority number (formatted as 9477...)
+  // ============================================================================
+  const isPriorityPhone = useCallback((phone) => {
+    return phone && phone.toString().startsWith('9477');
+  }, []);
+
+  // ============================================================================
+  // ✅ HELPER: Get recommended channel based on engagement
+  // ============================================================================
+  const getRecommendedChannel = useCallback((contact) => {
+    if (!contact) return 'email';
     const history = getContactHistory(contact);
     const scores = {
       email: contact.email ? (leadScores[contact.email] || 50) : 0,
@@ -394,16 +513,18 @@ Would you be open to a quick chat?`);
       .sort((a, b) => b[1] - a[1])[0];
     
     return bestChannel ? bestChannel[0] : 'email';
-  };
+  }, [leadScores, getContactHistory]);
 
-  // ✅ ENHANCED: Sort contacts with contacted at bottom
-  const getFilteredAndSortedContacts = () => {
+  // ============================================================================
+  // ✅ FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
+  // ============================================================================
+  const getFilteredAndSortedContacts = useCallback(() => {
     let filtered = [...whatsappLinks];
     
     // Apply search
     if (searchQuery) {
       filtered = filtered.filter(c =>
-        c.business.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.business?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         c.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         c.phone?.includes(searchQuery.replace(/\D/g, ''))
       );
@@ -443,225 +564,44 @@ Would you be open to a quick chat?`);
       } else if (sortBy === 'recent') {
         return new Date(lastSent[b.email || b.phone] || 0) - new Date(lastSent[a.email || a.phone] || 0);
       } else if (sortBy === 'name') {
-        return a.business.localeCompare(b.business);
+        return (a.business || '').localeCompare(b.business || '');
       }
       return 0;
     });
     
     return filtered;
-  };
+  }, [whatsappLinks, searchQuery, contactFilter, sortBy, leadScores, lastSent, repliedLeads, isContactedOnAnyChannel, isPriorityPhone]);
 
-  // ✅ ENHANCED: Prepare sorted contacts with contacted at bottom
-  const sortedWhatsappLinks = [...whatsappLinks].sort((a, b) => {
-    const aIsContacted = isContactedOnAnyChannel(a);
-    const bIsContacted = isContactedOnAnyChannel(b);
-    const aIsPriority = isPriorityPhone(a.phone);
-    const bIsPriority = isPriorityPhone(b.phone);
+  // ============================================================================
+  // ✅ PREPARE SORTED CONTACTS FOR MAIN OUTREACH LIST (CONTACTED AT BOTTOM)
+  // ============================================================================
+  const sortedWhatsappLinks = useMemo(() => {
+    if (!whatsappLinks || whatsappLinks.length === 0) return [];
     
-    // 1. Non-contacted first, contacted last
-    if (!aIsContacted && bIsContacted) return -1;
-    if (aIsContacted && !bIsContacted) return 1;
-    
-    // 2. Then 077 priority
-    if (aIsPriority && !bIsPriority) return -1;
-    if (!aIsPriority && bIsPriority) return 1;
-    
-    // 3. Fallback to score ranking
-    return (leadScores[b.email] || 0) - (leadScores[a.email] || 0);
-  });
+    return [...whatsappLinks].sort((a, b) => {
+      const aIsContacted = isContactedOnAnyChannel(a);
+      const bIsContacted = isContactedOnAnyChannel(b);
+      const aIsPriority = isPriorityPhone(a.phone);
+      const bIsPriority = isPriorityPhone(b.phone);
+      
+      // 1. Non-contacted first, contacted last
+      if (!aIsContacted && bIsContacted) return -1;
+      if (aIsContacted && !bIsContacted) return 1;
+      
+      // 2. Then 077 priority
+      if (aIsPriority && !bIsPriority) return -1;
+      if (!aIsPriority && bIsPriority) return 1;
+      
+      // 3. Fallback to score ranking
+      return (leadScores[b.email] || 0) - (leadScores[a.email] || 0);
+    });
+  }, [whatsappLinks, leadScores, isContactedOnAnyChannel, isPriorityPhone]);
 
-  // ✅ HELPER: Check if phone is a 077 priority number (formatted as 9477...)
-  const isPriorityPhone = (phone) => phone && phone.toString().startsWith('9477');
-
-  useEffect(() => {
-    if (window.google?.accounts?.oauth2?.initTokenClient) {
-      setIsGoogleLoaded(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.onload = () => setIsGoogleLoaded(true);
-    document.head.appendChild(script);
-    return () => document.head.removeChild(script);
-  }, []);
-
-  const handleSmartCall = (contact) => {
-    if (contact.dealStage === 'replied' || contact.leadScore >= 80) {
-      handleTwilioCall(contact, 'bridge');
-    } else if (contact.followUpCount >= 2) {
-      handleTwilioCall(contact, 'voicemail');
-    } else {
-      handleTwilioCall(contact, 'interactive');
-    }
-  };
-
-  const generateSocialHandle = (businessName, platform) => {
-    if (!businessName) return null;
-    let handle = businessName
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, '_')
-      .substring(0, 30);
-    return handle;
-  };
-
-  const handleOpenLinkedIn = (contact, type = 'company') => {
-    if (!contact.business) return;
-    let url;
-    if (type === 'company' && contact.linkedin_company) {
-      url = contact.linkedin_company;
-    } else if (type === 'ceo' && contact.linkedin_ceo) {
-      url = contact.linkedin_ceo;
-    } else if (type === 'founder' && contact.linkedin_founder) {
-      url = contact.linkedin_founder;
-    } else {
-      const query = encodeURIComponent(contact.business);
-      url = `https://www.linkedin.com/search/results/companies/?keywords=${query}`;
-    }
-    window.open(url, '_blank');
-  };
-
-  const getSocialOutreachStrategy = (link) => {
-    const strategies = [];
-    if (link.linkedin_company || link.linkedin_ceo) {
-      strategies.push({
-        type: 'linkedin',
-        priority: 1,
-        action: 'Connect & Engage',
-        description: 'Send connection request with personalized message'
-      });
-    }
-    if (link.email_primary) {
-      const confidence = link.contact_confidence;
-      strategies.push({
-        type: 'email',
-        priority: confidence === 'High' ? 1 : confidence === 'Medium' ? 2 : 3,
-        action: 'Send Email',
-        description: `Email outreach (${confidence} confidence)`
-      });
-    }
-    if (link.twitter) {
-      strategies.push({
-        type: 'twitter',
-        priority: 2,
-        action: 'Follow & Engage',
-        description: 'Follow, like recent posts, comment with value'
-      });
-    }
-    if (link.youtube) {
-      strategies.push({
-        type: 'youtube',
-        priority: 2,
-        action: 'Subscribe & Comment',
-        description: 'Subscribe, comment on recent videos'
-      });
-    }
-    if (link.instagram) {
-      strategies.push({
-        type: 'instagram',
-        priority: 3,
-        action: 'Follow & Like',
-        description: 'Follow account, like posts, engage authentically'
-      });
-    }
-    if (link.facebook) {
-      strategies.push({
-        type: 'facebook',
-        priority: 3,
-        action: 'Like & Follow',
-        description: 'Like page, follow, engage with recent posts'
-      });
-    }
-    if (link.tiktok) {
-      strategies.push({
-        type: 'tiktok',
-        priority: 4,
-        action: 'Follow & Like',
-        description: 'Follow account, like trending content'
-      });
-    }
-    return strategies.sort((a, b) => a.priority - b.priority);
-  };
-
-  const copyToClipboard = (text, label) => {
-    navigator.clipboard.writeText(text);
-    alert(`✅ Copied ${label}: ${text}`);
-  };
-
-  const isSafeToFollowUp = (email) => {
-    if (!email) return false;
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const followUpCount = followUpHistory[email]?.count || 0;
-    const hasReplied = repliedLeads[email];
-    const rules = {
-      isWaitingForReply: !hasReplied && daysSinceSent >= 2,
-      notOverContacted: followUpCount < 3,
-      notTooRecent: daysSinceSent >= 2,
-      withinCampaignWindow: daysSinceSent <= 30
-    };
-    return rules.isWaitingForReply && rules.notOverContacted && rules.notTooRecent && rules.withinCampaignWindow;
-  };
-
-  const getOptimalFollowUpStrategy = (email) => {
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const followUpCount = followUpHistory[email]?.count || 0;
-    const score = leadScores[email] || 50;
-    if (daysSinceSent < 2) {
-      return { optimalDay: 2, reason: 'Too soon - let settle', templateType: 'none' };
-    }
-    if (daysSinceSent >= 2 && daysSinceSent < 5) {
-      return { optimalDay: 2, reason: '2-5 days: First follow-up (gentle)', templateType: 'soft' };
-    }
-    if (daysSinceSent >= 5 && daysSinceSent < 7) {
-      return { optimalDay: 5, reason: '5-7 days: Value-first follow-up', templateType: 'aggressive' };
-    }
-    if (daysSinceSent >= 7 && daysSinceSent < 14) {
-      return { optimalDay: 7, reason: '7-14 days: Final push (breakup)', templateType: 'urgent' };
-    }
-    if (daysSinceSent >= 14 && daysSinceSent <= 30) {
-      return { optimalDay: 14, reason: '14+ days: Win-back attempt', templateType: 'question' };
-    }
-    return { optimalDay: 999, reason: 'Campaign window closed', templateType: 'none' };
-  };
-
-  const getSafeFollowUpCandidates = () => {
-    const candidates = whatsappLinks
-      .filter(contact => contact.email && isSafeToFollowUp(contact.email))
-      .map(contact => {
-        const strategy = getOptimalFollowUpStrategy(contact.email);
-        const followUpCount = followUpHistory[contact.email]?.count || 0;
-        const daysSinceSent = lastSent[contact.email] ?
-          (new Date() - new Date(lastSent[contact.email])) / (1000 * 60 * 60 * 24) : 999;
-        return {
-          ...contact,
-          strategy,
-          followUpCount,
-          daysSinceSent,
-          urgencyScore: 100 - (daysSinceSent * 2),
-          safetyScore: (3 - followUpCount) * 33.33
-        };
-      })
-      .sort((a, b) => b.urgencyScore - a.urgencyScore);
-    return candidates;
-  };
-
-  const getEngagementHealth = (email) => {
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const score = leadScores[email] || 50;
-    const hasReplied = repliedLeads[email];
-    if (hasReplied) return { status: '✅ Engaged', color: 'green', urgency: 'low' };
-    if (daysSinceSent < 2) return { status: '⏳ Fresh', color: 'blue', urgency: 'low' };
-    if (daysSinceSent < 5) return { status: '🟡 Warming', color: 'yellow', urgency: 'medium' };
-    if (daysSinceSent < 7) return { status: '⚠️ Cooling', color: 'orange', urgency: 'high' };
-    if (daysSinceSent <= 30) return { status: '🔴 Cold', color: 'red', urgency: 'critical' };
-    return { status: '❌ Dead', color: 'gray', urgency: 'none' };
-  };
-
-  const calculateLeadQualityScore = (contact) => {
+  // ============================================================================
+  // ✅ CALCULATE LEAD QUALITY SCORE
+  // ============================================================================
+  const calculateLeadQualityScore = useCallback((contact) => {
+    if (!contact) return 50;
     let score = 50;
     const contactKey = contact.email || contact.phone;
     if (contact.email) {
@@ -686,9 +626,12 @@ Would you be open to a quick chat?`);
     if (contact.website) score += 5;
     if (contact.contact_page_found === 'Yes') score += 5;
     return Math.min(100, Math.max(0, score));
-  };
+  }, [leadScores, repliedLeads, lastSent]);
 
-  const calculateConversionFunnel = () => {
+  // ============================================================================
+  // ✅ CALCULATE CONVERSION FUNNEL
+  // ============================================================================
+  const calculateConversionFunnel = useCallback(() => {
     const stages = {
       'sent': whatsappLinks.length,
       'opened': Math.round(whatsappLinks.length * 0.35),
@@ -700,16 +643,19 @@ Would you be open to a quick chat?`);
     return {
       stages,
       conversionRate: {
-        openRate: Math.round((stages.opened / stages.sent) * 100),
-        clickRate: Math.round((stages.clicked / stages.sent) * 100),
-        replyRate: Math.round((stages.replied / stages.sent) * 100),
-        demoRate: Math.round((stages.demo / stages.replied) * 100 || 0),
-        closeRate: Math.round((stages.closed / stages.demo) * 100 || 0)
+        openRate: Math.round((stages.opened / stages.sent) * 100) || 0,
+        clickRate: Math.round((stages.clicked / stages.sent) * 100) || 0,
+        replyRate: Math.round((stages.replied / stages.sent) * 100) || 0,
+        demoRate: Math.round((stages.demo / stages.replied) * 100) || 0,
+        closeRate: Math.round((stages.closed / stages.demo) * 100) || 0
       }
     };
-  };
+  }, [whatsappLinks, repliedLeads]);
 
-  const calculateRevenueForecasts = () => {
+  // ============================================================================
+  // ✅ CALCULATE REVENUE FORECASTS
+  // ============================================================================
+  const calculateRevenueForecasts = useCallback(() => {
     const avgDealValue = 5000;
     const closeRate = 0.15;
     const demoToCloseRate = 0.40;
@@ -729,9 +675,12 @@ Would you be open to a quick chat?`);
         expectedAnnualRunRate: expectedClosures * avgDealValue * 12
       }
     };
-  };
+  }, [repliedLeads]);
 
-  const segmentLeads = () => {
+  // ============================================================================
+  // ✅ SEGMENT LEADS
+  // ============================================================================
+  const segmentLeads = useCallback(() => {
     const segments = {
       veryHot: [],
       hot: [],
@@ -757,35 +706,594 @@ Would you be open to a quick chat?`);
       }
     });
     return segments;
-  };
+  }, [whatsappLinks, leadScores, repliedLeads, lastSent]);
 
-  const handleOpenInstagram = (contact) => {
-    if (!contact.business) return;
-    const igHandle = generateSocialHandle(contact.business, 'instagram');
-    if (igHandle) {
-      window.open(`https://www.instagram.com/${igHandle}/`, '_blank');
-    } else {
-      window.open('https://www.instagram.com/', '_blank');
+  // ============================================================================
+  // ✅ GET SAFE FOLLOW-UP CANDIDATES
+  // ============================================================================
+  const getSafeFollowUpCandidates = useCallback(() => {
+    const candidates = whatsappLinks
+      .filter(contact => contact.email && isSafeToFollowUp(contact.email))
+      .map(contact => {
+        const strategy = getOptimalFollowUpStrategy(contact.email);
+        const followUpCount = followUpHistory[contact.email]?.count || 0;
+        const daysSinceSent = lastSent[contact.email] ?
+          (new Date() - new Date(lastSent[contact.email])) / (1000 * 60 * 60 * 24) : 999;
+        return {
+          ...contact,
+          strategy,
+          followUpCount,
+          daysSinceSent,
+          urgencyScore: 100 - (daysSinceSent * 2),
+          safetyScore: (3 - followUpCount) * 33.33
+        };
+      })
+      .sort((a, b) => b.urgencyScore - a.urgencyScore);
+    return candidates;
+  }, [whatsappLinks, followUpHistory, lastSent]);
+
+  // ============================================================================
+  // ✅ CHECK IF SAFE TO FOLLOW UP
+  // ============================================================================
+  const isSafeToFollowUp = useCallback((email) => {
+    if (!email) return false;
+    const daysSinceSent = lastSent[email] ?
+      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
+    const followUpCount = followUpHistory[email]?.count || 0;
+    const hasReplied = repliedLeads[email];
+    const rules = {
+      isWaitingForReply: !hasReplied && daysSinceSent >= 2,
+      notOverContacted: followUpCount < 3,
+      notTooRecent: daysSinceSent >= 2,
+      withinCampaignWindow: daysSinceSent <= 30
+    };
+    return rules.isWaitingForReply && rules.notOverContacted && rules.notTooRecent && rules.withinCampaignWindow;
+  }, [lastSent, followUpHistory, repliedLeads]);
+
+  // ============================================================================
+  // ✅ GET OPTIMAL FOLLOW-UP STRATEGY
+  // ============================================================================
+  const getOptimalFollowUpStrategy = useCallback((email) => {
+    const daysSinceSent = lastSent[email] ?
+      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
+    const followUpCount = followUpHistory[email]?.count || 0;
+    const score = leadScores[email] || 50;
+    if (daysSinceSent < 2) {
+      return { optimalDay: 2, reason: 'Too soon - let settle', templateType: 'none' };
+    }
+    if (daysSinceSent >= 2 && daysSinceSent < 5) {
+      return { optimalDay: 2, reason: '2-5 days: First follow-up (gentle)', templateType: 'soft' };
+    }
+    if (daysSinceSent >= 5 && daysSinceSent < 7) {
+      return { optimalDay: 5, reason: '5-7 days: Value-first follow-up', templateType: 'aggressive' };
+    }
+    if (daysSinceSent >= 7 && daysSinceSent < 14) {
+      return { optimalDay: 7, reason: '7-14 days: Final push (breakup)', templateType: 'urgent' };
+    }
+    if (daysSinceSent >= 14 && daysSinceSent <= 30) {
+      return { optimalDay: 14, reason: '14+ days: Win-back attempt', templateType: 'question' };
+    }
+    return { optimalDay: 999, reason: 'Campaign window closed', templateType: 'none' };
+  }, [lastSent, followUpHistory, leadScores]);
+
+  // ============================================================================
+  // ✅ GET ENGAGEMENT HEALTH
+  // ============================================================================
+  const getEngagementHealth = useCallback((email) => {
+    const daysSinceSent = lastSent[email] ?
+      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
+    const score = leadScores[email] || 50;
+    const hasReplied = repliedLeads[email];
+    if (hasReplied) return { status: '✅ Engaged', color: 'green', urgency: 'low' };
+    if (daysSinceSent < 2) return { status: '⏳ Fresh', color: 'blue', urgency: 'low' };
+    if (daysSinceSent < 5) return { status: '🟡 Warming', color: 'yellow', urgency: 'medium' };
+    if (daysSinceSent < 7) return { status: '⚠️ Cooling', color: 'orange', urgency: 'high' };
+    if (daysSinceSent <= 30) return { status: '🔴 Cold', color: 'red', urgency: 'critical' };
+    return { status: '❌ Dead', color: 'gray', urgency: 'none' };
+  }, [lastSent, leadScores, repliedLeads]);
+
+  // ============================================================================
+  // ✅ GET NEW LEADS (NOT YET EMAILED)
+  // ============================================================================
+  const getNewLeads = useCallback(() => {
+    if (!whatsappLinks || whatsappLinks.length === 0) return [];
+    const sentEmailsSet = new Set();
+    sentLeads.forEach(lead => {
+      if (lead.email) {
+        sentEmailsSet.add(lead.email.toLowerCase().trim());
+      }
+    });
+    const newLeads = whatsappLinks
+      .filter(contact => {
+        if (!contact.email) return false;
+        const email = contact.email.toLowerCase().trim();
+        return !sentEmailsSet.has(email);
+      })
+      .map(contact => ({
+        ...contact,
+        email: contact.email.toLowerCase().trim()
+      }));
+    return newLeads.sort((a, b) => {
+      const scoreA = leadScores[a.email] || 50;
+      const scoreB = leadScores[b.email] || 50;
+      return scoreB - scoreA;
+    });
+  }, [whatsappLinks, sentLeads, leadScores]);
+
+  // ============================================================================
+  // GOOGLE OAUTH SCRIPT LOADER
+  // ============================================================================
+  useEffect(() => {
+    if (window.google?.accounts?.oauth2?.initTokenClient) {
+      setIsGoogleLoaded(true);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.onload = () => setIsGoogleLoaded(true);
+    document.head.appendChild(script);
+    return () => document.head.removeChild(script);
+  }, []);
+
+  // ============================================================================
+  // ✅ AUTH STATE LISTENER WITH PROPER NULL CHECKS
+  // ============================================================================
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUser(user);
+        loadSettings(user.uid);
+        loadClickStats();
+        loadDeals();
+        loadAbResults();
+        loadRepliedAndFollowUp();
+        loadDailyEmailCount();
+        loadSendTimeOptimization();
+      } else {
+        setUser(null);
+      }
+      setLoadingAuth(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // ============================================================================
+  // AUTO-SAVE SETTINGS
+  // ============================================================================
+  const saveSettings = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const docRef = doc(db, 'users', user.uid, 'settings', 'templates');
+      await setDoc(docRef, {
+        senderName,
+        templateA,
+        templateB,
+        whatsappTemplate,
+        smsTemplate,
+        instagramTemplate,
+        twitterTemplate,
+        followUpTemplates,
+        fieldMappings,
+        abTestMode,
+        smsConsent
+      }, { merge: true });
+    } catch (error) {
+      console.warn('Failed to save settings:', error);
+    }
+  }, [user?.uid, senderName, templateA, templateB, whatsappTemplate, smsTemplate, instagramTemplate, twitterTemplate, followUpTemplates, fieldMappings, abTestMode, smsConsent]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const handler = setTimeout(() => saveSettings(), 1500);
+    return () => clearTimeout(handler);
+  }, [saveSettings, user?.uid]);
+
+  // ============================================================================
+  // LOAD SETTINGS FROM FIREBASE
+  // ============================================================================
+  const loadSettings = async (userId) => {
+    if (!userId) return;
+    try {
+      const docRef = doc(db, 'users', userId, 'settings', 'templates');
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        setSenderName(data.senderName || 'Team');
+        setTemplateA(data.templateA || DEFAULT_TEMPLATE_A);
+        setTemplateB(data.templateB || DEFAULT_TEMPLATE_B);
+        setWhatsappTemplate(data.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE);
+        setSmsTemplate(data.smsTemplate || DEFAULT_SMS_TEMPLATE);
+        setInstagramTemplate(data.instagramTemplate || DEFAULT_INSTAGRAM_TEMPLATE);
+        setTwitterTemplate(data.twitterTemplate || DEFAULT_TWITTER_TEMPLATE);
+        setFollowUpTemplates(data.followUpTemplates || followUpTemplates);
+        setFieldMappings(data.fieldMappings || {});
+        setAbTestMode(data.abTestMode || false);
+        setSmsConsent(data.smsConsent || false);
+      }
+    } catch (error) {
+      console.warn('Failed to load settings:', error);
     }
   };
 
-  const handleOpenTwitter = (contact) => {
-    if (!contact.business) return;
-    const twitterHandle = generateSocialHandle(contact.business, 'twitter');
-    if (twitterHandle) {
-      const tweetText = encodeURIComponent(`@${twitterHandle} ${renderPreviewText(
-        twitterTemplate,
-        { business_name: contact.business, address: contact.address || '' },
+  // ============================================================================
+  // LOAD CLICK STATS FROM FIREBASE
+  // ============================================================================
+  const loadClickStats = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const q = query(collection(db, 'clicks'), where('userId', '==', user.uid));
+      const snapshot = await getDocs(q);
+      const stats = {};
+      snapshot.forEach(doc => {
+        stats[doc.id] = doc.data();
+      });
+      setClickStats(stats);
+    } catch (e) {
+      console.warn('Click stats load failed:', e);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // LOAD A/B TEST RESULTS FROM FIREBASE
+  // ============================================================================
+  const loadAbResults = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        setAbResults(snapshot.docs[0].data());
+      }
+    } catch (e) {
+      console.warn('AB results load failed:', e);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // LOAD DEALS FROM FIREBASE
+  // ============================================================================
+  const loadDeals = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const q = query(collection(db, 'deals'), where('userId', '==', user.uid));
+      const snapshot = await getDocs(q);
+      const stages = {};
+      let totalValue = 0;
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        stages[data.email] = data.stage || 'new';
+        if (data.stage !== 'won') totalValue += 5000;
+      });
+      setDealStage(stages);
+      setPipelineValue(totalValue);
+    } catch (e) {
+      console.warn('Deals load failed:', e);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // LOAD REPLIED LEADS AND FOLLOW-UP FROM FIREBASE
+  // ============================================================================
+  const loadRepliedAndFollowUp = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const q = query(collection(db, 'sent_emails'), where('userId', '==', user.uid));
+      const snapshot = await getDocs(q);
+      const repliedMap = {};
+      const followUpMap = {};
+      const now = new Date();
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        if (data.replied) repliedMap[data.to] = true;
+        else if (data.followUpAt && new Date(data.followUpAt) <= now) {
+          followUpMap[data.to] = true;
+        }
+      });
+      setRepliedLeads(repliedMap);
+      setFollowUpLeads(followUpMap);
+    } catch (e) {
+      console.warn('Replied/Follow-up load failed:', e);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // LOAD DAILY EMAIL COUNT FROM API
+  // ============================================================================
+  const loadDailyEmailCount = useCallback(async () => {
+    if (!user?.uid) return;
+    setLoadingDailyCount(true);
+    try {
+      const res = await fetch('/api/get-daily-count', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDailyEmailCount(data.count || 0);
+        setDailyWhatsAppCount(data.whatsappCount || 0);
+      }
+    } catch (err) {
+      console.error('Load daily count error:', err);
+    } finally {
+      setLoadingDailyCount(false);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // LOAD SEND TIME OPTIMIZATION FROM API
+  // ============================================================================
+  const loadSendTimeOptimization = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const res = await fetch('/api/ai-send-time-optimizer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSendTimeOptimization(data);
+      }
+    } catch (err) {
+      console.error('Send time optimization error:', err);
+    }
+  }, [user?.uid]);
+
+  // ============================================================================
+  // REQUEST GMAIL OAUTH TOKEN
+  // ============================================================================
+  const requestGmailToken = () => {
+    return new Promise((resolve, reject) => {
+      if (typeof window === 'undefined') return reject('Browser only');
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+      if (!clientId) return reject('Google Client ID missing');
+      if (!window.google?.accounts?.oauth2) return reject('Google not loaded');
+      
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
+        callback: (res) => res.access_token ? resolve(res.access_token) : reject('No token'),
+        error_callback: reject
+      });
+      client.requestAccessToken();
+    });
+  };
+
+  // ============================================================================
+  // UPDATE DEAL STAGE IN FIREBASE
+  // ============================================================================
+  const updateDealStage = async (email, stage) => {
+    if (!user?.uid || !email) return;
+    try {
+      const dealRef = doc(db, 'deals', email);
+      await setDoc(dealRef, {
+        userId: user.uid,
+        email,
+        stage,
+        lastUpdate: new Date().toISOString(),
+        value: 5000
+      }, { merge: true });
+      setDealStage(prev => ({ ...prev, [email]: stage }));
+      if (stage === 'won') {
+        setPipelineValue(prev => prev - 5000);
+      } else if (dealStage[email] === 'won') {
+        setPipelineValue(prev => prev + 5000);
+      }
+    } catch (e) {
+      console.error('Update deal error:', e);
+    }
+  };
+
+  // ============================================================================
+  // ✅ WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+  // ============================================================================
+  const handleSendWhatsApp = async (contact) => {
+    if (!user?.uid) {
+      alert('Please sign in first');
+      return;
+    }
+    if (!contact?.phone) {
+      alert('No phone number for this contact');
+      return;
+    }
+    
+    const contactKey = contact.email || contact.phone;
+    
+    // ✅ Prevent duplicate WhatsApp
+    if (lastWhatsAppSent[contactKey]) {
+      const daysSince = (new Date() - new Date(lastWhatsAppSent[contactKey])) / (1000 * 60 * 60 * 24);
+      if (daysSince < 2) {
+        const confirmed = confirm(`⚠️ WhatsApp was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
+        if (!confirmed) return;
+      }
+    }
+    
+    const confirmed = confirm(`Send WhatsApp to ${contact.business} at +${contact.phone}?`);
+    if (!confirmed) return;
+    
+    try {
+      const message = renderPreviewText(
+        whatsappTemplate,
+        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
         fieldMappings,
         senderName
-      )}`);
-      window.open(`https://twitter.com/intent/tweet?text=${tweetText}`, '_blank');
-    } else {
-      const query = encodeURIComponent(contact.business);
-      window.open(`https://twitter.com/search?q=${query}&src=typed_query`, '_blank');
+      );
+      
+      const whatsappUrl = `https://wa.me/${formatForDialing(contact.phone)}?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, '_blank');
+      
+      // ✅ Track WhatsApp
+      setLastWhatsAppSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+      setContactedChannels(prev => ({
+        ...prev,
+        [contactKey]: [...(prev[contactKey] || []), 'whatsapp']
+      }));
+      setDailyWhatsAppCount(prev => prev + 1);
+      
+      if (dealStage[contactKey] === 'new') {
+        updateDealStage(contactKey, 'contacted');
+      }
+      
+      alert(`✅ WhatsApp opened for ${contact.business}!\nMessage tracked to prevent duplicates.`);
+    } catch (error) {
+      console.error('WhatsApp send error:', error);
+      alert(`❌ Failed to open WhatsApp: ${error.message}`);
     }
   };
 
+  // ============================================================================
+  // ✅ SMS SEND WITH TRACKING & DUPLICATE PREVENTION
+  // ============================================================================
+  const handleSendSMS = async (contact) => {
+    if (!user?.uid) {
+      alert('Please sign in first');
+      return;
+    }
+    
+    const contactKey = contact.email || contact.phone;
+    
+    // ✅ Prevent duplicate SMS
+    if (lastSMSSent[contactKey]) {
+      const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
+      if (daysSince < 2) {
+        const confirmed = confirm(`⚠️ SMS was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
+        if (!confirmed) return;
+      }
+    }
+    
+    const confirmed = confirm(`Send SMS to ${contact.business} at +${contact.phone}?`);
+    if (!confirmed) return;
+    
+    try {
+      const message = renderPreviewText(
+        smsTemplate,
+        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+        fieldMappings,
+        senderName
+      );
+      
+      const response = await fetch('/api/send-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: contact.phone,
+          message,
+          businessName: contact.business,
+          userId: user.uid
+        })
+      });
+      
+      const data = await response.json();
+      if (response.ok) {
+        alert(`✅ SMS sent to ${contact.business}!`);
+        
+        // ✅ Track SMS
+        setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+        setContactedChannels(prev => ({
+          ...prev,
+          [contactKey]: [...(prev[contactKey] || []), 'sms']
+        }));
+        
+        if (dealStage[contactKey] === 'new') {
+          updateDealStage(contactKey, 'contacted');
+        }
+      } else {
+        alert(`❌ SMS failed: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('SMS send error:', error);
+      alert(`❌ Failed to send SMS: ${error.message}`);
+    }
+  };
+
+  // ============================================================================
+  // OPEN NATIVE SMS APP
+  // ============================================================================
+  const handleOpenNativeSMS = (contact) => {
+    if (!contact?.phone) return;
+    const messageBody = renderPreviewText(
+      smsTemplate,
+      { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+      fieldMappings,
+      senderName
+    );
+    let formattedPhone = contact.phone.toString().replace(/\D/g, '');
+    if (formattedPhone.startsWith('0') && formattedPhone.length >= 9) {
+      formattedPhone = '94' + formattedPhone.slice(1);
+    }
+    if (!formattedPhone.startsWith('+')) {
+      formattedPhone = '+' + formattedPhone;
+    }
+    window.location.href = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
+  };
+
+  // ============================================================================
+  // SEND BULK SMS TO ALL CONTACTS
+  // ============================================================================
+  const handleSendBulkSMS = async () => {
+    if (!user?.uid || whatsappLinks.length === 0) return;
+    const confirmed = confirm(`Send SMS to ${whatsappLinks.length} contacts?`);
+    if (!confirmed) return;
+    
+    let successCount = 0;
+    setStatus('📤 Sending SMS batch...');
+    
+    for (const contact of whatsappLinks) {
+      const phone = formatForDialing(contact.phone);
+      if (!phone) continue;
+      
+      // ✅ Check if already contacted
+      const contactKey = contact.email || contact.phone;
+      if (lastSMSSent[contactKey]) {
+        const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
+        if (daysSince < 2) continue; // Skip recently contacted
+      }
+      
+      try {
+        const message = renderPreviewText(
+          smsTemplate,
+          { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+          fieldMappings,
+          senderName
+        );
+        
+        const response = await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            message,
+            businessName: contact.business,
+            userId: user.uid
+          })
+        });
+        
+        if (response.ok) {
+          successCount++;
+          setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+          setContactedChannels(prev => ({
+            ...prev,
+            [contactKey]: [...(prev[contactKey] || []), 'sms']
+          }));
+          
+          if (dealStage[contactKey] === 'new') {
+            updateDealStage(contactKey, 'contacted');
+          }
+        }
+      } catch (error) {
+        console.error(`SMS error for ${contact.business}:`, error);
+      }
+    }
+    
+    setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
+    alert(`✅ SMS batch complete!\nSent: ${successCount}\nFailed: ${whatsappLinks.length - successCount}\nSkipped (recently contacted): ${whatsappLinks.length - successCount}`);
+  };
+
+  // ============================================================================
+  // HANDLE DIRECT CALL
+  // ============================================================================
   const handleCall = (phone) => {
     if (!phone) return;
     const dialNumber = formatForDialing(phone) || phone.toString().replace(/\D/g, '');
@@ -798,6 +1306,9 @@ Would you be open to a quick chat?`);
     }
   };
 
+  // ============================================================================
+  // POLL CALL STATUS FROM FIREBASE
+  // ============================================================================
   const pollCallStatus = (callId, businessName) => {
     let attempts = 0;
     const maxAttempts = 20;
@@ -837,6 +1348,9 @@ Would you be open to a quick chat?`);
     }, 6000);
   };
 
+  // ============================================================================
+  // HANDLE TWILIO CALL WITH TRACKING
+  // ============================================================================
   const handleTwilioCall = async (contact, callType = 'direct') => {
     if (!contact || !contact.phone || !contact.business) {
       console.warn('Invalid contact passed to handleTwilioCall:', contact);
@@ -943,14 +1457,28 @@ Would you be open to a quick chat?`);
     }
   };
 
+  // ============================================================================
+  // HANDLE SMART CALL (AI-POWERED)
+  // ============================================================================
+  const handleSmartCall = (contact) => {
+    if (!contact) return;
+    if (contact.dealStage === 'replied' || contact.leadScore >= 80) {
+      handleTwilioCall(contact, 'bridge');
+    } else if (contact.followUpCount >= 2) {
+      handleTwilioCall(contact, 'voicemail');
+    } else {
+      handleTwilioCall(contact, 'interactive');
+    }
+  };
+
+  // ============================================================================
+  // LOAD CALL HISTORY FROM FIREBASE
+  // ============================================================================
   const loadCallHistory = async () => {
     if (!user?.uid) return;
     setLoadingCallHistory(true);
     try {
-      const q = query(
-        collection(db, 'calls'),
-        where('userId', '==', user.uid)
-      );
+      const q = query(collection(db, 'calls'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
       const calls = [];
       snapshot.forEach(doc => {
@@ -966,6 +1494,9 @@ Would you be open to a quick chat?`);
     }
   };
 
+  // ============================================================================
+  // GET STATUS BADGE FOR CALLS
+  // ============================================================================
   const getStatusBadge = (status) => {
     const badges = {
       'initiating': { bg: 'bg-blue-100', text: 'text-blue-800', label: '🔵 Initiating' },
@@ -981,245 +1512,117 @@ Would you be open to a quick chat?`);
     return badges[status] || { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
   };
 
-  // ✅ ENHANCED: WhatsApp send with tracking
-  const handleSendWhatsApp = async (contact) => {
-    if (!user?.uid) return;
-    if (!contact.phone) {
-      alert('❌ No phone number for this contact');
-      return;
+  // ============================================================================
+  // HANDLE SOCIAL MEDIA OUTREACH
+  // ============================================================================
+  const handleOpenLinkedIn = (contact, type = 'company') => {
+    if (!contact?.business) return;
+    let url;
+    if (type === 'company' && contact.linkedin_company) {
+      url = contact.linkedin_company;
+    } else if (type === 'ceo' && contact.linkedin_ceo) {
+      url = contact.linkedin_ceo;
+    } else if (type === 'founder' && contact.linkedin_founder) {
+      url = contact.linkedin_founder;
+    } else {
+      const query = encodeURIComponent(contact.business);
+      url = `https://www.linkedin.com/search/results/companies/?keywords=${query}`;
     }
-    
-    // ✅ Prevent duplicate WhatsApp messages
-    const contactKey = contact.email || contact.phone;
-    if (lastWhatsAppSent[contactKey]) {
-      const daysSince = (new Date() - new Date(lastWhatsAppSent[contactKey])) / (1000 * 60 * 60 * 24);
-      if (daysSince < 2) {
-        const confirmed = confirm(`⚠️ WhatsApp was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
-        if (!confirmed) return;
-      }
-    }
-    
-    const confirmed = confirm(`Send WhatsApp to ${contact.business} at +${contact.phone}?`);
-    if (!confirmed) return;
-    
-    try {
-      const message = renderPreviewText(
-        whatsappTemplate,
-        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
-        fieldMappings,
-        senderName
-      );
-      
-      const whatsappUrl = `https://wa.me/${formatForDialing(contact.phone)}?text=${encodeURIComponent(message)}`;
-      window.open(whatsappUrl, '_blank');
-      
-      // ✅ Track WhatsApp message sent
-      setLastWhatsAppSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
-      setContactedChannels(prev => ({
-        ...prev,
-        [contactKey]: [...(prev[contactKey] || []), 'whatsapp']
-      }));
-      
-      // ✅ Update daily WhatsApp count
-      setDailyWhatsAppCount(prev => prev + 1);
-      
-      if (dealStage[contactKey] === 'new') {
-        updateDealStage(contactKey, 'contacted');
-      }
-      
-      alert(`✅ WhatsApp opened for ${contact.business}!\nMessage tracked to prevent duplicates.`);
-    } catch (error) {
-      console.error('WhatsApp send error:', error);
-      alert(`❌ Failed to open WhatsApp: ${error.message}`);
+    window.open(url, '_blank');
+  };
+
+  const handleOpenInstagram = (contact) => {
+    if (!contact?.business) return;
+    const igHandle = generateSocialHandle(contact.business, 'instagram');
+    if (igHandle) {
+      window.open(`https://www.instagram.com/${igHandle}/`, '_blank');
+    } else {
+      window.open('https://www.instagram.com/', '_blank');
     }
   };
 
-  const handleSendSMS = async (contact) => {
-    if (!user?.uid) return;
-    
-    // ✅ Prevent duplicate SMS
-    const contactKey = contact.email || contact.phone;
-    if (lastSMSSent[contactKey]) {
-      const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
-      if (daysSince < 2) {
-        const confirmed = confirm(`⚠️ SMS was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
-        if (!confirmed) return;
-      }
-    }
-    
-    const confirmed = confirm(`Send SMS to ${contact.business} at +${contact.phone}?`);
-    if (!confirmed) return;
-    
-    try {
-      const message = renderPreviewText(
-        smsTemplate,
-        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
-        fieldMappings,
-        senderName
-      );
-      
-      const response = await fetch('/api/send-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: contact.phone,
-          message,
-          businessName: contact.business,
-          userId: user.uid
-        })
-      });
-      
-      const data = await response.json();
-      if (response.ok) {
-        alert(`✅ SMS sent to ${contact.business}!`);
-        
-        // ✅ Track SMS sent
-        setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
-        setContactedChannels(prev => ({
-          ...prev,
-          [contactKey]: [...(prev[contactKey] || []), 'sms']
-        }));
-        
-        if (dealStage[contactKey] === 'new') {
-          updateDealStage(contactKey, 'contacted');
-        }
-      } else {
-        alert(`❌ SMS failed: ${data.error}`);
-      }
-    } catch (error) {
-      console.error('SMS send error:', error);
-      alert(`❌ Failed to send SMS: ${error.message}`);
-    }
-  };
-
-  const handleOpenNativeSMS = (contact) => {
-    if (!contact?.phone) return;
-    const messageBody = renderPreviewText(
-      smsTemplate,
-      { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
-      fieldMappings,
-      senderName
-    );
-    let formattedPhone = contact.phone.toString().replace(/\D/g, '');
-    if (formattedPhone.startsWith('0') && formattedPhone.length >= 9) {
-      formattedPhone = '94' + formattedPhone.slice(1);
-    }
-    if (!formattedPhone.startsWith('+')) {
-      formattedPhone = '+' + formattedPhone;
-    }
-    window.location.href = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
-  };
-
-  const handleSendBulkSMS = async () => {
-    if (!user?.uid || whatsappLinks.length === 0) return;
-    const confirmed = confirm(`Send SMS to ${whatsappLinks.length} contacts?`);
-    if (!confirmed) return;
-    
-    let successCount = 0;
-    setStatus('📤 Sending SMS batch...');
-    
-    for (const contact of whatsappLinks) {
-      const phone = formatForDialing(contact.phone);
-      if (!phone) continue;
-      
-      // ✅ Check if already contacted
-      const contactKey = contact.email || contact.phone;
-      if (lastSMSSent[contactKey]) {
-        const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
-        if (daysSince < 2) continue; // Skip recently contacted
-      }
-      
-      try {
-        const message = renderPreviewText(
-          smsTemplate,
-          { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
-          fieldMappings,
-          senderName
-        );
-        
-        const response = await fetch('/api/send-sms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phone,
-            message,
-            businessName: contact.business,
-            userId: user.uid
-          })
-        });
-        
-        if (response.ok) {
-          successCount++;
-          setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
-          setContactedChannels(prev => ({
-            ...prev,
-            [contactKey]: [...(prev[contactKey] || []), 'sms']
-          }));
-          
-          if (dealStage[contactKey] === 'new') {
-            updateDealStage(contactKey, 'contacted');
-          }
-        }
-      } catch (error) {
-        console.error(`SMS error for ${contact.business}:`, error);
-      }
-    }
-    
-    setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
-    alert(`✅ SMS batch complete!\nSent: ${successCount}\nFailed: ${whatsappLinks.length - successCount}\nSkipped (recently contacted): ${whatsappLinks.length - successCount}`);
-  };
-
-  const loadSettings = async (userId) => {
-    try {
-      const docRef = doc(db, 'users', userId, 'settings', 'templates');
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        const data = snap.data();
-        setSenderName(data.senderName || 'Team');
-        setTemplateA(data.templateA || DEFAULT_TEMPLATE_A);
-        setTemplateB(data.templateB || DEFAULT_TEMPLATE_B);
-        setWhatsappTemplate(data.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE);
-        setSmsTemplate(data.smsTemplate || DEFAULT_SMS_TEMPLATE);
-        setInstagramTemplate(data.instagramTemplate || instagramTemplate);
-        setTwitterTemplate(data.twitterTemplate || twitterTemplate);
-        setFollowUpTemplates(data.followUpTemplates || followUpTemplates);
-        setFieldMappings(data.fieldMappings || {});
-        setAbTestMode(data.abTestMode || false);
-        setSmsConsent(data.smsConsent || false);
-      }
-    } catch (error) {
-      console.warn('Failed to load settings:', error);
-    }
-  };
-
-  const saveSettings = useCallback(async () => {
-    if (!user?.uid) return;
-    try {
-      const docRef = doc(db, 'users', user.uid, 'settings', 'templates');
-      await setDoc(docRef, {
-        senderName,
-        templateA,
-        templateB,
-        whatsappTemplate,
-        smsTemplate,
-        instagramTemplate,
+  const handleOpenTwitter = (contact) => {
+    if (!contact?.business) return;
+    const twitterHandle = generateSocialHandle(contact.business, 'twitter');
+    if (twitterHandle) {
+      const tweetText = encodeURIComponent(`@${twitterHandle} ${renderPreviewText(
         twitterTemplate,
-        followUpTemplates,
+        { business_name: contact.business, address: contact.address || '' },
         fieldMappings,
-        abTestMode,
-        smsConsent
-      }, { merge: true });
-    } catch (error) {
-      console.warn('Failed to save settings:', error);
+        senderName
+      )}`);
+      window.open(`https://twitter.com/intent/tweet?text=${tweetText}`, '_blank');
+    } else {
+      const query = encodeURIComponent(contact.business);
+      window.open(`https://twitter.com/search?q=${query}&src=typed_query`, '_blank');
     }
-  }, [user?.uid, senderName, templateA, templateB, whatsappTemplate, smsTemplate, instagramTemplate, twitterTemplate, followUpTemplates, fieldMappings, abTestMode, smsConsent]);
+  };
 
-  useEffect(() => {
-    if (!user?.uid) return;
-    const handler = setTimeout(() => saveSettings(), 1500);
-    return () => clearTimeout(handler);
-  }, [saveSettings, user?.uid]);
+  const getSocialOutreachStrategy = (link) => {
+    const strategies = [];
+    if (link.linkedin_company || link.linkedin_ceo) {
+      strategies.push({
+        type: 'linkedin',
+        priority: 1,
+        action: 'Connect & Engage',
+        description: 'Send connection request with personalized message'
+      });
+    }
+    if (link.email_primary) {
+      const confidence = link.contact_confidence;
+      strategies.push({
+        type: 'email',
+        priority: confidence === 'High' ? 1 : confidence === 'Medium' ? 2 : 3,
+        action: 'Send Email',
+        description: `Email outreach (${confidence} confidence)`
+      });
+    }
+    if (link.twitter) {
+      strategies.push({
+        type: 'twitter',
+        priority: 2,
+        action: 'Follow & Engage',
+        description: 'Follow, like recent posts, comment with value'
+      });
+    }
+    if (link.youtube) {
+      strategies.push({
+        type: 'youtube',
+        priority: 2,
+        action: 'Subscribe & Comment',
+        description: 'Subscribe, comment on recent videos'
+      });
+    }
+    if (link.instagram) {
+      strategies.push({
+        type: 'instagram',
+        priority: 3,
+        action: 'Follow & Like',
+        description: 'Follow account, like posts, engage authentically'
+      });
+    }
+    if (link.facebook) {
+      strategies.push({
+        type: 'facebook',
+        priority: 3,
+        action: 'Like & Follow',
+        description: 'Like page, follow, engage with recent posts'
+      });
+    }
+    if (link.tiktok) {
+      strategies.push({
+        type: 'tiktok',
+        priority: 4,
+        action: 'Follow & Like',
+        description: 'Follow account, like trending content'
+      });
+    }
+    return strategies.sort((a, b) => a.priority - b.priority);
+  };
 
+  // ============================================================================
+  // HANDLE CSV UPLOAD
+  // ============================================================================
   const handleCsvUpload = (e) => {
     setValidEmails(0);
     setValidWhatsApp(0);
@@ -1368,134 +1771,29 @@ Would you be open to a quick chat?`);
     reader.readAsText(file);
   };
 
-  const requestGmailToken = () => {
-    return new Promise((resolve, reject) => {
-      if (typeof window === 'undefined') return reject('Browser only');
-      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-      if (!clientId) return reject('Google Client ID missing');
-      if (!window.google?.accounts?.oauth2) return reject('Google not loaded');
-      
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
-        callback: (res) => res.access_token ? resolve(res.access_token) : reject('No token'),
-        error_callback: reject
-      });
-      client.requestAccessToken();
+  // ============================================================================
+  // HANDLE FIELD MAPPING CHANGE
+  // ============================================================================
+  const handleMappingChange = (varName, csvColumn) => {
+    setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
+  };
+
+  // ============================================================================
+  // HANDLE IMAGE UPLOAD
+  // ============================================================================
+  const handleImageUpload = (e) => {
+    const files = Array.from(e.target.files).slice(0, 3);
+    const newImages = files.map((file, index) => {
+      const preview = URL.createObjectURL(file);
+      const cid = `img${index + 1}@massmailer`;
+      return { file, preview, cid, placeholder: `{{image${index + 1}}}` };
     });
+    setEmailImages(newImages);
   };
 
-  const loadAbResults = async () => {
-    try {
-      const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-      if (!snapshot.empty) {
-        setAbResults(snapshot.docs[0].data());
-      }
-    } catch (e) {
-      console.warn('AB results load failed:', e);
-    }
-  };
-
-  const loadClickStats = async () => {
-    try {
-      const q = query(collection(db, 'clicks'), where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-      const stats = {};
-      snapshot.forEach(doc => {
-        stats[doc.id] = doc.data();
-      });
-      setClickStats(stats);
-    } catch (e) {
-      console.warn('Click stats load failed:', e);
-    }
-  };
-
-  const loadDeals = useCallback(async () => {
-    if (!user?.uid) return;
-    try {
-      const q = query(collection(db, 'deals'), where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-      const stages = {};
-      let totalValue = 0;
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        stages[data.email] = data.stage || 'new';
-        if (data.stage !== 'won') totalValue += 5000;
-      });
-      setDealStage(stages);
-      setPipelineValue(totalValue);
-    } catch (e) {
-      console.warn('Deals load failed:', e);
-    }
-  }, [user?.uid]);
-
-  const loadRepliedAndFollowUp = async () => {
-    try {
-      const q = query(collection(db, 'sent_emails'), where('userId', '==', user.uid));
-      const snapshot = await getDocs(q);
-      const repliedMap = {};
-      const followUpMap = {};
-      const now = new Date();
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (data.replied) repliedMap[data.to] = true;
-        else if (data.followUpAt && new Date(data.followUpAt) <= now) {
-          followUpMap[data.to] = true;
-        }
-      });
-      setRepliedLeads(repliedMap);
-      setFollowUpLeads(followUpMap);
-    } catch (e) {
-      console.warn('Replied/Follow-up load failed:', e);
-    }
-  };
-
-  const updateDealStage = async (email, stage) => {
-    try {
-      const dealRef = doc(db, 'deals', email);
-      await setDoc(dealRef, {
-        userId: user.uid,
-        email,
-        stage,
-        lastUpdate: new Date().toISOString(),
-        value: 5000
-      }, { merge: true });
-      setDealStage(prev => ({ ...prev, [email]: stage }));
-      if (stage === 'won') {
-        setPipelineValue(prev => prev - 5000);
-      } else if (dealStage[email] === 'won') {
-        setPipelineValue(prev => prev + 5000);
-      }
-    } catch (e) {
-      console.error('Update deal error:', e);
-    }
-  };
-
-  const checkForReplies = async () => {
-    if (!user?.uid) return;
-    setStatus('🔍 Checking for replies...');
-    try {
-      const accessToken = await requestGmailToken();
-      const res = await fetch('/api/check-replies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken, userId: user.uid })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatus(`✅ Found ${data.repliedCount} new replies!`);
-        loadDeals();
-        loadRepliedAndFollowUp();
-      } else {
-        setStatus(`❌ Reply check failed: ${data.error}`);
-      }
-    } catch (err) {
-      console.error('Check replies error:', err);
-      setStatus(`❌ ${err.message}`);
-    }
-  };
-
+  // ============================================================================
+  // LOAD SENT LEADS FROM API
+  // ============================================================================
   const loadSentLeads = async () => {
     if (!user?.uid) return;
     setLoadingSentLeads(true);
@@ -1559,6 +1857,36 @@ Would you be open to a quick chat?`);
     }
   };
 
+  // ============================================================================
+  // CHECK FOR REPLIES VIA GMAIL API
+  // ============================================================================
+  const checkForReplies = async () => {
+    if (!user?.uid) return;
+    setStatus('🔍 Checking for replies...');
+    try {
+      const accessToken = await requestGmailToken();
+      const res = await fetch('/api/check-replies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken, userId: user.uid })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setStatus(`✅ Found ${data.repliedCount} new replies!`);
+        loadDeals();
+        loadRepliedAndFollowUp();
+      } else {
+        setStatus(`❌ Reply check failed: ${data.error}`);
+      }
+    } catch (err) {
+      console.error('Check replies error:', err);
+      setStatus(`❌ ${err.message}`);
+    }
+  };
+
+  // ============================================================================
+  // SEND FOLLOW-UP WITH GMAIL TOKEN
+  // ============================================================================
   const sendFollowUpWithToken = async (email, accessToken) => {
     if (!user?.uid || !email || !accessToken) {
       alert('Missing required data to send follow-up.');
@@ -1619,153 +1947,9 @@ Would you be open to a quick chat?`);
     }
   };
 
-  const loadSendTimeOptimization = async () => {
-    if (!user?.uid) return;
-    try {
-      const res = await fetch('/api/ai-send-time-optimizer', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSendTimeOptimization(data);
-      }
-    } catch (err) {
-      console.error('Send time optimization error:', err);
-    }
-  };
-
-  const calculatePredictiveScore = async (leadEmail, leadData) => {
-    if (!user?.uid || predictiveScores[leadEmail]) return;
-    try {
-      const res = await fetch('/api/predictive-lead-scoring', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
-          leadData: {
-            ...leadData,
-            email: leadEmail
-          }
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setPredictiveScores(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
-      }
-    } catch (err) {
-      console.error('Predictive scoring error:', err);
-    }
-  };
-
-  const analyzeReplySentiment = async (replyText, leadEmail) => {
-    if (!replyText) return;
-    try {
-      const res = await fetch('/api/sentiment-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ replyText, leadEmail })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSentimentAnalysis(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
-      }
-    } catch (err) {
-      console.error('Sentiment analysis error:', err);
-    }
-  };
-
-  const generateSmartFollowUp = async (leadEmail, leadData, followUpNumber = 1) => {
-    if (!user?.uid) return;
-    try {
-      const lead = sentLeads.find(l => l.email === leadEmail);
-      const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
-      const res = await fetch('/api/smart-followup-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyName: leadData.business || leadEmail,
-          leadBehavior: {
-            opened: lead?.opened || false,
-            openedCount: lead?.openedCount || 0,
-            clicked: lead?.clicked || false,
-            clickCount: lead?.clickCount || 0,
-            replied: lead?.replied || false,
-            interestScore: lead?.interestScore || 0,
-            daysSinceSent: lead ? Math.floor((new Date() - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24)) : 0
-          },
-          previousEmails: lead?.followUpCount || 0,
-          defaultTemplate,
-          followUpNumber
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSmartFollowUpSuggestions(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
-        return data;
-      }
-    } catch (err) {
-      console.error('Smart follow-up error:', err);
-    }
-    return null;
-  };
-
-  const researchCompany = async (companyName, companyWebsite, email) => {
-    if (!user?.uid) {
-      alert('Please sign in to use AI research');
-      return;
-    }
-    setResearchingCompany(email);
-    try {
-      const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
-      const res = await fetch('/api/research-company', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyName,
-          companyWebsite: companyWebsite || '',
-          defaultEmailTemplate: defaultTemplate,
-          userId: user.uid
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setResearchResults(prev => ({
-          ...prev,
-          [email]: data
-        }));
-        setShowResearchModal(true);
-      } else {
-        alert(`Research failed: ${data.error || 'Unknown error'}`);
-      }
-    } catch (err) {
-      console.error('Research error:', err);
-      alert(`Error: ${err.message || 'Failed to research company'}`);
-    } finally {
-      setResearchingCompany(null);
-    }
-  };
-
-  const isEligibleForFollowUp = (lead) => {
-    if (!lead || !lead.email || lead.replied) return false;
-    const now = new Date();
-    const followUpAt = new Date(lead.followUpAt);
-    if (followUpAt > now) return false;
-    const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
-    if (followUpCount >= 3) return false;
-    return true;
-  };
-
+  // ============================================================================
+  // SEND MASS FOLLOW-UP TO ALL ELIGIBLE LEADS
+  // ============================================================================
   const sendMassFollowUp = async (accessToken) => {
     if (!user?.uid || !accessToken) return;
     const eligibleLeads = sentLeads.filter(isEligibleForFollowUp);
@@ -1826,57 +2010,22 @@ Would you be open to a quick chat?`);
     await loadRepliedAndFollowUp();
   };
 
-  const checkRepliesAndLoad = async () => {
-    await checkForReplies();
-    await loadSentLeads();
+  // ============================================================================
+  // CHECK IF LEAD IS ELIGIBLE FOR FOLLOW-UP
+  // ============================================================================
+  const isEligibleForFollowUp = (lead) => {
+    if (!lead || !lead.email || lead.replied) return false;
+    const now = new Date();
+    const followUpAt = new Date(lead.followUpAt);
+    if (followUpAt > now) return false;
+    const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
+    if (followUpCount >= 3) return false;
+    return true;
   };
 
-  const loadDailyEmailCount = async () => {
-    if (!user?.uid) return;
-    setLoadingDailyCount(true);
-    try {
-      const res = await fetch('/api/get-daily-count', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setDailyEmailCount(data.count || 0);
-        setDailyWhatsAppCount(data.whatsappCount || 0);
-      }
-    } catch (err) {
-      console.error('Load daily count error:', err);
-    } finally {
-      setLoadingDailyCount(false);
-    }
-  };
-
-  const getNewLeads = () => {
-    if (!whatsappLinks || whatsappLinks.length === 0) return [];
-    const sentEmailsSet = new Set();
-    sentLeads.forEach(lead => {
-      if (lead.email) {
-        sentEmailsSet.add(lead.email.toLowerCase().trim());
-      }
-    });
-    const newLeads = whatsappLinks
-      .filter(contact => {
-        if (!contact.email) return false;
-        const email = contact.email.toLowerCase().trim();
-        return !sentEmailsSet.has(email);
-      })
-      .map(contact => ({
-        ...contact,
-        email: contact.email.toLowerCase().trim()
-      }));
-    return newLeads.sort((a, b) => {
-      const scoreA = leadScores[a.email] || 50;
-      const scoreB = leadScores[b.email] || 50;
-      return scoreB - scoreA;
-    });
-  };
-
+  // ============================================================================
+  // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
+  // ============================================================================
   const handleSendToNewLeads = async () => {
     if (!user?.uid) {
       alert('Please sign in first.');
@@ -1967,6 +2116,9 @@ Would you be open to a quick chat?`);
     }
   };
 
+  // ============================================================================
+  // SEND EMAILS (MAIN FUNCTION)
+  // ============================================================================
   const handleSendEmails = async (templateToSend = null) => {
     const lines = csvContent?.split('\n').filter(line => line.trim() !== '') || [];
     if (lines.length < 2) {
@@ -2145,25 +2297,165 @@ Would you be open to a quick chat?`);
     }
   };
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUser(user);
-        loadSettings(user.uid);
-        loadClickStats();
-        loadDeals();
-        loadAbResults();
-        loadRepliedAndFollowUp();
-        loadDailyEmailCount();
-        loadSendTimeOptimization();
+  // ============================================================================
+  // AI RESEARCH COMPANY
+  // ============================================================================
+  const researchCompany = async (companyName, companyWebsite, email) => {
+    if (!user?.uid) {
+      alert('Please sign in to use AI research');
+      return;
+    }
+    setResearchingCompany(email);
+    try {
+      const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
+      const res = await fetch('/api/research-company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName,
+          companyWebsite: companyWebsite || '',
+          defaultEmailTemplate: defaultTemplate,
+          userId: user.uid
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setResearchResults(prev => ({
+          ...prev,
+          [email]: data
+        }));
+        setShowResearchModal(true);
       } else {
-        setUser(null);
+        alert(`Research failed: ${data.error || 'Unknown error'}`);
       }
-      setLoadingAuth(false);
-    });
-    return () => unsubscribe();
-  }, []);
+    } catch (err) {
+      console.error('Research error:', err);
+      alert(`Error: ${err.message || 'Failed to research company'}`);
+    } finally {
+      setResearchingCompany(null);
+    }
+  };
 
+  // ============================================================================
+  // CALCULATE PREDICTIVE SCORE
+  // ============================================================================
+  const calculatePredictiveScore = async (leadEmail, leadData) => {
+    if (!user?.uid || predictiveScores[leadEmail]) return;
+    try {
+      const res = await fetch('/api/predictive-lead-scoring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          leadData: {
+            ...leadData,
+            email: leadEmail
+          }
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPredictiveScores(prev => ({
+          ...prev,
+          [leadEmail]: data
+        }));
+      }
+    } catch (err) {
+      console.error('Predictive scoring error:', err);
+    }
+  };
+
+  // ============================================================================
+  // GENERATE SMART FOLLOW-UP
+  // ============================================================================
+  const generateSmartFollowUp = async (leadEmail, leadData, followUpNumber = 1) => {
+    if (!user?.uid) return;
+    try {
+      const lead = sentLeads.find(l => l.email === leadEmail);
+      const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
+      const res = await fetch('/api/smart-followup-generator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: leadData.business || leadEmail,
+          leadBehavior: {
+            opened: lead?.opened || false,
+            openedCount: lead?.openedCount || 0,
+            clicked: lead?.clicked || false,
+            clickCount: lead?.clickCount || 0,
+            replied: lead?.replied || false,
+            interestScore: lead?.interestScore || 0,
+            daysSinceSent: lead ? Math.floor((new Date() - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24)) : 0
+          },
+          previousEmails: lead?.followUpCount || 0,
+          defaultTemplate,
+          followUpNumber
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSmartFollowUpSuggestions(prev => ({
+          ...prev,
+          [leadEmail]: data
+        }));
+        return data;
+      }
+    } catch (err) {
+      console.error('Smart follow-up error:', err);
+    }
+    return null;
+  };
+
+  // ============================================================================
+  // ANALYZE REPLY SENTIMENT
+  // ============================================================================
+  const analyzeReplySentiment = async (replyText, leadEmail) => {
+    if (!replyText) return;
+    try {
+      const res = await fetch('/api/sentiment-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ replyText, leadEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSentimentAnalysis(prev => ({
+          ...prev,
+          [leadEmail]: data
+        }));
+      }
+    } catch (err) {
+      console.error('Sentiment analysis error:', err);
+    }
+  };
+
+  // ============================================================================
+  // UPDATE DEALS FROM CLICKS
+  // ============================================================================
+  useEffect(() => {
+    const updateDealsFromClicks = async () => {
+      const updates = [];
+      Object.entries(clickStats).forEach(([clid, data]) => {
+        if (data.count > 0 && data.email) {
+          updates.push(updateDoc(doc(db, 'deals', data.email), {
+            stage: 'contacted',
+            lastUpdate: new Date().toISOString()
+          }));
+        }
+      });
+      if (updates.length > 0) {
+        await Promise.all(updates);
+        loadDeals();
+      }
+    };
+    if (Object.keys(clickStats).length > 0) {
+      updateDealsFromClicks();
+    }
+  }, [clickStats, loadDeals]);
+
+  // ============================================================================
+  // UPDATE VALID EMAILS COUNT ON FILTER CHANGE
+  // ============================================================================
   useEffect(() => {
     if (!csvContent) return;
     const lines = csvContent.split('\n').filter(line => line.trim() !== '');
@@ -2187,55 +2479,26 @@ Would you be open to a quick chat?`);
     else setValidEmails(hot + warm);
   }, [leadQualityFilter, csvContent]);
 
-  useEffect(() => {
-    const updateDealsFromClicks = async () => {
-      const updates = [];
-      Object.entries(clickStats).forEach(([clid, data]) => {
-        if (data.count > 0 && data.email) {
-          updates.push(updateDoc(doc(db, 'deals', data.email), {
-            stage: 'contacted',
-            lastUpdate: new Date().toISOString()
-          }));
-        }
-      });
-      if (updates.length > 0) {
-        await Promise.all(updates);
-        loadDeals();
-      }
-    };
-    if (Object.keys(clickStats).length > 0) {
-      updateDealsFromClicks();
-    }
-  }, [clickStats, loadDeals]);
-
-  const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files).slice(0, 3);
-    const newImages = files.map((file, index) => {
-      const preview = URL.createObjectURL(file);
-      const cid = `img${index + 1}@massmailer`;
-      return { file, preview, cid, placeholder: `{{image${index + 1}}}` };
-    });
-    setEmailImages(newImages);
-  };
-
-  const handleMappingChange = (varName, csvColumn) => {
-    setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
-  };
-
+  // ============================================================================
+  // LOADING STATE
+  // ============================================================================
   if (loadingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-lg">Loading your strategic outreach dashboard...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-lg text-white">Loading your strategic outreach dashboard...</div>
       </div>
     );
   }
 
+  // ============================================================================
+  // NOT AUTHENTICATED STATE
+  // ============================================================================
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
         <button
           onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg"
+          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition"
         >
           Sign in to Continue
         </button>
@@ -2243,6 +2506,9 @@ Would you be open to a quick chat?`);
     );
   }
 
+  // ============================================================================
+  // EXTRACT ALL TEMPLATE VARIABLES FOR UI
+  // ============================================================================
   const uiVars = [...new Set([
     ...extractTemplateVariables(templateA.subject),
     ...extractTemplateVariables(templateA.body),
@@ -2257,6 +2523,9 @@ Would you be open to a quick chat?`);
     ...csvHeaders
   ])];
 
+  // ============================================================================
+  // A/B TEST SUMMARY
+  // ============================================================================
   const abSummary = abTestMode ? (
     <div className="bg-blue-50 p-3 rounded-lg mt-4">
       <h3 className="text-sm font-bold text-blue-800">📊 A/B Test Results</h3>
@@ -2270,12 +2539,16 @@ Would you be open to a quick chat?`);
     </div>
   ) : null;
 
+  // ============================================================================
+  // MAIN DASHBOARD UI
+  // ============================================================================
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200">
       <Head>
         <title>B2B Growth Engine | Strategic Outreach</title>
       </Head>
       
+      {/* HEADER */}
       <header className="bg-gray-800 shadow-sm border-b border-gray-700">
         <div className="container mx-auto px-2 sm:px-4 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <h1 className="text-lg sm:text-xl font-bold text-white">B2B Growth Engine</h1>
@@ -2321,7 +2594,7 @@ Would you be open to a quick chat?`);
       </header>
 
       <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
-        {/* Dashboard Stats */}
+        {/* DASHBOARD STATS */}
         {whatsappLinks.length > 0 && (
           <div className="mb-6 sm:mb-8">
             <div className={`grid grid-cols-2 sm:grid-cols-3 ${followUpStats.interestedLeads > 0 ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-2 sm:gap-3`}>
@@ -2516,8 +2789,9 @@ Would you be open to a quick chat?`);
           </div>
         )}
 
+        {/* MAIN GRID LAYOUT */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
-          {/* Left Column - Upload & Settings */}
+          {/* LEFT COLUMN - UPLOAD & SETTINGS */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-4 text-white">1. Upload Leads CSV</h2>
@@ -2643,7 +2917,7 @@ Would you be open to a quick chat?`);
             )}
           </div>
 
-          {/* Middle Column - Templates & Send */}
+          {/* MIDDLE COLUMN - TEMPLATES & SEND */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">3. Your Name (Sender)</h2>
@@ -2932,7 +3206,7 @@ Would you be open to a quick chat?`);
             )}
           </div>
 
-          {/* Right Column - Analytics & Multi-Channel */}
+          {/* RIGHT COLUMN - ANALYTICS & MULTI-CHANNEL */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             {whatsappLinks.length > 0 && (
               <div className="space-y-4">
@@ -3755,142 +4029,127 @@ Would you be open to a quick chat?`);
 
       {/* MULTI-CHANNEL OUTREACH MODAL - ✅ MOBILE RESPONSIVE */}
       {showMultiChannelModal && (
-        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${isMultiChannelFullscreen ? '' : 'p-4'}`}>
-          <div className={`bg-gray-800 rounded-xl shadow-2xl ${isMultiChannelFullscreen ? 'w-screen h-screen max-h-screen rounded-none' : 'w-full max-w-6xl max-h-[90vh]'} overflow-hidden flex flex-col border border-gray-700`}>
+        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${isMultiChannelFullscreen ? '' : 'p-2 sm:p-4'}`}>
+          <div className={`bg-gray-800 rounded-xl shadow-2xl ${
+            isMultiChannelFullscreen
+              ? 'w-screen h-screen max-h-screen rounded-none'
+              : 'w-full max-w-6xl max-h-[90vh]'
+          } overflow-hidden flex flex-col border border-gray-700`}>
             <div className="p-3 sm:p-4 border-b border-gray-700 flex justify-between items-center bg-gradient-to-r from-indigo-900/20 to-blue-900/20">
               <div className="flex-1 min-w-0">
-                <h2 className="text-lg sm:text-2xl font-bold text-white truncate">🌐 Multi-Channel Outreach Manager</h2>
+                <h2 className="text-base sm:text-2xl font-bold text-white truncate">🌐 Multi-Channel Outreach Manager</h2>
                 <p className="text-xs sm:text-sm text-gray-400 truncate">Manage all your communication channels ({whatsappLinks.length} contacts)</p>
               </div>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-1 sm:gap-2 flex-shrink-0">
                 <button
                   onClick={() => setIsMultiChannelFullscreen(!isMultiChannelFullscreen)}
-                  className="text-white hover:text-indigo-400 transition px-2 sm:px-3 py-2 rounded hover:bg-gray-700 text-sm"
+                  className="text-white hover:text-indigo-400 transition px-2 sm:px-3 py-2 rounded hover:bg-gray-700 text-xs sm:text-sm"
                   title={isMultiChannelFullscreen ? "Exit fullscreen" : "Fullscreen"}
                 >
-                  {isMultiChannelFullscreen ? '⛶' : '⛶'}
+                  {isMultiChannelFullscreen ? '⛶ Exit' : '⛶ Full'}
                 </button>
                 <button
                   onClick={() => setShowMultiChannelModal(false)}
-                  className="text-gray-400 hover:text-white text-2xl sm:text-3xl"
+                  className="text-gray-400 hover:text-white text-xl sm:text-2xl"
                 >
                   ✕
                 </button>
               </div>
             </div>
-            <div className="p-3 sm:p-4 bg-gray-800 border-b border-gray-700 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 sm:gap-3">
+            
+            {/* Stats Row - Mobile Responsive */}
+            <div className="p-2 sm:p-4 bg-gray-800 border-b border-gray-700 grid grid-cols-3 sm:grid-cols-6 gap-1 sm:gap-3">
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-blue-400">{whatsappLinks.length}</div>
-                <div className="text-xs text-gray-400">Total Contacts</div>
+                <div className="text-sm sm:text-xl font-bold text-blue-400">{whatsappLinks.length}</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">Total</div>
               </div>
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-green-400">
+                <div className="text-sm sm:text-xl font-bold text-green-400">
                   {Object.keys(repliedLeads).filter(k => repliedLeads[k]).length}
                 </div>
-                <div className="text-xs text-gray-400">Replied</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">Replied</div>
               </div>
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-yellow-400">
+                <div className="text-sm sm:text-xl font-bold text-yellow-400">
                   {Object.keys(followUpLeads).filter(k => followUpLeads[k]).length}
                 </div>
-                <div className="text-xs text-gray-400">Need Follow-Up</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">Follow-Up</div>
               </div>
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-purple-400">
+                <div className="text-sm sm:text-xl font-bold text-purple-400">
                   {whatsappLinks.filter(l => lastSent[l.email || l.phone]).length}
                 </div>
-                <div className="text-xs text-gray-400">Recently Contacted</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">Contacted</div>
               </div>
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-orange-400">
+                <div className="text-sm sm:text-xl font-bold text-orange-400">
                   {whatsappLinks.filter(l => !l.email).length}
                 </div>
-                <div className="text-xs text-gray-400">Phone Only</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">Phone Only</div>
               </div>
               <div className="text-center">
-                <div className="text-lg sm:text-xl font-bold text-cyan-400">
+                <div className="text-sm sm:text-xl font-bold text-cyan-400">
                   {whatsappLinks.filter(l => l.email && (leadScores[l.email] || 0) >= 70).length}
                 </div>
-                <div className="text-xs text-gray-400">High Quality</div>
+                <div className="text-[10px] sm:text-xs text-gray-400">High Quality</div>
               </div>
             </div>
-            <div className="p-3 sm:p-4 border-b border-gray-700 bg-gray-800 flex gap-2 flex-wrap">
-              <input
-                type="text"
-                placeholder="🔍 Search by business name or phone..."
-                className="flex-1 min-w-[150px] sm:min-w-[200px] px-3 py-2 bg-gray-700 text-white border border-gray-600 rounded text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                onChange={(e) => {
-                  const value = e.target.value.toLowerCase();
-                }}
-              />
-              <select
-                defaultValue="all"
-                className="px-3 py-2 bg-gray-700 text-white border border-gray-600 rounded text-sm"
-              >
-                <option value="all">📊 All Status</option>
-                <option value="replied">✅ Replied</option>
-                <option value="followup">⏳ Follow-Up Ready</option>
-                <option value="pending">📤 Pending Reply</option>
-              </select>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 sm:p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+            
+            {/* Contact List - Mobile Responsive Grid */}
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
                 {/* ✅ UPDATED: Use sortedWhatsappLinks to show 077 numbers first, contacted at bottom */}
                 {sortedWhatsappLinks.map((link) => {
                   const contactKey = link.email || link.phone;
-                  const last = lastSent[contactKey];
-                  const lastWA = lastWhatsAppSent[contactKey];
-                  const lastSMS = lastSMSSent[contactKey];
-                  const lastCall = lastCallMade[contactKey];
-                  const channels = contactedChannels[contactKey] || [];
-                  const score = leadScores[link.email] || 0;
-                  const isReplied = repliedLeads[link.email];
-                  const isFollowUp = followUpLeads[link.email];
                   const isContacted = isContactedOnAnyChannel(link);
+                  const isReplied = repliedLeads[link.email];
+                  const score = leadScores[link.email] || 0;
+                  const lastWA = lastWhatsAppSent[contactKey];
                   
                   return (
                     <div
                       key={link.id}
-                      className={`p-3 sm:p-4 rounded-lg border-2 transition-all ${
+                      className={`p-2 sm:p-3 rounded-lg border-2 transition-all ${
                         isReplied
                           ? 'border-green-700 bg-green-900/15'
-                          : isFollowUp
-                          ? 'border-yellow-700 bg-yellow-900/15'
                           : isContacted
                           ? 'border-gray-600 bg-gray-750 opacity-70'
                           : 'border-gray-700 bg-gray-750'
                       }`}
                     >
-                      <div className="flex justify-between items-start mb-3">
+                      <div className="flex justify-between items-start mb-2">
                         <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-white text-base sm:text-lg truncate">{link.business}</h3>
-                          <p className="text-sm text-gray-400 truncate">📞 +{link.phone}</p>
+                          <h3 className="font-bold text-white text-sm sm:text-base truncate">
+                            {link.business}
+                          </h3>
+                          <p className="text-xs sm:text-sm text-gray-400 truncate">
+                            📞 +{link.phone}
+                          </p>
                           {link.email && (
-                            <p className="text-xs text-blue-400 truncate">📧 {link.email}</p>
+                            <p className="text-[10px] sm:text-xs text-blue-400 truncate">
+                              📧 {link.email}
+                            </p>
                           )}
                         </div>
                         <div className="flex flex-col gap-1 flex-shrink-0 ml-2">
                           {isReplied && (
-                            <span className="bg-green-900/40 text-green-300 text-xs px-2 py-1 rounded font-medium whitespace-nowrap">
-                              ✅ Replied
+                            <span className="bg-green-900/40 text-green-300 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded font-medium whitespace-nowrap">
+                              ✅
                             </span>
                           )}
-                          {!isReplied && isFollowUp && (
-                            <span className="bg-yellow-900/40 text-yellow-300 text-xs px-2 py-1 rounded font-medium whitespace-nowrap">
-                              ⏳ Follow-Up
-                            </span>
-                          )}
-                          {isContacted && !isReplied && !isFollowUp && (
-                            <span className="bg-gray-700/40 text-gray-400 text-xs px-2 py-1 rounded font-medium whitespace-nowrap">
-                              📞 Contacted
+                          {isContacted && !isReplied && (
+                            <span className="bg-gray-700/40 text-gray-400 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded font-medium whitespace-nowrap">
+                              📞
                             </span>
                           )}
                         </div>
                       </div>
-                      <div className="mb-3 p-2 bg-gray-800/50 rounded text-xs space-y-1">
+                      
+                      {/* Info Box */}
+                      <div className="mb-2 p-1.5 sm:p-2 bg-gray-800/50 rounded text-[10px] sm:text-xs space-y-1">
                         {link.email ? (
                           <div className="flex justify-between">
-                            <span className="text-gray-400">Lead Quality Score:</span>
+                            <span className="text-gray-400">Score:</span>
                             <span className={`font-bold ${
                               score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-orange-400'
                             }`}>
@@ -3898,297 +4157,91 @@ Would you be open to a quick chat?`);
                             </span>
                           </div>
                         ) : (
-                          <div className="text-gray-500 italic">📵 No email (phone-only lead)</div>
+                          <div className="text-gray-500 italic">📵 Phone only</div>
                         )}
-                        {last && (
+                        {lastWA && (
                           <div className="flex justify-between text-gray-400">
-                            <span>Last Contacted:</span>
-                            <span className="text-green-400">{new Date(last).toLocaleDateString()}</span>
+                            <span>WhatsApp:</span>
+                            <span className="text-green-400">
+                              {new Date(lastWA).toLocaleDateString()}
+                            </span>
                           </div>
                         )}
                         
-                        {/* ✅ Channel tracking badges */}
-                        <div className="flex gap-1 flex-wrap mt-2">
-                          {last && (
-                            <span className="text-xs bg-blue-900/30 text-blue-300 px-1.5 py-0.5 rounded">
-                              📧 Email
+                        {/* Channel Badges */}
+                        <div className="flex gap-1 flex-wrap mt-1">
+                          {lastSent[contactKey] && (
+                            <span className="text-[10px] bg-blue-900/30 text-blue-300 px-1 py-0.5 rounded">
+                              📧
                             </span>
                           )}
                           {lastWA && (
-                            <span className="text-xs bg-green-900/30 text-green-300 px-1.5 py-0.5 rounded">
-                              💬 WhatsApp
+                            <span className="text-[10px] bg-green-900/30 text-green-300 px-1 py-0.5 rounded">
+                              💬
                             </span>
                           )}
-                          {lastSMS && (
-                            <span className="text-xs bg-purple-900/30 text-purple-300 px-1.5 py-0.5 rounded">
-                              📱 SMS
+                          {lastSMSSent[contactKey] && (
+                            <span className="text-[10px] bg-purple-900/30 text-purple-300 px-1 py-0.5 rounded">
+                              📱
                             </span>
                           )}
-                          {lastCall && (
-                            <span className="text-xs bg-orange-900/30 text-orange-300 px-1.5 py-0.5 rounded">
-                              📞 Call
+                          {lastCallMade[contactKey] && (
+                            <span className="text-[10px] bg-orange-900/30 text-orange-300 px-1 py-0.5 rounded">
+                              📞
                             </span>
                           )}
                         </div>
-                        
-                        {link.social_media_score && (
-                          <div className="flex justify-between text-gray-400">
-                            <span>Social Score:</span>
-                            <span className="text-purple-400">{link.social_media_score}/6</span>
-                          </div>
-                        )}
                       </div>
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
+                      
+                      {/* Action Buttons - Mobile Responsive */}
+                      <div className="space-y-1 sm:space-y-2">
+                        <div className="grid grid-cols-2 gap-1">
                           <button
                             onClick={() => handleCall(link.phone)}
-                            className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-1.5 rounded font-medium transition"
-                            title="Direct call to phone"
+                            className="text-[10px] sm:text-xs bg-green-700 hover:bg-green-600 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
                           >
                             📞 Call
                           </button>
                           <button
-                            onClick={() => handleTwilioCall(link, 'direct')}
-                            className="text-xs bg-green-600 hover:bg-green-500 text-white px-2 py-1.5 rounded font-medium transition"
-                            title="Send automated message"
+                            onClick={() => handleSendWhatsApp(link)}
+                            className="text-[10px] sm:text-xs bg-green-600 hover:bg-green-500 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
                           >
-                            🤖 Auto
+                            💬 WA
                           </button>
                         </div>
                         <button
-                          onClick={() => handleSmartCall(link)}
-                          className="w-full text-xs bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-600 hover:to-indigo-700 text-white px-2 py-1.5 rounded font-medium transition"
-                          title="AI-powered call strategy based on lead quality"
+                          onClick={() => handleOpenNativeSMS(link)}
+                          className="w-full text-[10px] sm:text-xs bg-purple-700 hover:bg-purple-600 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
                         >
-                          📞 Smart Call (AI)
+                          📱 SMS
                         </button>
                         {link.email && (
-                          <button
-                            onClick={() => window.location.href = `mailto:${link.email}`}
-                            className="w-full text-xs bg-purple-700 hover:bg-purple-600 text-white px-2 py-1.5 rounded font-medium transition"
+                          <select
+                            value={dealStage[link.email] || 'new'}
+                            onChange={(e) => updateDealStage(link.email, e.target.value)}
+                            className="w-full text-[10px] sm:text-xs bg-gray-700 text-white border border-gray-600 rounded px-1 py-0.5"
                           >
-                            ✉️ Email Direct
-                          </button>
+                            <option value="new">New</option>
+                            <option value="contacted">Contacted</option>
+                            <option value="demo">Demo</option>
+                            <option value="won">Won</option>
+                          </select>
                         )}
-                        <button
-                          onClick={() => handleSendWhatsApp(link)}
-                          className="w-full text-xs block text-center bg-green-700 hover:bg-green-600 text-white px-2 py-1.5 rounded font-medium transition"
-                        >
-                          💬 WhatsApp
-                        </button>
-                      </div>
-                      <div className="mt-3 pt-3 border-t border-gray-600">
-                        <div className="text-xs font-semibold text-gray-300 mb-2">💡 Recommended Outreach Strategy:</div>
-                        <div className="space-y-2">
-                          {link.best_contact_method && (
-                            <div className="bg-indigo-900/40 border border-indigo-700 rounded p-2 text-xs">
-                              <div className="text-indigo-300 font-bold mb-1">🎯 Recommended Method:</div>
-                              <div className="text-indigo-200">{link.best_contact_method}</div>
-                            </div>
-                          )}
-                          {(link.linkedin_company || link.linkedin_ceo || link.linkedin_founder) && (
-                            <div className="bg-blue-900/40 border border-blue-700 rounded p-2">
-                              <div className="text-xs font-semibold text-blue-300 mb-1">🔗 LinkedIn - Professional Engagement</div>
-                              <div className="space-y-1">
-                                {link.linkedin_company && (
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={() => handleOpenLinkedIn(link, 'company')}
-                                      className="flex-1 text-xs bg-blue-800 hover:bg-blue-700 text-blue-100 px-2 py-1 rounded font-medium transition"
-                                      title="View company LinkedIn profile"
-                                    >
-                                      💼 Company
-                                    </button>
-                                    <button
-                                      onClick={() => copyToClipboard(link.linkedin_company, 'Company LinkedIn')}
-                                      className="text-xs bg-blue-900 hover:bg-blue-800 text-blue-200 px-2 py-1 rounded"
-                                      title="Copy link"
-                                    >
-                                      📋
-                                    </button>
-                                  </div>
-                                )}
-                                {link.linkedin_ceo && (
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={() => handleOpenLinkedIn(link, 'ceo')}
-                                      className="flex-1 text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-100 px-2 py-1 rounded font-medium transition"
-                                      title="View CEO profile on LinkedIn"
-                                    >
-                                      👔 CEO
-                                    </button>
-                                    <button
-                                      onClick={() => copyToClipboard(link.linkedin_ceo, 'CEO LinkedIn')}
-                                      className="text-xs bg-indigo-900 hover:bg-indigo-800 text-indigo-200 px-2 py-1 rounded"
-                                      title="Copy link"
-                                    >
-                                      📋
-                                    </button>
-                                  </div>
-                                )}
-                                {link.linkedin_founder && (
-                                  <div className="flex gap-1">
-                                    <button
-                                      onClick={() => handleOpenLinkedIn(link, 'founder')}
-                                      className="flex-1 text-xs bg-indigo-800 hover:bg-indigo-700 text-indigo-100 px-2 py-1 rounded font-medium transition"
-                                      title="View founder profile on LinkedIn"
-                                    >
-                                      🚀 Founder
-                                    </button>
-                                    <button
-                                      onClick={() => copyToClipboard(link.linkedin_founder, 'Founder LinkedIn')}
-                                      className="text-xs bg-indigo-900 hover:bg-indigo-800 text-indigo-200 px-2 py-1 rounded"
-                                      title="Copy link"
-                                    >
-                                      📋
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="text-xs text-blue-400 mt-1 italic">
-                                💡 Tip: Send personalized connection request + value-first message
-                              </div>
-                            </div>
-                          )}
-                          {(link.twitter || link.instagram || link.facebook || link.youtube || link.tiktok) && (
-                            <div className="bg-purple-900/40 border border-purple-700 rounded p-2">
-                              <div className="text-xs font-semibold text-purple-300 mb-1">📱 Social Media Engagement</div>
-                              <div className="text-xs text-purple-300 mb-2 italic">Follow, engage with recent posts, build relationship</div>
-                              <div className="grid grid-cols-2 gap-1">
-                                {link.twitter && (
-                                  <a
-                                    href={link.twitter}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-sky-900 hover:bg-sky-800 text-sky-200 px-2 py-1.5 rounded font-medium text-center transition"
-                                    title="View profile, follow and engage"
-                                  >
-                                    𝕏 Follow
-                                  </a>
-                                )}
-                                {link.youtube && (
-                                  <a
-                                    href={link.youtube}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-red-900 hover:bg-red-800 text-red-200 px-2 py-1.5 rounded font-medium text-center transition"
-                                    title="View channel, subscribe and comment"
-                                  >
-                                    📹 Subscribe
-                                  </a>
-                                )}
-                                {link.instagram && (
-                                  <a
-                                    href={link.instagram}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-pink-900 hover:bg-pink-800 text-pink-200 px-2 py-1.5 rounded font-medium text-center transition"
-                                    title="View profile, follow and like posts"
-                                  >
-                                    📷 Follow
-                                  </a>
-                                )}
-                                {link.facebook && (
-                                  <a
-                                    href={link.facebook}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-blue-900 hover:bg-blue-800 text-blue-200 px-2 py-1.5 rounded font-medium text-center transition"
-                                    title="Like page and follow"
-                                  >
-                                    f Like
-                                  </a>
-                                )}
-                                {link.tiktok && (
-                                  <a
-                                    href={link.tiktok}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1.5 rounded font-medium text-center transition"
-                                    title="View profile and follow"
-                                  >
-                                    🎵 TikTok
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          {link.website && (
-                            <div className="bg-orange-900/40 border border-orange-700 rounded p-2">
-                              <div className="text-xs font-semibold text-orange-300 mb-1">
-                                {link.contact_page_found === 'Yes' ? '🌐 Contact Page Found' : '🔗 Visit Website'}
-                              </div>
-                              <a
-                                href={link.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs w-full block text-center bg-orange-800 hover:bg-orange-700 text-orange-100 px-2 py-1.5 rounded font-medium transition"
-                              >
-                                {link.contact_page_found === 'Yes' ? '✉️ Go to Contact Page' : '🌐 View Website'}
-                              </a>
-                            </div>
-                          )}
-                          <div className="mt-2 pt-2 border-t border-gray-600">
-                            <div className="text-xs font-semibold text-gray-400 mb-1">📊 Company Intelligence:</div>
-                            <div className="grid grid-cols-2 gap-1 text-xs">
-                              {link.lead_quality_score && (
-                                <div className="bg-gray-750 p-1 rounded">
-                                  <div className="text-gray-400">Lead Score</div>
-                                  <div className={`font-bold ${link.lead_quality_score >= 70 ? 'text-green-400' : link.lead_quality_score >= 50 ? 'text-yellow-400' : 'text-orange-400'}`}>
-                                    {link.lead_quality_score}/100
-                                  </div>
-                                </div>
-                              )}
-                              {link.contact_confidence && (
-                                <div className="bg-gray-750 p-1 rounded">
-                                  <div className="text-gray-400">Contact Trust</div>
-                                  <div className={`font-bold ${link.contact_confidence === 'High' ? 'text-green-400' : link.contact_confidence === 'Medium' ? 'text-yellow-400' : 'text-orange-400'}`}>
-                                    {link.contact_confidence}
-                                  </div>
-                                </div>
-                              )}
-                              {link.company_size_indicator && link.company_size_indicator !== 'unknown' && (
-                                <div className="bg-gray-750 p-1 rounded">
-                                  <div className="text-gray-400">Company Size</div>
-                                  <div className="font-bold text-blue-400 capitalize">
-                                    {link.company_size_indicator}
-                                  </div>
-                                </div>
-                              )}
-                              {link.social_media_score && (
-                                <div className="bg-gray-750 p-1 rounded">
-                                  <div className="text-gray-400">Social Presence</div>
-                                  <div className="font-bold text-purple-400">{link.social_media_score}/6</div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          {link.tech_stack_detected && (
-                            <div className="text-xs bg-purple-900/30 text-purple-200 p-1.5 rounded">
-                              <span className="font-semibold">⚙️ Tech Stack:</span> {link.tech_stack_detected}
-                            </div>
-                          )}
-                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              {whatsappLinks.length === 0 && (
-                <div className="text-center py-12">
-                  <div className="text-6xl mb-4">🌐</div>
-                  <div className="text-xl font-medium mb-2 text-gray-300">No contacts yet</div>
-                  <div className="text-gray-500">Generate WhatsApp links from your CSV to see them here</div>
-                </div>
-              )}
             </div>
-            <div className="p-3 sm:p-4 border-t border-gray-700 bg-gray-800 flex justify-between items-center">
-              <div className="text-xs text-gray-500 space-x-2 sm:space-x-4 hidden sm:block">
-                <span>💡 All social profiles and contact info are available for outreach</span>
+            
+            {/* Footer */}
+            <div className="p-2 sm:p-4 border-t border-gray-700 bg-gray-800 flex justify-between items-center">
+              <div className="text-[10px] sm:text-xs text-gray-500">
+                💡 Contacted contacts shown at bottom
               </div>
               <button
                 onClick={() => setShowMultiChannelModal(false)}
-                className="text-sm bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded font-medium"
+                className="text-xs sm:text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded font-medium"
               >
                 Close
               </button>
