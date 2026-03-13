@@ -2,17 +2,17 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  updateDoc, 
-  addDoc, 
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  updateDoc,
+  addDoc,
   serverTimestamp,
   deleteDoc,
   onSnapshot,
@@ -23,11 +23,11 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  onAuthStateChanged, 
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  onAuthStateChanged,
   signOut,
   updateProfile,
   sendPasswordResetEmail
@@ -1402,6 +1402,119 @@ export default function Dashboard() {
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
   }, [sentLeads, followUpHistory]);
+  
+  // ============================================================================
+  // ✅ HANDLE SEND BULK SMS (DEFINED BEFORE JSX - FIXES REFERENCE ERROR)
+  // ============================================================================
+  const handleSendBulkSMS = useCallback(async () => {
+    if (!user?.uid || whatsappLinks.length === 0) {
+      addNotification('No contacts available', 'error');
+      return;
+    }
+    
+    const quotaCheck = canUse('sms', whatsappLinks.length);
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Send SMS to ${whatsappLinks.length} contacts?\n\nThis will use ${whatsappLinks.length} of your daily SMS quota.`
+    );
+    
+    if (!confirmed) return;
+    
+    let successCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+    
+    setStatus('📤 Sending SMS batch...');
+    setStatusType('info');
+    setIsSending(true);
+    setSendProgress({ current: 0, total: whatsappLinks.length });
+    
+    for (let i = 0; i < whatsappLinks.length; i++) {
+      const contact = whatsappLinks[i];
+      const phone = formatForDialing(contact.phone);
+      
+      if (!phone) {
+        skipCount++;
+        continue;
+      }
+      
+      const contactKey = contact.email || contact.phone;
+      
+      // Check if already contacted recently
+      const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
+      if (!safetyCheck.safe) {
+        skipCount++;
+        continue;
+      }
+      
+      try {
+        const message = renderPreviewText(
+          smsTemplate,
+          { 
+            business_name: contact.business, 
+            address: contact.address || '', 
+            phone_raw: contact.phone 
+          },
+          fieldMappings,
+          senderName
+        );
+        
+        const response = await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phone,
+            message,
+            businessName: contact.business,
+            userId: user.uid
+          })
+        });
+        
+        if (response.ok) {
+          successCount++;
+          
+          const now = new Date().toISOString();
+          setLastSMSSent(prev => ({ ...prev, [contactKey]: now }));
+          setContactedChannels(prev => ({
+            ...prev,
+            [contactKey]: [...(prev[contactKey] || []), 'sms']
+          }));
+          
+          await updateContact(contactKey, 'sms', {
+            smsCount: increment(1),
+            lastSMSSent: now
+          });
+          
+          if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
+            updateDealStage(contactKey, 'contacted');
+          }
+        } else {
+          failCount++;
+        }
+        
+        setSendProgress({ current: i + 1, total: whatsappLinks.length });
+      } catch (error) {
+        console.error(`SMS error for ${contact.business}:`, error);
+        failCount++;
+      }
+      
+      // Add small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
+    }
+    
+    setIsSending(false);
+    setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
+    setStatusType('success');
+    
+    addNotification(
+      `SMS batch complete!\nSent: ${successCount}\nFailed: ${failCount}\nSkipped: ${skipCount}`,
+      successCount > 0 ? 'success' : 'error'
+    );
+  }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, isSafeToContactOnChannel, updateContact, dealStage, addNotification]);
   
   // ============================================================================
   // FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
