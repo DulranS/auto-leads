@@ -21,7 +21,6 @@ import {
   arrayRemove,
   orderBy,
   limit,
-  startAfter,
   Timestamp
 } from 'firebase/firestore';
 import { 
@@ -30,8 +29,8 @@ import {
   signInWithPopup, 
   onAuthStateChanged, 
   signOut,
-  sendPasswordResetEmail,
-  updateProfile
+  updateProfile,
+  sendPasswordResetEmail
 } from 'firebase/auth';
 import Head from 'next/head';
 import { useRouter } from 'next/navigation';
@@ -49,7 +48,9 @@ const firebaseConfig = {
   measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase with error handling
+// ============================================================================
+// FIREBASE INITIALIZATION WITH ERROR HANDLING
+// ============================================================================
 const initializeFirebase = () => {
   try {
     if (typeof window === 'undefined') return null;
@@ -70,7 +71,7 @@ const db = firebase?.db;
 const auth = firebase?.auth;
 
 // ============================================================================
-// CONSTANTS & CONFIGURATION
+// CONFIGURATION CONSTANTS
 // ============================================================================
 const CONFIG = {
   MAX_DAILY_EMAILS: 500,
@@ -88,14 +89,14 @@ const CONFIG = {
   DEFAULT_AVG_DEAL_VALUE: 5000,
   DEFAULT_CLOSE_RATE: 0.15,
   DEFAULT_DEMO_RATE: 0.40,
-  CACHE_EXPIRY_MS: 300000, // 5 minutes
+  CACHE_EXPIRY_MS: 300000,
   MAX_RECENT_CONTACTS: 1000,
   BACKUP_INTERVAL_HOURS: 24,
   ITEMS_PER_PAGE: 50,
   DEBOUNCE_DELAY_MS: 300,
   NOTIFICATION_DURATION_MS: 5000,
   MAX_NOTIFICATIONS: 50,
-  SESSION_TIMEOUT_MS: 3600000, // 1 hour
+  SESSION_TIMEOUT_MS: 3600000,
   MAX_IMAGE_SIZE_MB: 5,
   MAX_IMAGES_PER_EMAIL: 3,
   RATE_LIMIT_DELAY_MS: 200,
@@ -1053,7 +1054,7 @@ export default function Dashboard() {
   // ============================================================================
   const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
-  const [statusType, setStatusType] = useState('info'); // info, success, error, warning
+  const [statusType, setStatusType] = useState('info');
   const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
   
   // ============================================================================
@@ -1112,7 +1113,7 @@ export default function Dashboard() {
   // ============================================================================
   const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
   const [isMultiChannelFullscreen, setIsMultiChannelFullscreen] = useState(false);
-  const [multiChannelView, setMultiChannelView] = useState('grid'); // grid, list
+  const [multiChannelView, setMultiChannelView] = useState('grid');
   const [multiChannelFilter, setMultiChannelFilter] = useState('all');
   
   // ============================================================================
@@ -1121,7 +1122,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [contactFilter, setContactFilter] = useState('all');
   const [sortBy, setSortBy] = useState('score');
-  const [sortOrder, setSortOrder] = useState('desc'); // asc, desc
+  const [sortOrder, setSortOrder] = useState('desc');
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -1370,6 +1371,37 @@ export default function Dashboard() {
       return false;
     }
   }, [user?.uid, updateContact, addNotification]);
+  
+  // ============================================================================
+  // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
+  // ============================================================================
+  const getSafeFollowUpCandidates = useCallback(() => {
+    if (!sentLeads || sentLeads.length === 0) return [];
+    
+    const now = new Date();
+    return sentLeads
+      .filter(lead => {
+        if (!lead || !lead.email || lead.replied) return false;
+        const followUpAt = new Date(lead.followUpAt);
+        if (followUpAt > now) return false;
+        const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
+        if (followUpCount >= 3) return false;
+        return true;
+      })
+      .map(lead => {
+        const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
+        const daysSinceSent = lead.sentAt ?
+          (now - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24) : 999;
+        return {
+          ...lead,
+          followUpCount,
+          daysSinceSent,
+          urgencyScore: 100 - (daysSinceSent * 2),
+          safetyScore: Math.max(0, (3 - followUpCount) * 33.33)
+        };
+      })
+      .sort((a, b) => b.urgencyScore - a.urgencyScore);
+  }, [sentLeads, followUpHistory]);
   
   // ============================================================================
   // FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
@@ -1938,7 +1970,7 @@ export default function Dashboard() {
   }, [user?.uid]);
   
   // ============================================================================
-  // LOAD DAILY EMAIL COUNT FROM API
+  // LOAD DAILY EMAIL COUNT FROM API WITH ERROR HANDLING
   // ============================================================================
   const loadDailyEmailCount = useCallback(async () => {
     if (!user?.uid) return;
@@ -1952,6 +1984,17 @@ export default function Dashboard() {
         body: JSON.stringify({ userId: user.uid })
       });
       
+      // Handle 404 gracefully
+      if (res.status === 404) {
+        console.warn('Daily count API not found, using local state');
+        setDailyEmailCount(0);
+        setDailyWhatsAppCount(0);
+        setDailySMSCount(0);
+        setDailyCallCount(0);
+        setLoadingDailyCount(false);
+        return;
+      }
+      
       const data = await res.json();
       
       if (res.ok) {
@@ -1962,6 +2005,11 @@ export default function Dashboard() {
       }
     } catch (err) {
       console.error('Load daily count error:', err);
+      // Fallback to 0
+      setDailyEmailCount(0);
+      setDailyWhatsAppCount(0);
+      setDailySMSCount(0);
+      setDailyCallCount(0);
     } finally {
       setLoadingDailyCount(false);
     }
@@ -1989,6 +2037,106 @@ export default function Dashboard() {
       console.error('Send time optimization error:', err);
     }
   }, [user?.uid]);
+  
+  // ============================================================================
+  // LOAD SENT LEADS FROM API WITH ERROR HANDLING
+  // ============================================================================
+  const loadSentLeads = async () => {
+    if (!user?.uid) return;
+    
+    setLoadingSentLeads(true);
+    
+    try {
+      const res = await fetch('/api/list-sent-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.uid })
+      });
+      
+      // Handle 404 gracefully
+      if (res.status === 404) {
+        console.warn('Sent leads API not found, using empty state');
+        setSentLeads([]);
+        setFollowUpStats({
+          totalSent: 0,
+          totalReplied: 0,
+          readyForFollowUp: 0,
+          alreadyFollowedUp: 0,
+          awaitingReply: 0,
+          interestedLeads: 0
+        });
+        setLoadingSentLeads(false);
+        return;
+      }
+      
+      // Check if response is JSON
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        throw new Error('Response is not JSON');
+      }
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        setSentLeads(data.leads || []);
+        
+        const history = {};
+        let replied = 0;
+        let followedUp = 0;
+        let readyForFU = 0;
+        let awaiting = 0;
+        
+        (data.leads || []).forEach(lead => {
+          if (lead.replied) {
+            replied++;
+          }
+          
+          const followUpCount = lead.followUpCount || 0;
+          if (followUpCount > 0) {
+            followedUp++;
+          }
+          
+          history[lead.email] = {
+            count: followUpCount,
+            lastFollowUpAt: lead.lastFollowUpAt || null,
+            dates: lead.followUpDates || []
+          };
+          
+          const followUpAt = new Date(lead.followUpAt);
+          const now = new Date();
+          
+          if (!lead.replied && followUpAt <= now) {
+            readyForFU++;
+          } else if (!lead.replied) {
+            awaiting++;
+          }
+        });
+        
+        const interested = (data.leads || []).filter(lead =>
+          lead.seemsInterested && !lead.replied
+        );
+        
+        setInterestedLeadsList(interested);
+        setFollowUpHistory(history);
+        setFollowUpStats({
+          totalSent: data.leads?.length || 0,
+          totalReplied: replied,
+          readyForFollowUp: readyForFU,
+          alreadyFollowedUp: followedUp,
+          awaitingReply: awaiting,
+          interestedLeads: interested.length
+        });
+      } else {
+        addNotification('Failed to load sent leads', 'error');
+      }
+    } catch (err) {
+      console.error('Load sent leads error:', err);
+      setSentLeads([]);
+      addNotification('Error loading sent leads', 'error');
+    } finally {
+      setLoadingSentLeads(false);
+    }
+  };
   
   // ============================================================================
   // REQUEST GMAIL OAUTH TOKEN
@@ -2058,6 +2206,72 @@ export default function Dashboard() {
     } catch (e) {
       console.error('Update deal error:', e);
       addNotification('Failed to update deal stage', 'error');
+    }
+  };
+  
+  // ============================================================================
+  // SEND FOLLOW-UP WITH GMAIL TOKEN
+  // ============================================================================
+  const sendFollowUpWithToken = async (email, accessToken) => {
+    if (!user?.uid || !email || !accessToken) {
+      addNotification('Missing required data to send follow-up.', 'error');
+      return;
+    }
+    
+    if (repliedLeads[email]) {
+      addNotification(`❌ Cannot send follow-up: ${email} has already replied.`, 'error');
+      return;
+    }
+    
+    const history = followUpHistory[email];
+    const followUpCount = history?.count || 0;
+    
+    if (followUpCount >= 3) {
+      addNotification(`❌ Max follow-ups reached for ${email}`, 'error');
+      return;
+    }
+    
+    try {
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        const isFinalFollowUp = data.followUpCount >= 3;
+        addNotification(
+          `✅ Follow-up #${data.followUpCount} sent to ${email}` +
+          (isFinalFollowUp ? '\n⚠️ Loop closed' : ''),
+          'success'
+        );
+        
+        setFollowUpHistory(prev => ({
+          ...prev,
+          [email]: {
+            count: data.followUpCount || (prev[email]?.count || 0) + 1,
+            lastFollowUpAt: new Date().toISOString(),
+            dates: [...(prev[email]?.dates || []), new Date().toISOString()],
+            loopClosed: isFinalFollowUp
+          }
+        }));
+        
+        await loadSentLeads();
+        await loadRepliedAndFollowUp();
+        await loadDeals();
+      } else {
+        addNotification(`❌ Follow-up failed: ${data.error}`, 'error');
+      }
+    } catch (err) {
+      console.error('Follow-up send error:', err);
+      addNotification(`❌ Error: ${err.message}`, 'error');
     }
   };
   
@@ -2272,119 +2486,6 @@ export default function Dashboard() {
     
     const smsUrl = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
     window.location.href = smsUrl;
-  };
-  
-  // ============================================================================
-  // SEND BULK SMS TO ALL CONTACTS
-  // ============================================================================
-  const handleSendBulkSMS = async () => {
-    if (!user?.uid || whatsappLinks.length === 0) {
-      addNotification('No contacts available', 'error');
-      return;
-    }
-    
-    const quotaCheck = canUse('sms', whatsappLinks.length);
-    if (!quotaCheck.available) {
-      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
-      return;
-    }
-    
-    const confirmed = window.confirm(
-      `Send SMS to ${whatsappLinks.length} contacts?\n\nThis will use ${whatsappLinks.length} of your daily SMS quota.`
-    );
-    
-    if (!confirmed) return;
-    
-    let successCount = 0;
-    let failCount = 0;
-    let skipCount = 0;
-    
-    setStatus('📤 Sending SMS batch...');
-    setStatusType('info');
-    setIsSending(true);
-    setSendProgress({ current: 0, total: whatsappLinks.length });
-    
-    for (let i = 0; i < whatsappLinks.length; i++) {
-      const contact = whatsappLinks[i];
-      const phone = formatForDialing(contact.phone);
-      
-      if (!phone) {
-        skipCount++;
-        continue;
-      }
-      
-      const contactKey = contact.email || contact.phone;
-      
-      // Check if already contacted recently
-      const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
-      if (!safetyCheck.safe) {
-        skipCount++;
-        continue;
-      }
-      
-      try {
-        const message = renderPreviewText(
-          smsTemplate,
-          { 
-            business_name: contact.business, 
-            address: contact.address || '', 
-            phone_raw: contact.phone 
-          },
-          fieldMappings,
-          senderName
-        );
-        
-        const response = await fetch('/api/send-sms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phone,
-            message,
-            businessName: contact.business,
-            userId: user.uid
-          })
-        });
-        
-        if (response.ok) {
-          successCount++;
-          
-          const now = new Date().toISOString();
-          setLastSMSSent(prev => ({ ...prev, [contactKey]: now }));
-          setContactedChannels(prev => ({
-            ...prev,
-            [contactKey]: [...(prev[contactKey] || []), 'sms']
-          }));
-          
-          await updateContact(contactKey, 'sms', {
-            smsCount: increment(1),
-            lastSMSSent: now
-          });
-          
-          if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
-            updateDealStage(contactKey, 'contacted');
-          }
-        } else {
-          failCount++;
-        }
-        
-        setSendProgress({ current: i + 1, total: whatsappLinks.length });
-      } catch (error) {
-        console.error(`SMS error for ${contact.business}:`, error);
-        failCount++;
-      }
-      
-      // Add small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
-    }
-    
-    setIsSending(false);
-    setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
-    setStatusType('success');
-    
-    addNotification(
-      `SMS batch complete!\nSent: ${successCount}\nFailed: ${failCount}\nSkipped: ${skipCount}`,
-      successCount > 0 ? 'success' : 'error'
-    );
   };
   
   // ============================================================================
@@ -2960,79 +3061,128 @@ export default function Dashboard() {
   };
   
   // ============================================================================
-  // LOAD SENT LEADS FROM API
+  // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
   // ============================================================================
-  const loadSentLeads = async () => {
-    if (!user?.uid) return;
+  const handleSendToNewLeads = async () => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
     
-    setLoadingSentLeads(true);
+    const newLeads = getNewLeads();
+    
+    if (newLeads.length === 0) {
+      addNotification('✅ No new leads to email. All contacts have been reached.', 'success');
+      return;
+    }
+    
+    const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
+    
+    if (remainingQuota <= 0) {
+      addNotification(
+        `⚠️ Daily email limit reached (${CONFIG.MAX_DAILY_EMAILS} emails/day). ${dailyEmailCount} emails sent today.`,
+        'warning'
+      );
+      return;
+    }
+    
+    const leadsToSend = newLeads.slice(0, Math.min(remainingQuota, newLeads.length));
+    const potentialValue = Math.round((leadsToSend.length * 0.15 * CONFIG.DEFAULT_AVG_DEAL_VALUE) / 1000);
+    
+    const confirmMsg = `🚀 Smart New Lead Outreach\n\n` +
+      `📊 ${leadsToSend.length} new leads ready (${newLeads.length} total available)\n` +
+      `📈 Prioritized by lead quality\n` +
+      `💰 Estimated potential value: $${potentialValue}k\n` +
+      `📧 Daily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} (${remainingQuota} remaining)\n\n` +
+      `Send to ${leadsToSend.length} leads now?`;
+    
+    if (!window.confirm(confirmMsg)) return;
+    
+    if (!templateA.subject?.trim()) {
+      addNotification('Email subject is required', 'error');
+      return;
+    }
+    
+    setIsSending(true);
+    setStatus('Getting Gmail access...');
+    setStatusType('info');
+    setSendProgress({ current: 0, total: leadsToSend.length });
     
     try {
-      const res = await fetch('/api/list-sent-leads', {
+      const accessToken = await requestGmailToken();
+      setStatus(`Sending to ${leadsToSend.length} new leads...`);
+      
+      const imagesWithBase64 = await Promise.all(
+        emailImages.map(async (img, index) => {
+          const base64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(img.file);
+          });
+          
+          return {
+            cid: img.cid,
+            mimeType: img.file.type,
+            base64,
+            placeholder: img.placeholder
+          };
+        })
+      );
+      
+      const res = await fetch('/api/send-new-leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.uid })
+        body: JSON.stringify({
+          recipients: leadsToSend,
+          senderName,
+          senderEmail,
+          fieldMappings,
+          accessToken,
+          template: templateA,
+          userId: user.uid,
+          emailImages: imagesWithBase64
+        })
       });
       
       const data = await res.json();
       
       if (res.ok) {
-        setSentLeads(data.leads || []);
+        const sentCount = data.sent || 0;
+        setStatus(`✅ ${sentCount}/${leadsToSend.length} emails sent to new leads!`);
+        setStatusType('success');
         
-        const history = {};
-        let replied = 0;
-        let followedUp = 0;
-        let readyForFU = 0;
-        let awaiting = 0;
+        setDailyEmailCount(data.dailyCount || dailyEmailCount + sentCount);
         
-        (data.leads || []).forEach(lead => {
-          if (lead.replied) {
-            replied++;
-          }
-          
-          const followUpCount = lead.followUpCount || 0;
-          if (followUpCount > 0) {
-            followedUp++;
-          }
-          
-          history[lead.email] = {
-            count: followUpCount,
-            lastFollowUpAt: lead.lastFollowUpAt || null,
-            dates: lead.followUpDates || []
-          };
-          
-          const followUpAt = new Date(lead.followUpAt);
-          const now = new Date();
-          
-          if (!lead.replied && followUpAt <= now) {
-            readyForFU++;
-          } else if (!lead.replied) {
-            awaiting++;
-          }
-        });
-        
-        const interested = (data.leads || []).filter(lead =>
-          lead.seemsInterested && !lead.replied
+        addNotification(
+          `✅ Successfully sent ${sentCount} emails!\n` +
+          `📊 Stats:\n` +
+          `• Sent: ${sentCount}\n` +
+          `• Failed: ${data.failed || 0}\n` +
+          `• Skipped: ${data.skipped || 0}\n` +
+          `• Daily count: ${data.dailyCount}/${CONFIG.MAX_DAILY_EMAILS}`,
+          'success'
         );
         
-        setInterestedLeadsList(interested);
-        setFollowUpHistory(history);
-        setFollowUpStats({
-          totalSent: data.leads?.length || 0,
-          totalReplied: replied,
-          readyForFollowUp: readyForFU,
-          alreadyFollowedUp: followedUp,
-          awaitingReply: awaiting,
-          interestedLeads: interested.length
-        });
+        await loadSentLeads();
+        await loadDailyEmailCount();
       } else {
-        addNotification('Failed to load sent leads', 'error');
+        if (res.status === 429) {
+          addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
+          setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
+        } else {
+          addNotification(`❌ Error: ${data.error || 'Failed to send emails'}`, 'error');
+        }
+        setStatus(`❌ ${data.error || 'Failed'}`);
+        setStatusType('error');
       }
     } catch (err) {
-      console.error('Load sent leads error:', err);
-      addNotification('Error loading sent leads', 'error');
+      console.error('Send new leads error:', err);
+      addNotification(`❌ Error: ${err.message || 'Failed to send emails'}`, 'error');
+      setStatus(`❌ ${err.message || 'Error'}`);
+      setStatusType('error');
     } finally {
-      setLoadingSentLeads(false);
+      setIsSending(false);
+      setSendProgress({ current: 0, total: 0 });
     }
   };
   
@@ -3271,132 +3421,6 @@ export default function Dashboard() {
   };
   
   // ============================================================================
-  // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
-  // ============================================================================
-  const handleSendToNewLeads = async () => {
-    if (!user?.uid) {
-      addNotification('Please sign in first', 'error');
-      return;
-    }
-    
-    const newLeads = getNewLeads();
-    
-    if (newLeads.length === 0) {
-      addNotification('✅ No new leads to email. All contacts have been reached.', 'success');
-      return;
-    }
-    
-    const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
-    
-    if (remainingQuota <= 0) {
-      addNotification(
-        `⚠️ Daily email limit reached (${CONFIG.MAX_DAILY_EMAILS} emails/day). ${dailyEmailCount} emails sent today.`,
-        'warning'
-      );
-      return;
-    }
-    
-    const leadsToSend = newLeads.slice(0, Math.min(remainingQuota, newLeads.length));
-    const potentialValue = Math.round((leadsToSend.length * 0.15 * CONFIG.DEFAULT_AVG_DEAL_VALUE) / 1000);
-    
-    const confirmMsg = `🚀 Smart New Lead Outreach\n\n` +
-      `📊 ${leadsToSend.length} new leads ready (${newLeads.length} total available)\n` +
-      `📈 Prioritized by lead quality\n` +
-      `💰 Estimated potential value: $${potentialValue}k\n` +
-      `📧 Daily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} (${remainingQuota} remaining)\n\n` +
-      `Send to ${leadsToSend.length} leads now?`;
-    
-    if (!window.confirm(confirmMsg)) return;
-    
-    if (!templateA.subject?.trim()) {
-      addNotification('Email subject is required', 'error');
-      return;
-    }
-    
-    setIsSending(true);
-    setStatus('Getting Gmail access...');
-    setStatusType('info');
-    setSendProgress({ current: 0, total: leadsToSend.length });
-    
-    try {
-      const accessToken = await requestGmailToken();
-      setStatus(`Sending to ${leadsToSend.length} new leads...`);
-      
-      const imagesWithBase64 = await Promise.all(
-        emailImages.map(async (img, index) => {
-          const base64 = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result.split(',')[1]);
-            reader.readAsDataURL(img.file);
-          });
-          
-          return {
-            cid: img.cid,
-            mimeType: img.file.type,
-            base64,
-            placeholder: img.placeholder
-          };
-        })
-      );
-      
-      const res = await fetch('/api/send-new-leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipients: leadsToSend,
-          senderName,
-          senderEmail,
-          fieldMappings,
-          accessToken,
-          template: templateA,
-          userId: user.uid,
-          emailImages: imagesWithBase64
-        })
-      });
-      
-      const data = await res.json();
-      
-      if (res.ok) {
-        const sentCount = data.sent || 0;
-        setStatus(`✅ ${sentCount}/${leadsToSend.length} emails sent to new leads!`);
-        setStatusType('success');
-        
-        setDailyEmailCount(data.dailyCount || dailyEmailCount + sentCount);
-        
-        addNotification(
-          `✅ Successfully sent ${sentCount} emails!\n` +
-          `📊 Stats:\n` +
-          `• Sent: ${sentCount}\n` +
-          `• Failed: ${data.failed || 0}\n` +
-          `• Skipped: ${data.skipped || 0}\n` +
-          `• Daily count: ${data.dailyCount}/${CONFIG.MAX_DAILY_EMAILS}`,
-          'success'
-        );
-        
-        await loadSentLeads();
-        await loadDailyEmailCount();
-      } else {
-        if (res.status === 429) {
-          addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
-          setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
-        } else {
-          addNotification(`❌ Error: ${data.error || 'Failed to send emails'}`, 'error');
-        }
-        setStatus(`❌ ${data.error || 'Failed'}`);
-        setStatusType('error');
-      }
-    } catch (err) {
-      console.error('Send new leads error:', err);
-      addNotification(`❌ Error: ${err.message || 'Failed to send emails'}`, 'error');
-      setStatus(`❌ ${err.message || 'Error'}`);
-      setStatusType('error');
-    } finally {
-      setIsSending(false);
-      setSendProgress({ current: 0, total: 0 });
-    }
-  };
-  
-  // ============================================================================
   // AI RESEARCH COMPANY
   // ============================================================================
   const researchCompany = async (companyName, companyWebsite, email) => {
@@ -3558,6 +3582,48 @@ export default function Dashboard() {
   };
   
   // ============================================================================
+  // EXTRACT ALL TEMPLATE VARIABLES FOR UI
+  // ============================================================================
+  const uiVars = [...new Set([
+    ...extractTemplateVariables(templateA.subject),
+    ...extractTemplateVariables(templateA.body),
+    ...extractTemplateVariables(templateB.subject),
+    ...extractTemplateVariables(templateB.body),
+    ...extractTemplateVariables(whatsappTemplate),
+    ...extractTemplateVariables(smsTemplate),
+    ...extractTemplateVariables(instagramTemplate),
+    ...extractTemplateVariables(twitterTemplate),
+    ...extractTemplateVariables(linkedinTemplate),
+    'sender_name',
+    ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
+    ...csvHeaders
+  ])];
+  
+  // ============================================================================
+  // A/B TEST SUMMARY
+  // ============================================================================
+  const abSummary = abTestMode ? (
+    <div className="bg-blue-900/30 p-4 rounded-xl mt-4 border border-blue-700/50">
+      <h3 className="text-sm font-bold text-blue-300 mb-3">📊 A/B Test Results</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-blue-800/30 p-3 rounded-lg">
+          <div className="text-xs text-blue-300">Template A</div>
+          <div className="text-xl font-bold text-white">{abResults.a.sent || 0} sent</div>
+          <div className="text-xs text-blue-400">{abResults.a.replied || 0} replied</div>
+        </div>
+        <div className="bg-purple-800/30 p-3 rounded-lg">
+          <div className="text-xs text-purple-300">Template B</div>
+          <div className="text-xl font-bold text-white">{abResults.b.sent || 0} sent</div>
+          <div className="text-xs text-purple-400">{abResults.b.replied || 0} replied</div>
+        </div>
+      </div>
+      <div className="text-xs text-blue-400 mt-3">
+        Check back in 48h for open/click rates
+      </div>
+    </div>
+  ) : null;
+  
+  // ============================================================================
   // LOADING STATE
   // ============================================================================
   if (loadingAuth) {
@@ -3620,48 +3686,6 @@ export default function Dashboard() {
       </div>
     );
   }
-  
-  // ============================================================================
-  // EXTRACT ALL TEMPLATE VARIABLES FOR UI
-  // ============================================================================
-  const uiVars = [...new Set([
-    ...extractTemplateVariables(templateA.subject),
-    ...extractTemplateVariables(templateA.body),
-    ...extractTemplateVariables(templateB.subject),
-    ...extractTemplateVariables(templateB.body),
-    ...extractTemplateVariables(whatsappTemplate),
-    ...extractTemplateVariables(smsTemplate),
-    ...extractTemplateVariables(instagramTemplate),
-    ...extractTemplateVariables(twitterTemplate),
-    ...extractTemplateVariables(linkedinTemplate),
-    'sender_name',
-    ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
-    ...csvHeaders
-  ])];
-  
-  // ============================================================================
-  // A/B TEST SUMMARY
-  // ============================================================================
-  const abSummary = abTestMode ? (
-    <div className="bg-blue-900/30 p-4 rounded-xl mt-4 border border-blue-700/50">
-      <h3 className="text-sm font-bold text-blue-300 mb-3">📊 A/B Test Results</h3>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-blue-800/30 p-3 rounded-lg">
-          <div className="text-xs text-blue-300">Template A</div>
-          <div className="text-xl font-bold text-white">{abResults.a.sent || 0} sent</div>
-          <div className="text-xs text-blue-400">{abResults.a.replied || 0} replied</div>
-        </div>
-        <div className="bg-purple-800/30 p-3 rounded-lg">
-          <div className="text-xs text-purple-300">Template B</div>
-          <div className="text-xl font-bold text-white">{abResults.b.sent || 0} sent</div>
-          <div className="text-xs text-purple-400">{abResults.b.replied || 0} replied</div>
-        </div>
-      </div>
-      <div className="text-xs text-blue-400 mt-3">
-        Check back in 48h for open/click rates
-      </div>
-    </div>
-  ) : null;
   
   // ============================================================================
   // MAIN DASHBOARD UI
