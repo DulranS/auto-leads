@@ -1,9 +1,38 @@
 // app/dashboard/page.js
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from 'firebase/auth';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc, 
+  addDoc, 
+  serverTimestamp,
+  deleteDoc,
+  onSnapshot,
+  increment,
+  arrayUnion,
+  arrayRemove,
+  orderBy,
+  limit,
+  startAfter,
+  Timestamp
+} from 'firebase/firestore';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  onAuthStateChanged, 
+  signOut,
+  sendPasswordResetEmail,
+  updateProfile
+} from 'firebase/auth';
 import Head from 'next/head';
 import { useRouter } from 'next/navigation';
 
@@ -20,18 +49,71 @@ const firebaseConfig = {
   measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
-const auth = getAuth(app);
+// Initialize Firebase with error handling
+const initializeFirebase = () => {
+  try {
+    if (typeof window === 'undefined') return null;
+    const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    return {
+      db: getFirestore(app),
+      auth: getAuth(app),
+      app
+    };
+  } catch (error) {
+    console.error('Firebase initialization error:', error);
+    return null;
+  }
+};
+
+const firebase = initializeFirebase();
+const db = firebase?.db;
+const auth = firebase?.auth;
+
+// ============================================================================
+// CONSTANTS & CONFIGURATION
+// ============================================================================
+const CONFIG = {
+  MAX_DAILY_EMAILS: 500,
+  MAX_DAILY_WHATSAPP: 100,
+  MAX_DAILY_SMS: 50,
+  MAX_DAILY_CALLS: 30,
+  MIN_DAYS_BETWEEN_CONTACT: 2,
+  MAX_FOLLOW_UPS: 3,
+  CAMPAIGN_WINDOW_DAYS: 30,
+  LEAD_SCORE_HOT: 75,
+  LEAD_SCORE_WARM: 50,
+  AUTO_SAVE_DELAY_MS: 1500,
+  POLL_INTERVAL_MS: 6000,
+  MAX_POLL_ATTEMPTS: 20,
+  DEFAULT_AVG_DEAL_VALUE: 5000,
+  DEFAULT_CLOSE_RATE: 0.15,
+  DEFAULT_DEMO_RATE: 0.40,
+  CACHE_EXPIRY_MS: 300000, // 5 minutes
+  MAX_RECENT_CONTACTS: 1000,
+  BACKUP_INTERVAL_HOURS: 24,
+  ITEMS_PER_PAGE: 50,
+  DEBOUNCE_DELAY_MS: 300,
+  NOTIFICATION_DURATION_MS: 5000,
+  MAX_NOTIFICATIONS: 50,
+  SESSION_TIMEOUT_MS: 3600000, // 1 hour
+  MAX_IMAGE_SIZE_MB: 5,
+  MAX_IMAGES_PER_EMAIL: 3,
+  RATE_LIMIT_DELAY_MS: 200,
+  BATCH_SIZE: 50,
+  RETRY_ATTEMPTS: 3,
+  RETRY_DELAY_MS: 1000
+};
 
 // ============================================================================
 // EMAIL TEMPLATES - YOUR ACTUAL PITCH
 // ============================================================================
 const DEFAULT_TEMPLATE_A = {
+  id: 'template_a',
+  name: 'Initial Outreach',
   subject: 'Quick question for {{business_name}}',
   body: `Hi {{business_name}}, 😊👋🏻
 I hope you're doing well.
-My name is Dulran Samarasinghe. I run Syndicate Solutions, a Sri Lanka–based mini agency supporting
+My name is {{sender_name}}. I run Syndicate Solutions, a Sri Lanka–based mini agency supporting
 small to mid-sized agencies and businesses with reliable execution across web, software,
 AI automation, and ongoing digital operations.
 We typically work as a white-label or outsourced partner when teams need:
@@ -50,54 +132,96 @@ You can contact me on Whatsapp - 0741143323
 You can email me at - syndicatesoftwaresolutions@gmail.com
 Otherwise, happy to continue the conversation over email.
 Best regards,
-Dulran Samarasinghe
+{{sender_name}}
 Founder – Syndicate Solutions
-`
+`,
+  channel: 'email',
+  enabled: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
+};
+
+const DEFAULT_TEMPLATE_B = {
+  id: 'template_b',
+  name: 'Alternative Outreach',
+  subject: '{{business_name}}, quick question',
+  body: `Hi {{business_name}},
+I noticed your company and wanted to reach out.
+We help businesses like yours with web development, AI automation, and digital operations.
+Would you be open to a quick 15-minute chat to see if we can help?
+No pressure at all.
+Best,
+{{sender_name}}
+Syndicate Solutions
+`,
+  channel: 'email',
+  enabled: true,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString()
 };
 
 // ============================================================================
 // FOLLOW-UP TEMPLATES
 // ============================================================================
-const FOLLOW_UP_1 = {
-  subject: 'Quick question for {{business_name}}',
-  body: `Hi {{business_name}},
+const DEFAULT_FOLLOW_UP_TEMPLATES = [
+  {
+    id: 'followup_1',
+    name: 'Follow-Up 1 (Day 2)',
+    channel: 'email',
+    enabled: true,
+    delayDays: 2,
+    subject: 'Quick question for {{business_name}}',
+    body: `Hi {{business_name}},
 Just circling back—did my note about outsourced dev & ops support land at a bad time?
 No pressure at all, but if you're ever swamped with web, automation, or backend work and need a reliable extra hand (especially for white-label or fast-turnaround needs), we're ready to help.
 Even a 1-hour task is a great way to test the waters.
 Either way, wishing you a productive week!
 Best,
-Dulran
+{{sender_name}}
 Founder – Syndicate Solutions
 WhatsApp: 0741143323
-`
-};
-
-const FOLLOW_UP_2 = {
-  subject: '{{business_name}}, a quick offer (no strings)',
-  body: `Hi again,
+`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'followup_2',
+    name: 'Follow-Up 2 (Day 5)',
+    channel: 'email',
+    enabled: true,
+    delayDays: 5,
+    subject: '{{business_name}}, a quick offer (no strings)',
+    body: `Hi again,
 I noticed you haven't had a chance to reply—totally understand!
 To make this zero-risk: **I'll audit one of your digital workflows (e.g., lead capture, client onboarding, internal tooling) for free** and send 2–3 actionable automation ideas you can implement immediately—even if you never work with us.
 Zero sales pitch. Just value.
 Interested? Hit "Yes" or reply with a workflow you'd like optimized.
 Cheers,
-Dulran
+{{sender_name}}
 Portfolio: https://syndicatesolutions.vercel.app/
-Book a call: https://cal.com/syndicate-solutions/15min`
-};
-
-const FOLLOW_UP_3 = {
-  subject: 'Closing the loop',
-  body: `Hi {{business_name}},
+Book a call: https://cal.com/syndicate-solutions/15min`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'followup_3',
+    name: 'Breakup Email (Day 7)',
+    channel: 'email',
+    enabled: true,
+    delayDays: 7,
+    subject: 'Closing the loop',
+    body: `Hi {{business_name}},
 I'll stop emailing after this one! 😅
 Just wanted to say: if outsourcing ever becomes a priority—whether for web dev, AI tools, or ongoing ops—we're here. Many of our clients started with a tiny $100 task and now work with us monthly.
 If now's not the time, no worries! I'll circle back in a few months.
 Either way, keep crushing it!
-— Dulran
+— {{sender_name}}
 WhatsApp: 0741143323
-`
-};
-
-const DEFAULT_TEMPLATE_B = FOLLOW_UP_1;
+`,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
 
 // ============================================================================
 // MULTI-CHANNEL TEMPLATES
@@ -123,6 +247,13 @@ const DEFAULT_TWITTER_TEMPLATE = `Hi {{business_name}} 👋
 I run Syndicate Solutions – we help businesses like yours with web, AI, and digital ops.
 Would you be open to a quick chat?`;
 
+const DEFAULT_LINKEDIN_TEMPLATE = `Hi {{business_name}},
+I came across your company and was impressed by your work.
+We help businesses like yours with web development, AI automation, and digital operations.
+Would you be open to connecting and exploring potential collaboration?
+Best,
+{{sender_name}}`;
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -131,12 +262,34 @@ Would you be open to a quick chat?`;
  * Format phone number for international dialing (Sri Lanka format)
  */
 function formatForDialing(raw) {
-  if (!raw || raw === 'N/A' || raw === '') return null;
+  if (!raw || raw === 'N/A' || raw === '' || raw === 'undefined' || raw === 'null') return null;
   let cleaned = raw.toString().replace(/\D/g, '');
+  
+  // Handle Sri Lankan numbers starting with 0
   if (cleaned.startsWith('0') && cleaned.length >= 9) {
     cleaned = '94' + cleaned.slice(1);
   }
-  return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
+  
+  // Handle numbers without country code
+  if (cleaned.length === 9 && /^[7-9]/.test(cleaned)) {
+    cleaned = '94' + cleaned;
+  }
+  
+  // Validate international format
+  const isValid = /^[1-9]\d{9,14}$/.test(cleaned);
+  return isValid ? cleaned : null;
+}
+
+/**
+ * Format phone for display
+ */
+function formatPhoneForDisplay(phone) {
+  if (!phone) return '';
+  const cleaned = phone.toString().replace(/\D/g, '');
+  if (cleaned.startsWith('94') && cleaned.length === 11) {
+    return '+' + cleaned.slice(0, 2) + ' ' + cleaned.slice(2, 5) + ' ' + cleaned.slice(5, 8) + ' ' + cleaned.slice(8);
+  }
+  return '+' + cleaned;
 }
 
 /**
@@ -153,29 +306,42 @@ const extractTemplateVariables = (text) => {
  */
 const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
+  
   let cleaned = email.trim()
     .toLowerCase()
     .replace(/^["']+/, '')
     .replace(/["']+$/, '')
     .replace(/\s+/g, '')
     .replace(/[<>]/g, '');
+  
   if (cleaned.length < 5) return false;
   if (cleaned === 'undefined' || cleaned === 'null' || cleaned === 'na' || cleaned === 'n/a') return false;
   if (cleaned.startsWith('[') || cleaned.includes('missing')) return false;
+  
   const atCount = (cleaned.match(/@/g) || []).length;
   if (atCount !== 1) return false;
+  
   const parts = cleaned.split('@');
   const [localPart, domainPart] = parts;
+  
   if (!localPart || localPart.length < 1) return false;
   if (localPart.startsWith('.') || localPart.endsWith('.')) return false;
+  
   if (!domainPart || domainPart.length < 3) return false;
   if (!domainPart.includes('.')) return false;
   if (domainPart.startsWith('.') || domainPart.endsWith('.')) return false;
+  
   const domainBits = domainPart.split('.');
   const tld = domainBits[domainBits.length - 1];
+  
   if (!tld || tld.length < 2 || tld.length > 6) return false;
   if (!/^[a-z0-9-]+$/.test(tld)) return false;
   if (tld.startsWith('-') || tld.endsWith('-')) return false;
+  
+  // Additional email validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleaned)) return false;
+  
   return true;
 };
 
@@ -186,19 +352,29 @@ const parseCsvRow = (str) => {
   const result = [];
   let current = '';
   let inQuotes = false;
+  
   for (let i = 0; i < str.length; i++) {
     const char = str[i];
-    if (char === '"' && !inQuotes) inQuotes = true;
-    else if (char === '"' && inQuotes) {
+    
+    if (char === '"' && !inQuotes) {
+      inQuotes = true;
+    } else if (char === '"' && inQuotes) {
       if (i + 1 < str.length && str[i + 1] === '"') {
         current += '"';
         i++;
-      } else inQuotes = false;
+      } else {
+        inQuotes = false;
+      }
     } else if (char === ',' && !inQuotes) {
-      result.push(current); current = '';
-    } else current += char;
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
   }
+  
   result.push(current);
+  
   return result.map(field => {
     let cleaned = field.replace(/[\r\n]/g, '').trim();
     if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
@@ -214,16 +390,26 @@ const parseCsvRow = (str) => {
 const renderPreviewText = (text, recipient, mappings, sender) => {
   if (!text) return '';
   let result = text;
+  
   Object.entries(mappings).forEach(([varName, col]) => {
     const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
+    
     if (varName === 'sender_name') {
       result = result.replace(regex, sender || 'Team');
     } else if (recipient && col && recipient[col] !== undefined) {
-      result = result.replace(regex, String(recipient[col]));
+      const value = recipient[col];
+      result = result.replace(regex, value !== null && value !== undefined ? String(value) : `[${varName}]`);
     } else {
-      result = result.replace(regex, `[MISSING: ${varName}]`);
+      result = result.replace(regex, `[${varName}]`);
     }
   });
+  
+  // Replace any remaining unmatched variables
+  result = result.replace(/\{\{\s*[^}]+\s*\}\}/g, (match) => {
+    const varName = match.replace(/\{\{\s*|\s*\}\}/g, '').trim();
+    return `[${varName}]`;
+  });
+  
   return result;
 };
 
@@ -232,26 +418,520 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
  */
 const generateSocialHandle = (businessName, platform) => {
   if (!businessName) return null;
+  
   let handle = businessName
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '_')
     .substring(0, 30);
-  return handle;
+  
+  // Remove leading/trailing underscores
+  handle = handle.replace(/^_+|_+$/g, '');
+  
+  return handle || null;
 };
 
 /**
- * Copy text to clipboard
+ * Copy text to clipboard with feedback
  */
-const copyToClipboard = (text, label) => {
-  navigator.clipboard.writeText(text);
-  alert(`✅ Copied ${label}: ${text}`);
+const copyToClipboard = async (text, label = 'Text') => {
+  try {
+    await navigator.clipboard.writeText(text);
+    return { success: true, message: `✅ Copied ${label}` };
+  } catch (error) {
+    console.error('Clipboard copy failed:', error);
+    return { success: false, message: `❌ Failed to copy ${label}` };
+  }
+};
+
+/**
+ * Calculate days between two dates
+ */
+const daysBetween = (date1, date2) => {
+  if (!date1 || !date2) return 999;
+  const d1 = new Date(date1);
+  const d2 = new Date(date2);
+  const diffTime = Math.abs(d2 - d1);
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+/**
+ * Generate unique ID
+ */
+const generateId = () => {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+};
+
+/**
+ * Debounce function
+ */
+const debounce = (func, wait) => {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+};
+
+/**
+ * Throttle function
+ */
+const throttle = (func, limit) => {
+  let inThrottle;
+  return function(...args) {
+    if (!inThrottle) {
+      func.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  };
+};
+
+/**
+ * Local storage helper with error handling
+ */
+const localStorageHelper = {
+  get: (key, defaultValue = null) => {
+    try {
+      const item = typeof window !== 'undefined' ? localStorage.getItem(key) : null;
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (error) {
+      console.error('LocalStorage get error:', error);
+      return defaultValue;
+    }
+  },
+  
+  set: (key, value) => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(key, JSON.stringify(value));
+      }
+      return true;
+    } catch (error) {
+      console.error('LocalStorage set error:', error);
+      return false;
+    }
+  },
+  
+  remove: (key) => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+      return true;
+    } catch (error) {
+      console.error('LocalStorage remove error:', error);
+      return false;
+    }
+  }
+};
+
+/**
+ * Session storage helper
+ */
+const sessionStorageHelper = {
+  get: (key, defaultValue = null) => {
+    try {
+      const item = typeof window !== 'undefined' ? sessionStorage.getItem(key) : null;
+      return item ? JSON.parse(item) : defaultValue;
+    } catch (error) {
+      console.error('SessionStorage get error:', error);
+      return defaultValue;
+    }
+  },
+  
+  set: (key, value) => {
+    try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(key, JSON.stringify(value));
+      }
+      return true;
+    } catch (error) {
+      console.error('SessionStorage set error:', error);
+      return false;
+    }
+  }
 };
 
 // ============================================================================
 // EXPORT TEMPLATES FOR API USE
 // ============================================================================
-export { FOLLOW_UP_1, FOLLOW_UP_2, FOLLOW_UP_3 };
+export { DEFAULT_FOLLOW_UP_TEMPLATES };
+
+// ============================================================================
+// CUSTOM HOOKS
+// ============================================================================
+
+/**
+ * Hook for managing contact tracking with duplicate prevention
+ */
+const useContactTracking = (userId) => {
+  const [contactHistory, setContactHistory] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  
+  // Load contact history from Firebase
+  useEffect(() => {
+    if (!userId || !db) {
+      setLoading(false);
+      return;
+    }
+    
+    const loadContactHistory = async () => {
+      try {
+        setLoading(true);
+        const q = query(
+          collection(db, 'contact_history'),
+          where('userId', '==', userId)
+        );
+        const snapshot = await getDocs(q);
+        
+        const history = {};
+        snapshot.forEach(doc => {
+          const data = doc.data();
+          const key = data.contactKey || data.email || data.phone;
+          if (key) {
+            history[key] = {
+              ...data,
+              id: doc.id,
+              lastUpdated: data.lastUpdated || new Date().toISOString()
+            };
+          }
+        });
+        
+        setContactHistory(history);
+        localStorageHelper.set(`contact_history_${userId}`, history);
+      } catch (err) {
+        console.error('Load contact history error:', err);
+        setError(err.message);
+        
+        // Fallback to localStorage
+        const cached = localStorageHelper.get(`contact_history_${userId}`, {});
+        setContactHistory(cached);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadContactHistory();
+  }, [userId]);
+  
+  // Update contact history
+  const updateContact = useCallback(async (contactKey, channel, data = {}) => {
+    if (!userId || !db || !contactKey) return false;
+    
+    try {
+      const now = new Date().toISOString();
+      const docRef = doc(db, 'contact_history', `${userId}_${contactKey}`);
+      
+      const updateData = {
+        userId,
+        contactKey,
+        lastContacted: now,
+        lastChannel: channel,
+        contactCount: increment(1),
+        channels: arrayUnion(channel),
+        lastUpdated: now,
+        ...data
+      };
+      
+      await setDoc(docRef, updateData, { merge: true });
+      
+      // Update local state
+      setContactHistory(prev => ({
+        ...prev,
+        [contactKey]: {
+          ...(prev[contactKey] || {}),
+          ...updateData,
+          lastUpdated: now
+        }
+      }));
+      
+      return true;
+    } catch (err) {
+      console.error('Update contact error:', err);
+      return false;
+    }
+  }, [userId]);
+  
+  // Check if contact can be reached
+  const canContact = useCallback((contactKey, channel, minDays = CONFIG.MIN_DAYS_BETWEEN_CONTACT) => {
+    const history = contactHistory[contactKey];
+    
+    if (!history) return { canContact: true, reason: 'No previous contact' };
+    
+    const lastContact = history.lastContacted;
+    if (!lastContact) return { canContact: true, reason: 'No contact date' };
+    
+    const daysSince = daysBetween(lastContact, new Date());
+    
+    if (daysSince < minDays) {
+      return {
+        canContact: false,
+        reason: `Contacted ${daysSince.toFixed(1)} days ago (min: ${minDays} days)`,
+        daysSince,
+        lastContact
+      };
+    }
+    
+    // Check channel-specific limits
+    const channelCount = history[`${channel}Count`] || 0;
+    const maxChannelContacts = channel === 'email' ? CONFIG.MAX_FOLLOW_UPS + 1 :
+                               channel === 'whatsapp' ? 5 :
+                               channel === 'sms' ? 3 : 2;
+    
+    if (channelCount >= maxChannelContacts) {
+      return {
+        canContact: false,
+        reason: `Max ${channel} contacts reached (${channelCount}/${maxChannelContacts})`,
+        channelCount,
+        maxChannelContacts
+      };
+    }
+    
+    return { canContact: true, reason: 'Safe to contact', daysSince };
+  }, [contactHistory]);
+  
+  // Get contact summary
+  const getContactSummary = useCallback((contactKey) => {
+    const history = contactHistory[contactKey];
+    
+    if (!history) {
+      return {
+        contacted: false,
+        totalContacts: 0,
+        channels: [],
+        lastContacted: null,
+        lastChannel: null
+      };
+    }
+    
+    return {
+      contacted: true,
+      totalContacts: history.contactCount || 0,
+      channels: history.channels || [],
+      lastContacted: history.lastContacted,
+      lastChannel: history.lastChannel,
+      emailCount: history.emailCount || 0,
+      whatsappCount: history.whatsappCount || 0,
+      smsCount: history.smsCount || 0,
+      callCount: history.callCount || 0
+    };
+  }, [contactHistory]);
+  
+  return {
+    contactHistory,
+    loading,
+    error,
+    updateContact,
+    canContact,
+    getContactSummary,
+    setContactHistory
+  };
+};
+
+/**
+ * Hook for managing daily quotas
+ */
+const useDailyQuotas = (userId) => {
+  const [quotas, setQuotas] = useState({
+    emails: { used: 0, limit: CONFIG.MAX_DAILY_EMAILS, resetTime: null },
+    whatsapp: { used: 0, limit: CONFIG.MAX_DAILY_WHATSAPP, resetTime: null },
+    sms: { used: 0, limit: CONFIG.MAX_DAILY_SMS, resetTime: null },
+    calls: { used: 0, limit: CONFIG.MAX_DAILY_CALLS, resetTime: null }
+  });
+  const [loading, setLoading] = useState(true);
+  
+  // Load quotas from API
+  useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    
+    const loadQuotas = async () => {
+      try {
+        const res = await fetch('/api/get-daily-count', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId })
+        });
+        
+        if (res.ok) {
+          const data = await res.json();
+          setQuotas({
+            emails: { 
+              used: data.count || 0, 
+              limit: CONFIG.MAX_DAILY_EMAILS,
+              resetTime: data.resetTime || null
+            },
+            whatsapp: { 
+              used: data.whatsappCount || 0, 
+              limit: CONFIG.MAX_DAILY_WHATSAPP,
+              resetTime: data.resetTime || null
+            },
+            sms: { 
+              used: data.smsCount || 0, 
+              limit: CONFIG.MAX_DAILY_SMS,
+              resetTime: data.resetTime || null
+            },
+            calls: { 
+              used: data.callCount || 0, 
+              limit: CONFIG.MAX_DAILY_CALLS,
+              resetTime: data.resetTime || null
+            }
+          });
+        }
+      } catch (err) {
+        console.error('Load quotas error:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadQuotas();
+    
+    // Refresh quotas every hour
+    const interval = setInterval(loadQuotas, 3600000);
+    return () => clearInterval(interval);
+  }, [userId]);
+  
+  // Check if quota available
+  const canUse = useCallback((channel, count = 1) => {
+    const quota = quotas[channel];
+    if (!quota) return { available: false, reason: 'Invalid channel' };
+    
+    const remaining = quota.limit - quota.used;
+    if (remaining < count) {
+      return {
+        available: false,
+        reason: `Quota exceeded (${quota.used}/${quota.limit} used)`,
+        remaining: 0,
+        used: quota.used,
+        limit: quota.limit
+      };
+    }
+    
+    return {
+      available: true,
+      reason: 'Quota available',
+      remaining,
+      used: quota.used,
+      limit: quota.limit
+    };
+  }, [quotas]);
+  
+  // Increment quota usage
+  const incrementQuota = useCallback((channel, count = 1) => {
+    setQuotas(prev => ({
+      ...prev,
+      [channel]: {
+        ...prev[channel],
+        used: prev[channel].used + count
+      }
+    }));
+  }, []);
+  
+  return {
+    quotas,
+    loading,
+    canUse,
+    incrementQuota,
+    setQuotas
+  };
+};
+
+/**
+ * Hook for managing lead scoring
+ */
+const useLeadScoring = () => {
+  const [scores, setScores] = useState({});
+  
+  const calculateScore = useCallback((contact, contactHistory = {}) => {
+    if (!contact) return 50;
+    
+    let score = 50;
+    const contactKey = contact.email || contact.phone;
+    const history = contactHistory[contactKey] || {};
+    
+    // Email quality
+    if (contact.email && isValidEmail(contact.email)) {
+      score += 15;
+    }
+    
+    // Phone quality
+    if (contact.phone && formatForDialing(contact.phone)) {
+      score += 10;
+    }
+    
+    // Social media presence
+    const socialChannels = [
+      contact.twitter,
+      contact.instagram,
+      contact.facebook,
+      contact.youtube,
+      contact.linkedin_company,
+      contact.linkedin_ceo,
+      contact.linkedin_founder
+    ].filter(Boolean).length;
+    
+    score += Math.min(15, socialChannels * 3);
+    
+    // Contact confidence
+    if (contact.contact_confidence === 'High') score += 10;
+    else if (contact.contact_confidence === 'Medium') score += 5;
+    
+    // Decision maker
+    if (contact.linkedin_ceo || contact.linkedin_founder) score += 10;
+    if (contact.decision_maker_found === 'Yes') score += 8;
+    
+    // Engagement history
+    if (history.contactCount > 0) {
+      score += Math.min(10, history.contactCount * 2);
+    }
+    
+    if (history.replied) {
+      score += 25;
+    }
+    
+    // Company size
+    if (contact.company_size_indicator === 'small') score += 5;
+    else if (contact.company_size_indicator === 'medium') score += 10;
+    else if (contact.company_size_indicator === 'enterprise') score += 12;
+    
+    // Website presence
+    if (contact.website) score += 5;
+    if (contact.contact_page_found === 'Yes') score += 5;
+    
+    // Lead quality from CSV
+    if (contact.lead_quality === 'HOT') score += 30;
+    else if (contact.lead_quality === 'WARM') score += 15;
+    
+    // Rating and reviews
+    if (parseFloat(contact.rating) >= 4.8) score += 20;
+    if (parseInt(contact.review_count) > 100) score += 10;
+    
+    return Math.min(100, Math.max(0, score));
+  }, []);
+  
+  const updateScore = useCallback((contactKey, score) => {
+    setScores(prev => ({
+      ...prev,
+      [contactKey]: score
+    }));
+  }, []);
+  
+  return {
+    scores,
+    calculateScore,
+    updateScore,
+    setScores
+  };
+};
 
 // ============================================================================
 // MAIN DASHBOARD COMPONENT
@@ -263,25 +943,28 @@ export default function Dashboard() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
+  const [authError, setAuthError] = useState(null);
   const router = useRouter();
-
+  
   // ============================================================================
   // CSV & LEAD DATA STATES
   // ============================================================================
   const [csvContent, setCsvContent] = useState('');
   const [csvHeaders, setCsvHeaders] = useState([]);
   const [whatsappLinks, setWhatsappLinks] = useState([]);
-  const [leadScores, setLeadScores] = useState({});
   const [validEmails, setValidEmails] = useState(0);
   const [validWhatsApp, setValidWhatsApp] = useState(0);
   const [leadQualityFilter, setLeadQualityFilter] = useState('HOT');
   const [previewRecipient, setPreviewRecipient] = useState(null);
   const [fieldMappings, setFieldMappings] = useState({});
-
+  const [csvFileName, setCsvFileName] = useState('');
+  const [csvUploadDate, setCsvUploadDate] = useState(null);
+  
   // ============================================================================
   // SENDER & TEMPLATE STATES
   // ============================================================================
   const [senderName, setSenderName] = useState('');
+  const [senderEmail, setSenderEmail] = useState('');
   const [abTestMode, setAbTestMode] = useState(false);
   const [templateA, setTemplateA] = useState(DEFAULT_TEMPLATE_A);
   const [templateB, setTemplateB] = useState(DEFAULT_TEMPLATE_B);
@@ -289,28 +972,69 @@ export default function Dashboard() {
   const [smsTemplate, setSmsTemplate] = useState(DEFAULT_SMS_TEMPLATE);
   const [instagramTemplate, setInstagramTemplate] = useState(DEFAULT_INSTAGRAM_TEMPLATE);
   const [twitterTemplate, setTwitterTemplate] = useState(DEFAULT_TWITTER_TEMPLATE);
+  const [linkedinTemplate, setLinkedinTemplate] = useState(DEFAULT_LINKEDIN_TEMPLATE);
   const [emailImages, setEmailImages] = useState([]);
   const [smsConsent, setSmsConsent] = useState(true);
-
+  const [activeTemplateTab, setActiveTemplateTab] = useState('email');
+  
   // ============================================================================
-  // ✅ MULTI-CHANNEL TRACKING STATES (WHATSAPP, SMS, CALL, EMAIL)
+  // CONTACT TRACKING STATES (Using custom hook)
   // ============================================================================
-  const [lastSent, setLastSent] = useState({}); // Email tracking
-  const [lastWhatsAppSent, setLastWhatsAppSent] = useState({}); // WhatsApp tracking
-  const [lastSMSSent, setLastSMSSent] = useState({}); // SMS tracking
-  const [lastCallMade, setLastCallMade] = useState({}); // Call tracking
-  const [contactedChannels, setContactedChannels] = useState({}); // Track which channels used per contact
-
+  const {
+    contactHistory,
+    loading: loadingContactHistory,
+    error: contactHistoryError,
+    updateContact,
+    canContact,
+    getContactSummary,
+    setContactHistory
+  } = useContactTracking(user?.uid);
+  
+  // Legacy tracking states (for backward compatibility)
+  const [lastSent, setLastSent] = useState({});
+  const [lastWhatsAppSent, setLastWhatsAppSent] = useState({});
+  const [lastSMSSent, setLastSMSSent] = useState({});
+  const [lastCallMade, setLastCallMade] = useState({});
+  const [contactedChannels, setContactedChannels] = useState({});
+  const [manualContactStatus, setManualContactStatus] = useState({});
+  
+  // ============================================================================
+  // QUOTA MANAGEMENT (Using custom hook)
+  // ============================================================================
+  const {
+    quotas,
+    loading: loadingQuotas,
+    canUse,
+    incrementQuota,
+    setQuotas
+  } = useDailyQuotas(user?.uid);
+  
+  const [dailyEmailCount, setDailyEmailCount] = useState(0);
+  const [dailyWhatsAppCount, setDailyWhatsAppCount] = useState(0);
+  const [dailySMSCount, setDailySMSCount] = useState(0);
+  const [dailyCallCount, setDailyCallCount] = useState(0);
+  const [loadingDailyCount, setLoadingDailyCount] = useState(false);
+  
+  // ============================================================================
+  // LEAD SCORING (Using custom hook)
+  // ============================================================================
+  const {
+    scores: leadScores,
+    calculateScore,
+    updateScore,
+    setScores: setLeadScores
+  } = useLeadScoring();
+  
   // ============================================================================
   // ANALYTICS & METRICS STATES
   // ============================================================================
   const [clickStats, setClickStats] = useState({});
   const [dealStage, setDealStage] = useState({});
   const [pipelineValue, setPipelineValue] = useState(0);
-  const [abResults, setAbResults] = useState({ a: { opens: 0, clicks: 0, sent: 0 }, b: { opens: 0, clicks: 0, sent: 0 } });
-  const [dailyEmailCount, setDailyEmailCount] = useState(0);
-  const [dailyWhatsAppCount, setDailyWhatsAppCount] = useState(0);
-  const [loadingDailyCount, setLoadingDailyCount] = useState(false);
+  const [abResults, setAbResults] = useState({ 
+    a: { opens: 0, clicks: 0, sent: 0, replied: 0 }, 
+    b: { opens: 0, clicks: 0, sent: 0, replied: 0 } 
+  });
   const [advancedMetrics, setAdvancedMetrics] = useState({
     avgDaysToFirstReply: 0,
     conversionFunnel: [],
@@ -321,13 +1045,17 @@ export default function Dashboard() {
     bestPerformingTemplate: null,
     estimatedMonthlyRevenue: 0
   });
-
+  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
+  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
+  
   // ============================================================================
   // SEND & STATUS STATES
   // ============================================================================
   const [isSending, setIsSending] = useState(false);
   const [status, setStatus] = useState('');
-
+  const [statusType, setStatusType] = useState('info'); // info, success, error, warning
+  const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
+  
   // ============================================================================
   // FOLLOW-UP STATES
   // ============================================================================
@@ -346,36 +1074,11 @@ export default function Dashboard() {
     awaitingReply: 0,
     interestedLeads: 0
   });
-  const [followUpTemplates, setFollowUpTemplates] = useState([
-    {
-      id: 'followup_1',
-      name: 'Follow-Up 1 (Day 2)',
-      channel: 'email',
-      enabled: true,
-      delayDays: 2,
-      subject: 'Quick question for {{business_name}}',
-      body: FOLLOW_UP_1.body
-    },
-    {
-      id: 'followup_2',
-      name: 'Follow-Up 2 (Day 5)',
-      channel: 'email',
-      enabled: true,
-      delayDays: 5,
-      subject: '{{business_name}}, a quick offer (no strings)',
-      body: FOLLOW_UP_2.body
-    },
-    {
-      id: 'followup_3',
-      name: 'Breakup Email (Day 7)',
-      channel: 'email',
-      enabled: true,
-      delayDays: 7,
-      subject: 'Closing the loop',
-      body: FOLLOW_UP_3.body
-    }
-  ]);
-
+  const [followUpTemplates, setFollowUpTemplates] = useState(DEFAULT_FOLLOW_UP_TEMPLATES);
+  const [followUpTemplate, setFollowUpTemplate] = useState('auto');
+  const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState('');
+  
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
   // ============================================================================
@@ -386,12 +1089,8 @@ export default function Dashboard() {
   const [sendTimeOptimization, setSendTimeOptimization] = useState(null);
   const [predictiveScores, setPredictiveScores] = useState({});
   const [sentimentAnalysis, setSentimentAnalysis] = useState({});
-  const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
   const [smartFollowUpSuggestions, setSmartFollowUpSuggestions] = useState({});
-  const [followUpTemplate, setFollowUpTemplate] = useState('auto');
   const [followUpTargeting, setFollowUpTargeting] = useState('ready');
-  const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
-  const [scheduledTime, setScheduledTime] = useState('');
   const [batchSize, setBatchSize] = useState(50);
   const [followUpAnalytics, setFollowUpAnalytics] = useState({
     totalFollowUpsSent: 0,
@@ -399,7 +1098,7 @@ export default function Dashboard() {
     bestTemplate: 'auto',
     bestTimeToSend: 'afternoon'
   });
-
+  
   // ============================================================================
   // CALL TRACKING STATES
   // ============================================================================
@@ -407,28 +1106,105 @@ export default function Dashboard() {
   const [loadingCallHistory, setLoadingCallHistory] = useState(false);
   const [showCallHistoryModal, setShowCallHistoryModal] = useState(false);
   const [activeCallStatus, setActiveCallStatus] = useState(null);
-
+  
   // ============================================================================
   // MULTI-CHANNEL MODAL STATES
   // ============================================================================
   const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
   const [isMultiChannelFullscreen, setIsMultiChannelFullscreen] = useState(false);
-
+  const [multiChannelView, setMultiChannelView] = useState('grid'); // grid, list
+  const [multiChannelFilter, setMultiChannelFilter] = useState('all');
+  
   // ============================================================================
   // SEARCH & FILTER STATES
   // ============================================================================
   const [searchQuery, setSearchQuery] = useState('');
   const [contactFilter, setContactFilter] = useState('all');
   const [sortBy, setSortBy] = useState('score');
-  const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
-
+  const [sortOrder, setSortOrder] = useState('desc'); // asc, desc
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [currentPage, setCurrentPage] = useState(1);
+  
   // ============================================================================
-  // ✅ HELPER: Check if contact was reached on ANY channel
+  // NOTIFICATION STATES
+  // ============================================================================
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  
+  // ============================================================================
+  // SETTINGS & PREFERENCES STATES
+  // ============================================================================
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [userPreferences, setUserPreferences] = useState({
+    theme: 'dark',
+    notificationsEnabled: true,
+    autoSaveEnabled: true,
+    confirmBeforeSend: true,
+    defaultChannel: 'email',
+    timezone: 'Asia/Colombo'
+  });
+  
+  // ============================================================================
+  // BACKUP & EXPORT STATES
+  // ============================================================================
+  const [lastBackup, setLastBackup] = useState(null);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  
+  // ============================================================================
+  // REF FOR AUTO-SAVE
+  // ============================================================================
+  const autoSaveTimeoutRef = useRef(null);
+  
+  // ============================================================================
+  // NOTIFICATION HELPER
+  // ============================================================================
+  const addNotification = useCallback((message, type = 'info', duration = CONFIG.NOTIFICATION_DURATION_MS) => {
+    const id = generateId();
+    const notification = {
+      id,
+      message,
+      type,
+      createdAt: new Date().toISOString(),
+      read: false
+    };
+    
+    setNotifications(prev => [notification, ...prev].slice(0, CONFIG.MAX_NOTIFICATIONS));
+    
+    if (duration > 0) {
+      setTimeout(() => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+      }, duration);
+    }
+    
+    return id;
+  }, []);
+  
+  const markNotificationRead = useCallback((id) => {
+    setNotifications(prev => prev.map(n => 
+      n.id === id ? { ...n, read: true } : n
+    ));
+  }, []);
+  
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
+  
+  // ============================================================================
+  // HELPER: Check if contact was reached on ANY channel
   // ============================================================================
   const isContactedOnAnyChannel = useCallback((contact) => {
     if (!contact) return false;
     const key = contact.email || contact.phone;
     if (!key) return false;
+    
+    // Check manual contact status first
+    if (manualContactStatus[key]?.contacted) return true;
+    
+    // Check contact history from hook
+    const summary = getContactSummary(key);
+    if (summary.contacted) return true;
+    
+    // Check legacy tracking (backward compatibility)
     return !!(
       lastSent[key] ||
       lastWhatsAppSent[key] ||
@@ -436,62 +1212,90 @@ export default function Dashboard() {
       lastCallMade[key] ||
       (contactedChannels[key] && contactedChannels[key].length > 0)
     );
-  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels]);
-
+  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels, manualContactStatus, getContactSummary]);
+  
   // ============================================================================
-  // ✅ HELPER: Get all contact attempts for a contact
+  // HELPER: Get all contact attempts for a contact
   // ============================================================================
   const getContactHistory = useCallback((contact) => {
-    if (!contact) return { email: null, whatsapp: null, sms: null, call: null, channels: [] };
+    if (!contact) return { 
+      email: null, 
+      whatsapp: null, 
+      sms: null, 
+      call: null, 
+      channels: [],
+      totalContacts: 0,
+      lastContacted: null
+    };
+    
     const key = contact.email || contact.phone;
+    const summary = getContactSummary(key);
+    const manual = manualContactStatus[key];
+    
     return {
       email: lastSent[key] ? new Date(lastSent[key]) : null,
       whatsapp: lastWhatsAppSent[key] ? new Date(lastWhatsAppSent[key]) : null,
       sms: lastSMSSent[key] ? new Date(lastSMSSent[key]) : null,
       call: lastCallMade[key] ? new Date(lastCallMade[key]) : null,
-      channels: contactedChannels[key] || []
+      channels: contactedChannels[key] || summary.channels || [],
+      totalContacts: summary.totalContacts || 0,
+      lastContacted: summary.lastContacted || manual?.lastContacted || null,
+      manuallyMarked: manual?.contacted || false
     };
-  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels]);
-
+  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels, getContactSummary, manualContactStatus]);
+  
   // ============================================================================
-  // ✅ HELPER: Check if safe to contact on specific channel
+  // HELPER: Check if safe to contact on specific channel
   // ============================================================================
-  const isSafeToContactOnChannel = useCallback((contact, channel, minDaysBetween = 2) => {
-    if (!contact) return true;
+  const isSafeToContactOnChannel = useCallback((contact, channel, minDaysBetween = CONFIG.MIN_DAYS_BETWEEN_CONTACT) => {
+    if (!contact) return { safe: true, reason: 'No contact' };
+    
     const key = contact.email || contact.phone;
-    if (!key) return true;
-    const now = new Date();
-    let lastContactDate = null;
+    if (!key) return { safe: true, reason: 'No contact key' };
     
-    if (channel === 'email') lastContactDate = lastSent[key];
-    else if (channel === 'whatsapp') lastContactDate = lastWhatsAppSent[key];
-    else if (channel === 'sms') lastContactDate = lastSMSSent[key];
-    else if (channel === 'call') lastContactDate = lastCallMade[key];
+    // Check manual override
+    if (manualContactStatus[key]?.blocked) {
+      return { safe: false, reason: 'Manually blocked' };
+    }
     
-    if (!lastContactDate) return true;
+    // Use contact tracking hook
+    const canContactResult = canContact(key, channel, minDaysBetween);
     
-    const daysSince = (now - new Date(lastContactDate)) / (1000 * 60 * 60 * 24);
-    return daysSince >= minDaysBetween;
-  }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade]);
-
+    return {
+      safe: canContactResult.canContact,
+      reason: canContactResult.reason,
+      daysSince: canContactResult.daysSince,
+      lastContact: canContactResult.lastContact
+    };
+  }, [canContact, manualContactStatus]);
+  
   // ============================================================================
-  // ✅ HELPER: Check if phone is a 077 priority number (formatted as 9477...)
+  // HELPER: Check if phone is a 077 priority number (formatted as 9477...)
   // ============================================================================
   const isPriorityPhone = useCallback((phone) => {
-    return phone && phone.toString().startsWith('9477');
+    if (!phone) return false;
+    const cleaned = phone.toString().replace(/\D/g, '');
+    return cleaned.startsWith('9477') || cleaned.startsWith('9476') || cleaned.startsWith('9475');
   }, []);
-
+  
   // ============================================================================
-  // ✅ HELPER: Get recommended channel based on engagement
+  // HELPER: Get recommended channel based on engagement
   // ============================================================================
   const getRecommendedChannel = useCallback((contact) => {
     if (!contact) return 'email';
+    
     const history = getContactHistory(contact);
+    const key = contact.email || contact.phone;
+    const canContactEmail = isSafeToContactOnChannel(contact, 'email');
+    const canContactWhatsApp = isSafeToContactOnChannel(contact, 'whatsapp');
+    const canContactSMS = isSafeToContactOnChannel(contact, 'sms');
+    const canContactCall = isSafeToContactOnChannel(contact, 'call');
+    
     const scores = {
-      email: contact.email ? (leadScores[contact.email] || 50) : 0,
-      whatsapp: contact.phone ? 60 : 0,
-      sms: contact.phone ? 50 : 0,
-      call: contact.phone ? 70 : 0
+      email: contact.email && canContactEmail.safe ? (leadScores[key] || 50) : 0,
+      whatsapp: contact.phone && canContactWhatsApp.safe ? 60 : 0,
+      sms: contact.phone && canContactSMS.safe ? 50 : 0,
+      call: contact.phone && canContactCall.safe ? 70 : 0
     };
     
     // Boost channels that haven't been used yet
@@ -513,20 +1317,73 @@ export default function Dashboard() {
       .sort((a, b) => b[1] - a[1])[0];
     
     return bestChannel ? bestChannel[0] : 'email';
-  }, [leadScores, getContactHistory]);
-
+  }, [leadScores, getContactHistory, isSafeToContactOnChannel]);
+  
   // ============================================================================
-  // ✅ FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
+  // HELPER: Mark contact as manually contacted/not contacted
+  // ============================================================================
+  const markContactManually = useCallback(async (contact, contacted, reason = '') => {
+    if (!contact) return false;
+    
+    const key = contact.email || contact.phone;
+    if (!key) return false;
+    
+    try {
+      const now = new Date().toISOString();
+      const status = {
+        contacted,
+        lastContacted: contacted ? now : null,
+        reason,
+        updatedAt: now,
+        manual: true
+      };
+      
+      setManualContactStatus(prev => ({
+        ...prev,
+        [key]: status
+      }));
+      
+      // Save to Firebase
+      if (user?.uid && db) {
+        const docRef = doc(db, 'manual_contact_status', `${user.uid}_${key}`);
+        await setDoc(docRef, {
+          userId: user.uid,
+          contactKey: key,
+          ...status
+        }, { merge: true });
+      }
+      
+      // Also update contact history
+      if (contacted) {
+        await updateContact(key, 'manual', { manuallyMarked: true });
+      }
+      
+      addNotification(
+        contacted ? `✅ Marked ${contact.business || key} as contacted` : `🔄 Marked ${contact.business || key} as not contacted`,
+        'success'
+      );
+      
+      return true;
+    } catch (error) {
+      console.error('Mark contact manually error:', error);
+      addNotification('❌ Failed to update contact status', 'error');
+      return false;
+    }
+  }, [user?.uid, updateContact, addNotification]);
+  
+  // ============================================================================
+  // FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
   // ============================================================================
   const getFilteredAndSortedContacts = useCallback(() => {
     let filtered = [...whatsappLinks];
     
     // Apply search
-    if (searchQuery) {
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
       filtered = filtered.filter(c =>
-        c.business?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        c.phone?.includes(searchQuery.replace(/\D/g, ''))
+        (c.business && c.business.toLowerCase().includes(query)) ||
+        (c.email && c.email.toLowerCase().includes(query)) ||
+        (c.phone && c.phone.includes(query.replace(/\D/g, '')))
       );
     }
     
@@ -541,128 +1398,152 @@ export default function Dashboard() {
       filtered = filtered.filter(c => isContactedOnAnyChannel(c));
     } else if (contactFilter === 'not-contacted') {
       filtered = filtered.filter(c => !isContactedOnAnyChannel(c));
+    } else if (contactFilter === 'hot-leads') {
+      filtered = filtered.filter(c => (leadScores[c.email] || 0) >= CONFIG.LEAD_SCORE_HOT);
+    } else if (contactFilter === 'warm-leads') {
+      filtered = filtered.filter(c => {
+        const score = leadScores[c.email] || 0;
+        return score >= CONFIG.LEAD_SCORE_WARM && score < CONFIG.LEAD_SCORE_HOT;
+      });
     }
     
-    // ✅ APPLY SORTING (Priority 1: Not Contacted, Priority 2: 077 Numbers, Priority 3: Selected Sort)
+    // Apply sorting
     filtered.sort((a, b) => {
+      const aKey = a.email || a.phone;
+      const bKey = b.email || b.phone;
+      
       const aIsContacted = isContactedOnAnyChannel(a);
       const bIsContacted = isContactedOnAnyChannel(b);
       const aIsPriority = isPriorityPhone(a.phone);
       const bIsPriority = isPriorityPhone(b.phone);
+      const aScore = leadScores[aKey] || 0;
+      const bScore = leadScores[bKey] || 0;
       
-      // 1. Force non-contacted to top, contacted to bottom
+      // Priority 1: Non-contacted first, contacted last
       if (!aIsContacted && bIsContacted) return -1;
       if (aIsContacted && !bIsContacted) return 1;
       
-      // 2. Then prioritize 077 numbers
+      // Priority 2: 077/076/075 numbers
       if (aIsPriority && !bIsPriority) return -1;
       if (!aIsPriority && bIsPriority) return 1;
       
-      // 3. If both are same priority, use existing ranking logic
+      // Priority 3: Selected sort
       if (sortBy === 'score') {
-        return (leadScores[b.email] || 0) - (leadScores[a.email] || 0);
+        return sortOrder === 'desc' ? bScore - aScore : aScore - bScore;
       } else if (sortBy === 'recent') {
-        return new Date(lastSent[b.email || b.phone] || 0) - new Date(lastSent[a.email || a.phone] || 0);
+        const aDate = new Date(lastSent[aKey] || lastWhatsAppSent[aKey] || 0);
+        const bDate = new Date(lastSent[bKey] || lastWhatsAppSent[bKey] || 0);
+        return sortOrder === 'desc' ? bDate - aDate : aDate - bDate;
       } else if (sortBy === 'name') {
-        return (a.business || '').localeCompare(b.business || '');
+        const aName = (a.business || '').toLowerCase();
+        const bName = (b.business || '').toLowerCase();
+        return sortOrder === 'desc' 
+          ? bName.localeCompare(aName) 
+          : aName.localeCompare(bName);
+      } else if (sortBy === 'added') {
+        return sortOrder === 'desc' ? b.id - a.id : a.id - b.id;
       }
+      
       return 0;
     });
     
     return filtered;
-  }, [whatsappLinks, searchQuery, contactFilter, sortBy, leadScores, lastSent, repliedLeads, isContactedOnAnyChannel, isPriorityPhone]);
-
+  }, [
+    whatsappLinks, 
+    searchQuery, 
+    contactFilter, 
+    sortBy, 
+    sortOrder, 
+    leadScores, 
+    lastSent, 
+    lastWhatsAppSent, 
+    repliedLeads, 
+    isContactedOnAnyChannel, 
+    isPriorityPhone
+  ]);
+  
   // ============================================================================
-  // ✅ PREPARE SORTED CONTACTS FOR MAIN OUTREACH LIST (CONTACTED AT BOTTOM)
+  // PAGINATED CONTACTS
+  // ============================================================================
+  const paginatedContacts = useMemo(() => {
+    const filtered = getFilteredAndSortedContacts();
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return {
+      contacts: filtered.slice(startIndex, endIndex),
+      total: filtered.length,
+      totalPages: Math.ceil(filtered.length / itemsPerPage),
+      currentPage,
+      itemsPerPage
+    };
+  }, [getFilteredAndSortedContacts, currentPage, itemsPerPage]);
+  
+  // ============================================================================
+  // PREPARE SORTED CONTACTS FOR MAIN OUTREACH LIST
   // ============================================================================
   const sortedWhatsappLinks = useMemo(() => {
     if (!whatsappLinks || whatsappLinks.length === 0) return [];
     
     return [...whatsappLinks].sort((a, b) => {
+      const aKey = a.email || a.phone;
+      const bKey = b.email || b.phone;
+      
       const aIsContacted = isContactedOnAnyChannel(a);
       const bIsContacted = isContactedOnAnyChannel(b);
       const aIsPriority = isPriorityPhone(a.phone);
       const bIsPriority = isPriorityPhone(b.phone);
+      const aScore = leadScores[aKey] || 0;
+      const bScore = leadScores[bKey] || 0;
       
       // 1. Non-contacted first, contacted last
       if (!aIsContacted && bIsContacted) return -1;
       if (aIsContacted && !bIsContacted) return 1;
       
-      // 2. Then 077 priority
+      // 2. Then 077/076/075 priority
       if (aIsPriority && !bIsPriority) return -1;
       if (!aIsPriority && bIsPriority) return 1;
       
       // 3. Fallback to score ranking
-      return (leadScores[b.email] || 0) - (leadScores[a.email] || 0);
+      return bScore - aScore;
     });
   }, [whatsappLinks, leadScores, isContactedOnAnyChannel, isPriorityPhone]);
-
+  
   // ============================================================================
-  // ✅ CALCULATE LEAD QUALITY SCORE
-  // ============================================================================
-  const calculateLeadQualityScore = useCallback((contact) => {
-    if (!contact) return 50;
-    let score = 50;
-    const contactKey = contact.email || contact.phone;
-    if (contact.email) {
-      score += 15;
-      if (leadScores[contact.email] && leadScores[contact.email] >= 75) score += 15;
-    }
-    if (contact.phone && formatForDialing(contact.phone)) score += 10;
-    const socialChannels = [contact.twitter, contact.instagram, contact.facebook, contact.youtube, contact.linkedin_company].filter(Boolean).length;
-    score += Math.min(15, socialChannels * 3);
-    if (contact.contact_confidence === 'High') score += 10;
-    else if (contact.contact_confidence === 'Medium') score += 5;
-    if (contact.linkedin_ceo || contact.linkedin_founder) score += 10;
-    if (contact.decision_maker_found === 'Yes') score += 8;
-    if (repliedLeads[contact.email]) score += 25;
-    if (lastSent[contactKey]) {
-      const daysSinceSent = (new Date() - new Date(lastSent[contactKey])) / (1000 * 60 * 60 * 24);
-      if (daysSinceSent > 7 && daysSinceSent <= 14) score += 5;
-    }
-    if (contact.company_size_indicator === 'small') score += 5;
-    if (contact.company_size_indicator === 'medium') score += 10;
-    if (contact.company_size_indicator === 'enterprise') score += 12;
-    if (contact.website) score += 5;
-    if (contact.contact_page_found === 'Yes') score += 5;
-    return Math.min(100, Math.max(0, score));
-  }, [leadScores, repliedLeads, lastSent]);
-
-  // ============================================================================
-  // ✅ CALCULATE CONVERSION FUNNEL
+  // CALCULATE CONVERSION FUNNEL
   // ============================================================================
   const calculateConversionFunnel = useCallback(() => {
+    const total = whatsappLinks.length;
+    const replied = Object.values(repliedLeads).filter(Boolean).length;
+    const contacted = whatsappLinks.filter(c => isContactedOnAnyChannel(c)).length;
+    
     const stages = {
-      'sent': whatsappLinks.length,
-      'opened': Math.round(whatsappLinks.length * 0.35),
-      'clicked': Math.round(whatsappLinks.length * 0.12),
-      'replied': Object.values(repliedLeads).filter(Boolean).length,
-      'demo': Math.round(Object.values(repliedLeads).filter(Boolean).length * 0.40),
-      'closed': Math.round(Object.values(repliedLeads).filter(Boolean).length * 0.15)
+      total,
+      contacted,
+      replied,
+      demo: Math.round(replied * 0.40),
+      closed: Math.round(replied * 0.15)
     };
+    
     return {
       stages,
       conversionRate: {
-        openRate: Math.round((stages.opened / stages.sent) * 100) || 0,
-        clickRate: Math.round((stages.clicked / stages.sent) * 100) || 0,
-        replyRate: Math.round((stages.replied / stages.sent) * 100) || 0,
-        demoRate: Math.round((stages.demo / stages.replied) * 100) || 0,
-        closeRate: Math.round((stages.closed / stages.demo) * 100) || 0
+        contactRate: total > 0 ? Math.round((contacted / total) * 100) : 0,
+        replyRate: contacted > 0 ? Math.round((replied / contacted) * 100) : 0,
+        demoRate: replied > 0 ? Math.round((stages.demo / replied) * 100) : 0,
+        closeRate: stages.demo > 0 ? Math.round((stages.closed / stages.demo) * 100) : 0
       }
     };
-  }, [whatsappLinks, repliedLeads]);
-
+  }, [whatsappLinks, repliedLeads, isContactedOnAnyChannel]);
+  
   // ============================================================================
-  // ✅ CALCULATE REVENUE FORECASTS
+  // CALCULATE REVENUE FORECASTS
   // ============================================================================
   const calculateRevenueForecasts = useCallback(() => {
-    const avgDealValue = 5000;
-    const closeRate = 0.15;
-    const demoToCloseRate = 0.40;
-    const replyToDemoRate = 0.40;
+    const avgDealValue = CONFIG.DEFAULT_AVG_DEAL_VALUE;
     const replies = Object.values(repliedLeads).filter(Boolean).length;
-    const demoOpportunities = Math.ceil(replies * replyToDemoRate);
-    const expectedClosures = Math.ceil(demoOpportunities * demoToCloseRate);
+    const demoOpportunities = Math.ceil(replies * CONFIG.DEFAULT_DEMO_RATE);
+    const expectedClosures = Math.ceil(demoOpportunities * CONFIG.DEFAULT_CLOSE_RATE);
+    
     return {
       currentPipeline: replies * avgDealValue,
       demoOpportunities: demoOpportunities * avgDealValue,
@@ -676,9 +1557,9 @@ export default function Dashboard() {
       }
     };
   }, [repliedLeads]);
-
+  
   // ============================================================================
-  // ✅ SEGMENT LEADS
+  // SEGMENT LEADS
   // ============================================================================
   const segmentLeads = useCallback(() => {
     const segments = {
@@ -688,121 +1569,44 @@ export default function Dashboard() {
       cold: [],
       inactive: []
     };
+    
     whatsappLinks.forEach(contact => {
-      const score = leadScores[contact.email] || 0;
+      const key = contact.email || contact.phone;
+      const score = leadScores[key] || 0;
       const replied = repliedLeads[contact.email];
-      const daysSinceSent = lastSent[contact.email] ?
-        (new Date() - new Date(lastSent[contact.email])) / (1000 * 60 * 60 * 24) : 999;
+      const contacted = isContactedOnAnyChannel(contact);
+      const daysSinceContact = contacted ? 
+        daysBetween(getContactHistory(contact).lastContacted, new Date()) : 999;
+      
       if (replied) {
         segments.veryHot.push(contact);
-      } else if (score >= 80) {
+      } else if (score >= CONFIG.LEAD_SCORE_HOT) {
         segments.hot.push(contact);
-      } else if (score >= 60 && daysSinceSent <= 3) {
+      } else if (score >= CONFIG.LEAD_SCORE_WARM && daysSinceContact <= 3) {
         segments.warm.push(contact);
-      } else if (score >= 40 && daysSinceSent <= 7) {
+      } else if (score >= 40 && daysSinceContact <= 7) {
         segments.cold.push(contact);
       } else {
         segments.inactive.push(contact);
       }
     });
+    
     return segments;
-  }, [whatsappLinks, leadScores, repliedLeads, lastSent]);
-
+  }, [whatsappLinks, leadScores, repliedLeads, isContactedOnAnyChannel, getContactHistory]);
+  
   // ============================================================================
-  // ✅ GET SAFE FOLLOW-UP CANDIDATES
-  // ============================================================================
-  const getSafeFollowUpCandidates = useCallback(() => {
-    const candidates = whatsappLinks
-      .filter(contact => contact.email && isSafeToFollowUp(contact.email))
-      .map(contact => {
-        const strategy = getOptimalFollowUpStrategy(contact.email);
-        const followUpCount = followUpHistory[contact.email]?.count || 0;
-        const daysSinceSent = lastSent[contact.email] ?
-          (new Date() - new Date(lastSent[contact.email])) / (1000 * 60 * 60 * 24) : 999;
-        return {
-          ...contact,
-          strategy,
-          followUpCount,
-          daysSinceSent,
-          urgencyScore: 100 - (daysSinceSent * 2),
-          safetyScore: (3 - followUpCount) * 33.33
-        };
-      })
-      .sort((a, b) => b.urgencyScore - a.urgencyScore);
-    return candidates;
-  }, [whatsappLinks, followUpHistory, lastSent]);
-
-  // ============================================================================
-  // ✅ CHECK IF SAFE TO FOLLOW UP
-  // ============================================================================
-  const isSafeToFollowUp = useCallback((email) => {
-    if (!email) return false;
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const followUpCount = followUpHistory[email]?.count || 0;
-    const hasReplied = repliedLeads[email];
-    const rules = {
-      isWaitingForReply: !hasReplied && daysSinceSent >= 2,
-      notOverContacted: followUpCount < 3,
-      notTooRecent: daysSinceSent >= 2,
-      withinCampaignWindow: daysSinceSent <= 30
-    };
-    return rules.isWaitingForReply && rules.notOverContacted && rules.notTooRecent && rules.withinCampaignWindow;
-  }, [lastSent, followUpHistory, repliedLeads]);
-
-  // ============================================================================
-  // ✅ GET OPTIMAL FOLLOW-UP STRATEGY
-  // ============================================================================
-  const getOptimalFollowUpStrategy = useCallback((email) => {
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const followUpCount = followUpHistory[email]?.count || 0;
-    const score = leadScores[email] || 50;
-    if (daysSinceSent < 2) {
-      return { optimalDay: 2, reason: 'Too soon - let settle', templateType: 'none' };
-    }
-    if (daysSinceSent >= 2 && daysSinceSent < 5) {
-      return { optimalDay: 2, reason: '2-5 days: First follow-up (gentle)', templateType: 'soft' };
-    }
-    if (daysSinceSent >= 5 && daysSinceSent < 7) {
-      return { optimalDay: 5, reason: '5-7 days: Value-first follow-up', templateType: 'aggressive' };
-    }
-    if (daysSinceSent >= 7 && daysSinceSent < 14) {
-      return { optimalDay: 7, reason: '7-14 days: Final push (breakup)', templateType: 'urgent' };
-    }
-    if (daysSinceSent >= 14 && daysSinceSent <= 30) {
-      return { optimalDay: 14, reason: '14+ days: Win-back attempt', templateType: 'question' };
-    }
-    return { optimalDay: 999, reason: 'Campaign window closed', templateType: 'none' };
-  }, [lastSent, followUpHistory, leadScores]);
-
-  // ============================================================================
-  // ✅ GET ENGAGEMENT HEALTH
-  // ============================================================================
-  const getEngagementHealth = useCallback((email) => {
-    const daysSinceSent = lastSent[email] ?
-      (new Date() - new Date(lastSent[email])) / (1000 * 60 * 60 * 24) : 999;
-    const score = leadScores[email] || 50;
-    const hasReplied = repliedLeads[email];
-    if (hasReplied) return { status: '✅ Engaged', color: 'green', urgency: 'low' };
-    if (daysSinceSent < 2) return { status: '⏳ Fresh', color: 'blue', urgency: 'low' };
-    if (daysSinceSent < 5) return { status: '🟡 Warming', color: 'yellow', urgency: 'medium' };
-    if (daysSinceSent < 7) return { status: '⚠️ Cooling', color: 'orange', urgency: 'high' };
-    if (daysSinceSent <= 30) return { status: '🔴 Cold', color: 'red', urgency: 'critical' };
-    return { status: '❌ Dead', color: 'gray', urgency: 'none' };
-  }, [lastSent, leadScores, repliedLeads]);
-
-  // ============================================================================
-  // ✅ GET NEW LEADS (NOT YET EMAILED)
+  // GET NEW LEADS (NOT YET EMAILED)
   // ============================================================================
   const getNewLeads = useCallback(() => {
     if (!whatsappLinks || whatsappLinks.length === 0) return [];
+    
     const sentEmailsSet = new Set();
     sentLeads.forEach(lead => {
       if (lead.email) {
         sentEmailsSet.add(lead.email.toLowerCase().trim());
       }
     });
+    
     const newLeads = whatsappLinks
       .filter(contact => {
         if (!contact.email) return false;
@@ -813,36 +1617,55 @@ export default function Dashboard() {
         ...contact,
         email: contact.email.toLowerCase().trim()
       }));
+    
     return newLeads.sort((a, b) => {
       const scoreA = leadScores[a.email] || 50;
       const scoreB = leadScores[b.email] || 50;
       return scoreB - scoreA;
     });
   }, [whatsappLinks, sentLeads, leadScores]);
-
+  
   // ============================================================================
   // GOOGLE OAUTH SCRIPT LOADER
   // ============================================================================
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
     if (window.google?.accounts?.oauth2?.initTokenClient) {
       setIsGoogleLoaded(true);
       return;
     }
+    
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.onload = () => setIsGoogleLoaded(true);
+    script.onerror = () => {
+      console.error('Failed to load Google OAuth script');
+      addNotification('Failed to load Google OAuth. Please refresh.', 'error');
+    };
     document.head.appendChild(script);
-    return () => document.head.removeChild(script);
-  }, []);
-
+    
+    return () => {
+      if (document.head.contains(script)) {
+        document.head.removeChild(script);
+      }
+    };
+  }, [addNotification]);
+  
   // ============================================================================
-  // ✅ AUTH STATE LISTENER WITH PROPER NULL CHECKS
+  // AUTH STATE LISTENER
   // ============================================================================
   useEffect(() => {
+    if (!auth) {
+      setLoadingAuth(false);
+      return;
+    }
+    
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
+        setSenderEmail(user.email || '');
         loadSettings(user.uid);
         loadClickStats();
         loadDeals();
@@ -850,98 +1673,176 @@ export default function Dashboard() {
         loadRepliedAndFollowUp();
         loadDailyEmailCount();
         loadSendTimeOptimization();
+        loadManualContactStatus(user.uid);
+        addNotification(`Welcome back, ${user.displayName || user.email}!`, 'success', 3000);
       } else {
         setUser(null);
+        setSenderEmail('');
       }
       setLoadingAuth(false);
     });
+    
     return () => unsubscribe();
-  }, []);
-
+  }, [auth, addNotification]);
+  
+  // ============================================================================
+  // LOAD MANUAL CONTACT STATUS FROM FIREBASE
+  // ============================================================================
+  const loadManualContactStatus = async (userId) => {
+    if (!userId || !db) return;
+    
+    try {
+      const q = query(
+        collection(db, 'manual_contact_status'),
+        where('userId', '==', userId)
+      );
+      const snapshot = await getDocs(q);
+      
+      const status = {};
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        status[data.contactKey] = data;
+      });
+      
+      setManualContactStatus(status);
+    } catch (error) {
+      console.error('Load manual contact status error:', error);
+    }
+  };
+  
   // ============================================================================
   // AUTO-SAVE SETTINGS
   // ============================================================================
   const saveSettings = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db || !userPreferences.autoSaveEnabled) return;
+    
     try {
       const docRef = doc(db, 'users', user.uid, 'settings', 'templates');
       await setDoc(docRef, {
         senderName,
+        senderEmail,
         templateA,
         templateB,
         whatsappTemplate,
         smsTemplate,
         instagramTemplate,
         twitterTemplate,
+        linkedinTemplate,
         followUpTemplates,
         fieldMappings,
         abTestMode,
-        smsConsent
+        smsConsent,
+        userPreferences,
+        lastSaved: new Date().toISOString()
       }, { merge: true });
+      
+      addNotification('Settings auto-saved', 'success', 2000);
     } catch (error) {
       console.warn('Failed to save settings:', error);
+      addNotification('Failed to auto-save settings', 'warning');
     }
-  }, [user?.uid, senderName, templateA, templateB, whatsappTemplate, smsTemplate, instagramTemplate, twitterTemplate, followUpTemplates, fieldMappings, abTestMode, smsConsent]);
-
+  }, [
+    user?.uid, 
+    senderName, 
+    senderEmail,
+    templateA, 
+    templateB, 
+    whatsappTemplate, 
+    smsTemplate, 
+    instagramTemplate, 
+    twitterTemplate,
+    linkedinTemplate,
+    followUpTemplates, 
+    fieldMappings, 
+    abTestMode, 
+    smsConsent,
+    userPreferences,
+    addNotification
+  ]);
+  
+  // Debounced auto-save
   useEffect(() => {
-    if (!user?.uid) return;
-    const handler = setTimeout(() => saveSettings(), 1500);
-    return () => clearTimeout(handler);
-  }, [saveSettings, user?.uid]);
-
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      saveSettings();
+    }, CONFIG.AUTO_SAVE_DELAY_MS);
+    
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [saveSettings]);
+  
   // ============================================================================
   // LOAD SETTINGS FROM FIREBASE
   // ============================================================================
   const loadSettings = async (userId) => {
-    if (!userId) return;
+    if (!userId || !db) return;
+    
     try {
       const docRef = doc(db, 'users', userId, 'settings', 'templates');
       const snap = await getDoc(docRef);
+      
       if (snap.exists()) {
         const data = snap.data();
-        setSenderName(data.senderName || 'Team');
+        setSenderName(data.senderName || '');
+        setSenderEmail(data.senderEmail || '');
         setTemplateA(data.templateA || DEFAULT_TEMPLATE_A);
         setTemplateB(data.templateB || DEFAULT_TEMPLATE_B);
         setWhatsappTemplate(data.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE);
         setSmsTemplate(data.smsTemplate || DEFAULT_SMS_TEMPLATE);
         setInstagramTemplate(data.instagramTemplate || DEFAULT_INSTAGRAM_TEMPLATE);
         setTwitterTemplate(data.twitterTemplate || DEFAULT_TWITTER_TEMPLATE);
-        setFollowUpTemplates(data.followUpTemplates || followUpTemplates);
+        setLinkedinTemplate(data.linkedinTemplate || DEFAULT_LINKEDIN_TEMPLATE);
+        setFollowUpTemplates(data.followUpTemplates || DEFAULT_FOLLOW_UP_TEMPLATES);
         setFieldMappings(data.fieldMappings || {});
         setAbTestMode(data.abTestMode || false);
-        setSmsConsent(data.smsConsent || false);
+        setSmsConsent(data.smsConsent !== undefined ? data.smsConsent : true);
+        setUserPreferences(data.userPreferences || userPreferences);
+        
+        addNotification('Settings loaded successfully', 'success', 2000);
       }
     } catch (error) {
       console.warn('Failed to load settings:', error);
+      addNotification('Using default settings', 'info', 2000);
     }
   };
-
+  
   // ============================================================================
   // LOAD CLICK STATS FROM FIREBASE
   // ============================================================================
   const loadClickStats = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db) return;
+    
     try {
       const q = query(collection(db, 'clicks'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
+      
       const stats = {};
       snapshot.forEach(doc => {
         stats[doc.id] = doc.data();
       });
+      
       setClickStats(stats);
     } catch (e) {
       console.warn('Click stats load failed:', e);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // LOAD A/B TEST RESULTS FROM FIREBASE
   // ============================================================================
   const loadAbResults = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db) return;
+    
     try {
       const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
+      
       if (!snapshot.empty) {
         setAbResults(snapshot.docs[0].data());
       }
@@ -949,70 +1850,115 @@ export default function Dashboard() {
       console.warn('AB results load failed:', e);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // LOAD DEALS FROM FIREBASE
   // ============================================================================
   const loadDeals = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db) return;
+    
     try {
       const q = query(collection(db, 'deals'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
+      
       const stages = {};
       let totalValue = 0;
+      
       snapshot.forEach(doc => {
         const data = doc.data();
         stages[data.email] = data.stage || 'new';
-        if (data.stage !== 'won') totalValue += 5000;
+        if (data.stage !== 'won') {
+          totalValue += CONFIG.DEFAULT_AVG_DEAL_VALUE;
+        }
       });
+      
       setDealStage(stages);
       setPipelineValue(totalValue);
     } catch (e) {
       console.warn('Deals load failed:', e);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // LOAD REPLIED LEADS AND FOLLOW-UP FROM FIREBASE
   // ============================================================================
   const loadRepliedAndFollowUp = useCallback(async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db) return;
+    
     try {
       const q = query(collection(db, 'sent_emails'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
+      
       const repliedMap = {};
       const followUpMap = {};
+      const history = {};
       const now = new Date();
+      
       snapshot.forEach(doc => {
         const data = doc.data();
-        if (data.replied) repliedMap[data.to] = true;
-        else if (data.followUpAt && new Date(data.followUpAt) <= now) {
+        
+        if (data.replied) {
+          repliedMap[data.to] = true;
+        }
+        
+        if (data.followUpAt && new Date(data.followUpAt) <= now) {
           followUpMap[data.to] = true;
         }
+        
+        history[data.to] = {
+          count: data.followUpCount || 0,
+          lastFollowUpAt: data.lastFollowUpAt || null,
+          dates: data.followUpDates || []
+        };
       });
+      
       setRepliedLeads(repliedMap);
       setFollowUpLeads(followUpMap);
+      setFollowUpHistory(history);
+      
+      // Calculate follow-up stats
+      const leads = snapshot.docs.map(doc => doc.data());
+      const replied = leads.filter(l => l.replied).length;
+      const followedUp = leads.filter(l => l.followUpCount > 0).length;
+      const readyForFU = leads.filter(l => !l.replied && l.followUpAt && new Date(l.followUpAt) <= now).length;
+      const awaiting = leads.filter(l => !l.replied && (!l.followUpAt || new Date(l.followUpAt) > now)).length;
+      const interested = leads.filter(l => l.seemsInterested && !l.replied).length;
+      
+      setFollowUpStats({
+        totalSent: leads.length,
+        totalReplied: replied,
+        readyForFollowUp: readyForFU,
+        alreadyFollowedUp: followedUp,
+        awaitingReply: awaiting,
+        interestedLeads: interested
+      });
     } catch (e) {
       console.warn('Replied/Follow-up load failed:', e);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // LOAD DAILY EMAIL COUNT FROM API
   // ============================================================================
   const loadDailyEmailCount = useCallback(async () => {
     if (!user?.uid) return;
+    
     setLoadingDailyCount(true);
+    
     try {
       const res = await fetch('/api/get-daily-count', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
+      
       const data = await res.json();
+      
       if (res.ok) {
         setDailyEmailCount(data.count || 0);
         setDailyWhatsAppCount(data.whatsappCount || 0);
+        setDailySMSCount(data.smsCount || 0);
+        setDailyCallCount(data.callCount || 0);
       }
     } catch (err) {
       console.error('Load daily count error:', err);
@@ -1020,19 +1966,22 @@ export default function Dashboard() {
       setLoadingDailyCount(false);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // LOAD SEND TIME OPTIMIZATION FROM API
   // ============================================================================
   const loadSendTimeOptimization = useCallback(async () => {
     if (!user?.uid) return;
+    
     try {
       const res = await fetch('/api/ai-send-time-optimizer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
+      
       const data = await res.json();
+      
       if (res.ok) {
         setSendTimeOptimization(data);
       }
@@ -1040,32 +1989,54 @@ export default function Dashboard() {
       console.error('Send time optimization error:', err);
     }
   }, [user?.uid]);
-
+  
   // ============================================================================
   // REQUEST GMAIL OAUTH TOKEN
   // ============================================================================
   const requestGmailToken = () => {
     return new Promise((resolve, reject) => {
-      if (typeof window === 'undefined') return reject('Browser only');
+      if (typeof window === 'undefined') {
+        reject('Browser only');
+        return;
+      }
+      
       const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-      if (!clientId) return reject('Google Client ID missing');
-      if (!window.google?.accounts?.oauth2) return reject('Google not loaded');
+      
+      if (!clientId) {
+        reject('Google Client ID missing');
+        return;
+      }
+      
+      if (!window.google?.accounts?.oauth2) {
+        reject('Google OAuth not loaded');
+        return;
+      }
       
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
-        callback: (res) => res.access_token ? resolve(res.access_token) : reject('No token'),
-        error_callback: reject
+        callback: (res) => {
+          if (res.access_token) {
+            resolve(res.access_token);
+          } else {
+            reject('No access token received');
+          }
+        },
+        error_callback: (err) => {
+          reject(err.message || 'OAuth error');
+        }
       });
+      
       client.requestAccessToken();
     });
   };
-
+  
   // ============================================================================
   // UPDATE DEAL STAGE IN FIREBASE
   // ============================================================================
   const updateDealStage = async (email, stage) => {
-    if (!user?.uid || !email) return;
+    if (!user?.uid || !email || !db) return;
+    
     try {
       const dealRef = doc(db, 'deals', email);
       await setDoc(dealRef, {
@@ -1073,103 +2044,151 @@ export default function Dashboard() {
         email,
         stage,
         lastUpdate: new Date().toISOString(),
-        value: 5000
+        value: CONFIG.DEFAULT_AVG_DEAL_VALUE
       }, { merge: true });
+      
       setDealStage(prev => ({ ...prev, [email]: stage }));
+      
       if (stage === 'won') {
-        setPipelineValue(prev => prev - 5000);
+        setPipelineValue(prev => prev - CONFIG.DEFAULT_AVG_DEAL_VALUE);
+        addNotification(`🎉 Deal won: ${email}`, 'success');
       } else if (dealStage[email] === 'won') {
-        setPipelineValue(prev => prev + 5000);
+        setPipelineValue(prev => prev + CONFIG.DEFAULT_AVG_DEAL_VALUE);
       }
     } catch (e) {
       console.error('Update deal error:', e);
+      addNotification('Failed to update deal stage', 'error');
     }
   };
-
+  
   // ============================================================================
-  // ✅ WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+  // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
   // ============================================================================
   const handleSendWhatsApp = async (contact) => {
     if (!user?.uid) {
-      alert('Please sign in first');
+      addNotification('Please sign in first', 'error');
       return;
     }
+    
     if (!contact?.phone) {
-      alert('No phone number for this contact');
+      addNotification('No phone number for this contact', 'error');
       return;
     }
     
     const contactKey = contact.email || contact.phone;
+    const business = contact.business || 'Contact';
     
-    // ✅ Prevent duplicate WhatsApp
-    if (lastWhatsAppSent[contactKey]) {
-      const daysSince = (new Date() - new Date(lastWhatsAppSent[contactKey])) / (1000 * 60 * 60 * 24);
-      if (daysSince < 2) {
-        const confirmed = confirm(`⚠️ WhatsApp was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
-        if (!confirmed) return;
-      }
+    // Check quota
+    const quotaCheck = canUse('whatsapp');
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
     }
     
-    const confirmed = confirm(`Send WhatsApp to ${contact.business} at +${contact.phone}?`);
+    // Check if safe to contact
+    const safetyCheck = isSafeToContactOnChannel(contact, 'whatsapp');
+    if (!safetyCheck.safe) {
+      const confirmed = window.confirm(
+        `⚠️ ${safetyCheck.reason}\n\nSend WhatsApp anyway?`
+      );
+      if (!confirmed) return;
+    }
+    
+    const confirmed = window.confirm(
+      `Send WhatsApp to ${business} at ${formatPhoneForDisplay(contact.phone)}?`
+    );
+    
     if (!confirmed) return;
     
     try {
       const message = renderPreviewText(
         whatsappTemplate,
-        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+        { 
+          business_name: contact.business, 
+          address: contact.address || '', 
+          phone_raw: contact.phone 
+        },
         fieldMappings,
         senderName
       );
       
-      const whatsappUrl = `https://wa.me/${formatForDialing(contact.phone)}?text=${encodeURIComponent(message)}`;
+      const formattedPhone = formatForDialing(contact.phone);
+      const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+      
       window.open(whatsappUrl, '_blank');
       
-      // ✅ Track WhatsApp
-      setLastWhatsAppSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+      // Track WhatsApp
+      const now = new Date().toISOString();
+      setLastWhatsAppSent(prev => ({ ...prev, [contactKey]: now }));
       setContactedChannels(prev => ({
         ...prev,
         [contactKey]: [...(prev[contactKey] || []), 'whatsapp']
       }));
+      
+      // Update contact history
+      await updateContact(contactKey, 'whatsapp', {
+        whatsappCount: increment(1),
+        lastWhatsAppSent: now
+      });
+      
+      // Update quota
+      incrementQuota('whatsapp', 1);
       setDailyWhatsAppCount(prev => prev + 1);
       
-      if (dealStage[contactKey] === 'new') {
+      // Update deal stage
+      if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
         updateDealStage(contactKey, 'contacted');
       }
       
-      alert(`✅ WhatsApp opened for ${contact.business}!\nMessage tracked to prevent duplicates.`);
+      addNotification(`✅ WhatsApp opened for ${business}!`, 'success');
     } catch (error) {
       console.error('WhatsApp send error:', error);
-      alert(`❌ Failed to open WhatsApp: ${error.message}`);
+      addNotification(`❌ Failed to open WhatsApp: ${error.message}`, 'error');
     }
   };
-
+  
   // ============================================================================
-  // ✅ SMS SEND WITH TRACKING & DUPLICATE PREVENTION
+  // SMS SEND WITH TRACKING & DUPLICATE PREVENTION
   // ============================================================================
   const handleSendSMS = async (contact) => {
     if (!user?.uid) {
-      alert('Please sign in first');
+      addNotification('Please sign in first', 'error');
       return;
     }
     
     const contactKey = contact.email || contact.phone;
+    const business = contact.business || 'Contact';
     
-    // ✅ Prevent duplicate SMS
-    if (lastSMSSent[contactKey]) {
-      const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
-      if (daysSince < 2) {
-        const confirmed = confirm(`⚠️ SMS was sent ${Math.floor(daysSince)} days ago. Send anyway?`);
-        if (!confirmed) return;
-      }
+    // Check quota
+    const quotaCheck = canUse('sms');
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
     }
     
-    const confirmed = confirm(`Send SMS to ${contact.business} at +${contact.phone}?`);
+    // Check if safe to contact
+    const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
+    if (!safetyCheck.safe) {
+      const confirmed = window.confirm(
+        `⚠️ ${safetyCheck.reason}\n\nSend SMS anyway?`
+      );
+      if (!confirmed) return;
+    }
+    
+    const confirmed = window.confirm(
+      `Send SMS to ${business} at ${formatPhoneForDisplay(contact.phone)}?`
+    );
+    
     if (!confirmed) return;
     
     try {
       const message = renderPreviewText(
         smsTemplate,
-        { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+        { 
+          business_name: contact.business, 
+          address: contact.address || '', 
+          phone_raw: contact.phone 
+        },
         fieldMappings,
         senderName
       );
@@ -1186,75 +2205,131 @@ export default function Dashboard() {
       });
       
       const data = await response.json();
+      
       if (response.ok) {
-        alert(`✅ SMS sent to ${contact.business}!`);
-        
-        // ✅ Track SMS
-        setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+        // Track SMS
+        const now = new Date().toISOString();
+        setLastSMSSent(prev => ({ ...prev, [contactKey]: now }));
         setContactedChannels(prev => ({
           ...prev,
           [contactKey]: [...(prev[contactKey] || []), 'sms']
         }));
         
-        if (dealStage[contactKey] === 'new') {
+        // Update contact history
+        await updateContact(contactKey, 'sms', {
+          smsCount: increment(1),
+          lastSMSSent: now
+        });
+        
+        // Update quota
+        incrementQuota('sms', 1);
+        setDailySMSCount(prev => prev + 1);
+        
+        // Update deal stage
+        if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
           updateDealStage(contactKey, 'contacted');
         }
+        
+        addNotification(`✅ SMS sent to ${business}!`, 'success');
       } else {
-        alert(`❌ SMS failed: ${data.error}`);
+        addNotification(`❌ SMS failed: ${data.error}`, 'error');
       }
     } catch (error) {
       console.error('SMS send error:', error);
-      alert(`❌ Failed to send SMS: ${error.message}`);
+      addNotification(`❌ Failed to send SMS: ${error.message}`, 'error');
     }
   };
-
+  
   // ============================================================================
   // OPEN NATIVE SMS APP
   // ============================================================================
   const handleOpenNativeSMS = (contact) => {
-    if (!contact?.phone) return;
+    if (!contact?.phone) {
+      addNotification('No phone number', 'error');
+      return;
+    }
+    
     const messageBody = renderPreviewText(
       smsTemplate,
-      { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+      { 
+        business_name: contact.business, 
+        address: contact.address || '', 
+        phone_raw: contact.phone 
+      },
       fieldMappings,
       senderName
     );
+    
     let formattedPhone = contact.phone.toString().replace(/\D/g, '');
+    
     if (formattedPhone.startsWith('0') && formattedPhone.length >= 9) {
       formattedPhone = '94' + formattedPhone.slice(1);
     }
+    
     if (!formattedPhone.startsWith('+')) {
       formattedPhone = '+' + formattedPhone;
     }
-    window.location.href = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
+    
+    const smsUrl = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
+    window.location.href = smsUrl;
   };
-
+  
   // ============================================================================
   // SEND BULK SMS TO ALL CONTACTS
   // ============================================================================
   const handleSendBulkSMS = async () => {
-    if (!user?.uid || whatsappLinks.length === 0) return;
-    const confirmed = confirm(`Send SMS to ${whatsappLinks.length} contacts?`);
+    if (!user?.uid || whatsappLinks.length === 0) {
+      addNotification('No contacts available', 'error');
+      return;
+    }
+    
+    const quotaCheck = canUse('sms', whatsappLinks.length);
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Send SMS to ${whatsappLinks.length} contacts?\n\nThis will use ${whatsappLinks.length} of your daily SMS quota.`
+    );
+    
     if (!confirmed) return;
     
     let successCount = 0;
-    setStatus('📤 Sending SMS batch...');
+    let failCount = 0;
+    let skipCount = 0;
     
-    for (const contact of whatsappLinks) {
+    setStatus('📤 Sending SMS batch...');
+    setStatusType('info');
+    setIsSending(true);
+    setSendProgress({ current: 0, total: whatsappLinks.length });
+    
+    for (let i = 0; i < whatsappLinks.length; i++) {
+      const contact = whatsappLinks[i];
       const phone = formatForDialing(contact.phone);
-      if (!phone) continue;
       
-      // ✅ Check if already contacted
+      if (!phone) {
+        skipCount++;
+        continue;
+      }
+      
       const contactKey = contact.email || contact.phone;
-      if (lastSMSSent[contactKey]) {
-        const daysSince = (new Date() - new Date(lastSMSSent[contactKey])) / (1000 * 60 * 60 * 24);
-        if (daysSince < 2) continue; // Skip recently contacted
+      
+      // Check if already contacted recently
+      const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
+      if (!safetyCheck.safe) {
+        skipCount++;
+        continue;
       }
       
       try {
         const message = renderPreviewText(
           smsTemplate,
-          { business_name: contact.business, address: contact.address || '', phone_raw: contact.phone },
+          { 
+            business_name: contact.business, 
+            address: contact.address || '', 
+            phone_raw: contact.phone 
+          },
           fieldMappings,
           senderName
         );
@@ -1272,53 +2347,91 @@ export default function Dashboard() {
         
         if (response.ok) {
           successCount++;
-          setLastSMSSent(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+          
+          const now = new Date().toISOString();
+          setLastSMSSent(prev => ({ ...prev, [contactKey]: now }));
           setContactedChannels(prev => ({
             ...prev,
             [contactKey]: [...(prev[contactKey] || []), 'sms']
           }));
           
-          if (dealStage[contactKey] === 'new') {
+          await updateContact(contactKey, 'sms', {
+            smsCount: increment(1),
+            lastSMSSent: now
+          });
+          
+          if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
             updateDealStage(contactKey, 'contacted');
           }
+        } else {
+          failCount++;
         }
+        
+        setSendProgress({ current: i + 1, total: whatsappLinks.length });
       } catch (error) {
         console.error(`SMS error for ${contact.business}:`, error);
+        failCount++;
       }
+      
+      // Add small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
     }
     
+    setIsSending(false);
     setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
-    alert(`✅ SMS batch complete!\nSent: ${successCount}\nFailed: ${whatsappLinks.length - successCount}\nSkipped (recently contacted): ${whatsappLinks.length - successCount}`);
+    setStatusType('success');
+    
+    addNotification(
+      `SMS batch complete!\nSent: ${successCount}\nFailed: ${failCount}\nSkipped: ${skipCount}`,
+      successCount > 0 ? 'success' : 'error'
+    );
   };
-
+  
   // ============================================================================
   // HANDLE DIRECT CALL
   // ============================================================================
   const handleCall = (phone) => {
-    if (!phone) return;
+    if (!phone) {
+      addNotification('No phone number', 'error');
+      return;
+    }
+    
     const dialNumber = formatForDialing(phone) || phone.toString().replace(/\D/g, '');
+    
     if (typeof window !== 'undefined') {
-      if (/iPhone|Android/i.test(navigator.userAgent)) {
+      const isMobile = /iPhone|Android/i.test(navigator.userAgent);
+      
+      if (isMobile) {
         window.location.href = `tel:${dialNumber}`;
       } else {
+        // Desktop - open WhatsApp as fallback
         window.open(`https://wa.me/${dialNumber}`, '_blank');
+        addNotification('Desktop detected - opened WhatsApp instead', 'info');
       }
     }
   };
-
+  
   // ============================================================================
   // POLL CALL STATUS FROM FIREBASE
   // ============================================================================
   const pollCallStatus = (callId, businessName) => {
     let attempts = 0;
-    const maxAttempts = 20;
+    
     const interval = setInterval(async () => {
       attempts++;
+      
       try {
+        if (!db) {
+          clearInterval(interval);
+          return;
+        }
+        
         const callDoc = await getDoc(doc(db, 'calls', callId));
+        
         if (callDoc.exists()) {
           const callData = callDoc.data();
           const status = callData.status;
+          
           setActiveCallStatus(prev => ({
             ...prev,
             status: status,
@@ -1326,60 +2439,81 @@ export default function Dashboard() {
             answeredBy: callData.answeredBy || 'unknown',
             updatedAt: callData.updatedAt
           }));
+          
           if (status === 'ringing') {
             setStatus(`📞 Ringing ${businessName}...`);
+            setStatusType('info');
           } else if (status === 'in-progress' || status === 'answered') {
-            setStatus(`✅ Call connected to ${businessName}!\nDuration: ${callData.duration || 0}s\nAnswered by: ${callData.answeredBy || 'unknown'}`);
+            setStatus(`✅ Call connected to ${businessName}!\nDuration: ${callData.duration || 0}s`);
+            setStatusType('success');
           } else if (status === 'completed') {
-            setStatus(`✅ Call Completed!\nBusiness: ${businessName}\nDuration: ${callData.duration || 0}s\nAnswered by: ${callData.answeredBy || 'unknown'}${callData.recordingUrl ? '\n🎙️ Recording available' : ''}`);
+            setStatus(`✅ Call Completed!\nBusiness: ${businessName}\nDuration: ${callData.duration || 0}s`);
+            setStatusType('success');
             clearInterval(interval);
-          } else if (status === 'failed' || status === 'busy' || status === 'no-answer') {
-            setStatus(`❌ Call ${status}\nBusiness: ${businessName}\nReason: ${status.toUpperCase()}`);
+          } else if (['failed', 'busy', 'no-answer'].includes(status)) {
+            setStatus(`❌ Call ${status}\nBusiness: ${businessName}`);
+            setStatusType('error');
             clearInterval(interval);
           }
         }
-        if (attempts >= maxAttempts) {
+        
+        if (attempts >= CONFIG.MAX_POLL_ATTEMPTS) {
           clearInterval(interval);
-          setStatus(`⏱️ Status polling stopped after 2 minutes.\nCheck call history for final status.`);
+          setStatus(`⏱️ Status polling stopped. Check call history.`);
+          setStatusType('warning');
         }
       } catch (error) {
         console.error('Poll error:', error);
       }
-    }, 6000);
+    }, CONFIG.POLL_INTERVAL_MS);
   };
-
+  
   // ============================================================================
   // HANDLE TWILIO CALL WITH TRACKING
   // ============================================================================
   const handleTwilioCall = async (contact, callType = 'direct') => {
     if (!contact || !contact.phone || !contact.business) {
-      console.warn('Invalid contact passed to handleTwilioCall:', contact);
-      alert('❌ Contact data is incomplete. Cannot place call.');
-      return;
-    }
-    if (!user?.uid) {
-      alert('❌ You must be signed in to make calls.');
+      addNotification('❌ Contact data is incomplete', 'error');
       return;
     }
     
-    // ✅ Check if already contacted recently
-    if (!isSafeToContactOnChannel(contact, 'call', 1)) {
-      const confirmed = confirm('⚠️ This contact was recently called. Continue anyway?');
+    if (!user?.uid) {
+      addNotification('❌ You must be signed in to make calls', 'error');
+      return;
+    }
+    
+    const contactKey = contact.email || contact.phone;
+    
+    // Check quota
+    const quotaCheck = canUse('calls');
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
+    }
+    
+    // Check if safe to contact
+    if (!isSafeToContactOnChannel(contact, 'call', 1).safe) {
+      const confirmed = window.confirm('⚠️ This contact was recently called. Continue anyway?');
       if (!confirmed) return;
     }
     
     const callTypeLabels = {
-      direct: 'Automated Message (Plays your script)',
-      bridge: 'Bridge Call (Connects you first)',
-      interactive: 'Interactive Menu (They can press buttons)'
+      direct: 'Automated Message',
+      bridge: 'Bridge Call',
+      interactive: 'Interactive Menu'
     };
-    const confirmed = confirm(
-      `📞 Call ${contact.business} at +${contact.phone}?\nType: ${callTypeLabels[callType]}\nClick OK to proceed.`
+    
+    const confirmed = window.confirm(
+      `📞 Call ${contact.business} at ${formatPhoneForDisplay(contact.phone)}?\nType: ${callTypeLabels[callType]}`
     );
+    
     if (!confirmed) return;
     
     try {
       setStatus(`📞 Initiating ${callType} call to ${contact.business}...`);
+      setStatusType('info');
+      setIsSending(true);
+      
       setActiveCallStatus({
         business: contact.business,
         phone: contact.phone,
@@ -1402,12 +2536,13 @@ export default function Dashboard() {
       try {
         data = await response.json();
       } catch (parseError) {
-        console.error('Invalid JSON from /api/make-call:', await response.text());
-        throw new Error('Server returned an invalid response. Check Vercel logs.');
+        throw new Error('Server returned an invalid response');
       }
       
       if (response.ok) {
-        setStatus(`✅ Call initiated to ${contact.business}!\nCall ID: ${data.callId}\nStatus: ${data.status}`);
+        setStatus(`✅ Call initiated to ${contact.business}!`);
+        setStatusType('success');
+        
         setActiveCallStatus({
           business: contact.business,
           phone: contact.phone,
@@ -1417,107 +2552,104 @@ export default function Dashboard() {
           timestamp: new Date().toISOString()
         });
         
-        // ✅ Track call in multi-channel history
-        const contactKey = contact.email || contact.phone;
-        setLastCallMade(prev => ({ ...prev, [contactKey]: new Date().toISOString() }));
+        // Track call
+        const now = new Date().toISOString();
+        setLastCallMade(prev => ({ ...prev, [contactKey]: now }));
         setContactedChannels(prev => ({
           ...prev,
           [contactKey]: [...(prev[contactKey] || []), 'call']
         }));
         
-        if (contact.email && dealStage[contactKey] === 'new') {
+        await updateContact(contactKey, 'call', {
+          callCount: increment(1),
+          lastCallMade: now
+        });
+        
+        // Update quota
+        incrementQuota('calls', 1);
+        setDailyCallCount(prev => prev + 1);
+        
+        // Update deal stage
+        if (contact.email && (dealStage[contactKey] === 'new' || !dealStage[contactKey])) {
           updateDealStage(contactKey, 'contacted');
         }
         
+        addNotification(`✅ Call initiated to ${contact.business}`, 'success');
         pollCallStatus(data.callId, contact.business);
       } else {
         const errorMsg = data.error || 'Unknown error';
-        setStatus(`❌ Call Failed\nError: ${errorMsg}`);
-        setActiveCallStatus({
-          business: contact.business,
-          phone: contact.phone,
-          status: 'failed',
-          error: errorMsg,
-          timestamp: new Date().toISOString()
-        });
-        alert(`❌ Call Failed!\nBusiness: ${contact.business}\nError: ${errorMsg}`);
+        setStatus(`❌ Call Failed: ${errorMsg}`);
+        setStatusType('error');
+        addNotification(`❌ Call failed: ${errorMsg}`, 'error');
       }
     } catch (error) {
       console.error('Twilio call error:', error);
-      const userMessage = error.message || 'Network or server error. Check Vercel logs.';
-      setStatus(`❌ ${userMessage}`);
-      setActiveCallStatus({
-        business: contact?.business || 'Unknown',
-        phone: contact?.phone || 'Unknown',
-        status: 'error',
-        error: userMessage,
-        timestamp: new Date().toISOString()
-      });
-      alert(`❌ ${userMessage}\nCheck browser console and Vercel function logs.`);
+      setStatus(`❌ ${error.message}`);
+      setStatusType('error');
+      addNotification(`❌ Call error: ${error.message}`, 'error');
+    } finally {
+      setIsSending(false);
     }
   };
-
+  
   // ============================================================================
   // HANDLE SMART CALL (AI-POWERED)
   // ============================================================================
   const handleSmartCall = (contact) => {
     if (!contact) return;
-    if (contact.dealStage === 'replied' || contact.leadScore >= 80) {
+    
+    const key = contact.email || contact.phone;
+    const score = leadScores[key] || 0;
+    const history = followUpHistory[key];
+    const followUpCount = history?.count || 0;
+    
+    if (repliedLeads[contact.email] || score >= 80) {
       handleTwilioCall(contact, 'bridge');
-    } else if (contact.followUpCount >= 2) {
+    } else if (followUpCount >= 2) {
       handleTwilioCall(contact, 'voicemail');
     } else {
       handleTwilioCall(contact, 'interactive');
     }
   };
-
+  
   // ============================================================================
   // LOAD CALL HISTORY FROM FIREBASE
   // ============================================================================
   const loadCallHistory = async () => {
-    if (!user?.uid) return;
+    if (!user?.uid || !db) return;
+    
     setLoadingCallHistory(true);
+    
     try {
       const q = query(collection(db, 'calls'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
+      
       const calls = [];
       snapshot.forEach(doc => {
         calls.push({ id: doc.id, ...doc.data() });
       });
+      
       calls.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setCallHistory(calls);
     } catch (error) {
       console.error('Failed to load call history:', error);
-      alert('Failed to load call history');
+      addNotification('Failed to load call history', 'error');
     } finally {
       setLoadingCallHistory(false);
     }
   };
-
-  // ============================================================================
-  // GET STATUS BADGE FOR CALLS
-  // ============================================================================
-  const getStatusBadge = (status) => {
-    const badges = {
-      'initiating': { bg: 'bg-blue-100', text: 'text-blue-800', label: '🔵 Initiating' },
-      'queued': { bg: 'bg-yellow-100', text: 'text-yellow-800', label: '⏳ Queued' },
-      'ringing': { bg: 'bg-purple-100', text: 'text-purple-800', label: '📞 Ringing' },
-      'in-progress': { bg: 'bg-green-100', text: 'text-green-800', label: '✅ In Progress' },
-      'answered': { bg: 'bg-green-100', text: 'text-green-800', label: '✅ Answered' },
-      'completed': { bg: 'bg-green-200', text: 'text-green-900', label: '✅ Completed' },
-      'failed': { bg: 'bg-red-100', text: 'text-red-800', label: '❌ Failed' },
-      'busy': { bg: 'bg-orange-100', text: 'text-orange-800', label: '📵 Busy' },
-      'no-answer': { bg: 'bg-gray-100', text: 'text-gray-800', label: '📞 No Answer' }
-    };
-    return badges[status] || { bg: 'bg-gray-100', text: 'text-gray-800', label: status };
-  };
-
+  
   // ============================================================================
   // HANDLE SOCIAL MEDIA OUTREACH
   // ============================================================================
   const handleOpenLinkedIn = (contact, type = 'company') => {
-    if (!contact?.business) return;
+    if (!contact?.business) {
+      addNotification('No business name', 'error');
+      return;
+    }
+    
     let url;
+    
     if (type === 'company' && contact.linkedin_company) {
       url = contact.linkedin_company;
     } else if (type === 'ceo' && contact.linkedin_ceo) {
@@ -1528,98 +2660,49 @@ export default function Dashboard() {
       const query = encodeURIComponent(contact.business);
       url = `https://www.linkedin.com/search/results/companies/?keywords=${query}`;
     }
+    
     window.open(url, '_blank');
   };
-
+  
   const handleOpenInstagram = (contact) => {
-    if (!contact?.business) return;
+    if (!contact?.business) {
+      addNotification('No business name', 'error');
+      return;
+    }
+    
     const igHandle = generateSocialHandle(contact.business, 'instagram');
+    
     if (igHandle) {
       window.open(`https://www.instagram.com/${igHandle}/`, '_blank');
     } else {
       window.open('https://www.instagram.com/', '_blank');
     }
   };
-
+  
   const handleOpenTwitter = (contact) => {
-    if (!contact?.business) return;
+    if (!contact?.business) {
+      addNotification('No business name', 'error');
+      return;
+    }
+    
     const twitterHandle = generateSocialHandle(contact.business, 'twitter');
+    
     if (twitterHandle) {
-      const tweetText = encodeURIComponent(`@${twitterHandle} ${renderPreviewText(
-        twitterTemplate,
-        { business_name: contact.business, address: contact.address || '' },
-        fieldMappings,
-        senderName
-      )}`);
+      const tweetText = encodeURIComponent(
+        `@${twitterHandle} ${renderPreviewText(
+          twitterTemplate,
+          { business_name: contact.business, address: contact.address || '' },
+          fieldMappings,
+          senderName
+        )}`
+      );
       window.open(`https://twitter.com/intent/tweet?text=${tweetText}`, '_blank');
     } else {
       const query = encodeURIComponent(contact.business);
       window.open(`https://twitter.com/search?q=${query}&src=typed_query`, '_blank');
     }
   };
-
-  const getSocialOutreachStrategy = (link) => {
-    const strategies = [];
-    if (link.linkedin_company || link.linkedin_ceo) {
-      strategies.push({
-        type: 'linkedin',
-        priority: 1,
-        action: 'Connect & Engage',
-        description: 'Send connection request with personalized message'
-      });
-    }
-    if (link.email_primary) {
-      const confidence = link.contact_confidence;
-      strategies.push({
-        type: 'email',
-        priority: confidence === 'High' ? 1 : confidence === 'Medium' ? 2 : 3,
-        action: 'Send Email',
-        description: `Email outreach (${confidence} confidence)`
-      });
-    }
-    if (link.twitter) {
-      strategies.push({
-        type: 'twitter',
-        priority: 2,
-        action: 'Follow & Engage',
-        description: 'Follow, like recent posts, comment with value'
-      });
-    }
-    if (link.youtube) {
-      strategies.push({
-        type: 'youtube',
-        priority: 2,
-        action: 'Subscribe & Comment',
-        description: 'Subscribe, comment on recent videos'
-      });
-    }
-    if (link.instagram) {
-      strategies.push({
-        type: 'instagram',
-        priority: 3,
-        action: 'Follow & Like',
-        description: 'Follow account, like posts, engage authentically'
-      });
-    }
-    if (link.facebook) {
-      strategies.push({
-        type: 'facebook',
-        priority: 3,
-        action: 'Like & Follow',
-        description: 'Like page, follow, engage with recent posts'
-      });
-    }
-    if (link.tiktok) {
-      strategies.push({
-        type: 'tiktok',
-        priority: 4,
-        action: 'Follow & Like',
-        description: 'Follow account, like trending content'
-      });
-    }
-    return strategies.sort((a, b) => a.priority - b.priority);
-  };
-
+  
   // ============================================================================
   // HANDLE CSV UPLOAD
   // ============================================================================
@@ -1627,211 +2710,311 @@ export default function Dashboard() {
     setValidEmails(0);
     setValidWhatsApp(0);
     setWhatsappLinks([]);
+    setLeadScores({});
+    setLastSent({});
+    
     const file = e.target.files?.[0];
-    if (!file) return;
+    
+    if (!file) {
+      addNotification('No file selected', 'error');
+      return;
+    }
+    
+    if (!file.name.endsWith('.csv')) {
+      addNotification('Please upload a CSV file', 'error');
+      return;
+    }
+    
+    setCsvFileName(file.name);
+    setCsvUploadDate(new Date().toISOString());
     
     const reader = new FileReader();
+    
     reader.onload = (e) => {
-      const rawContent = e.target.result;
-      const normalizedContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-      const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
-      
-      if (lines.length < 2) {
-        alert('CSV must have headers and data rows.');
-        return;
-      }
-      
-      const headers = parseCsvRow(lines[0]).map(h => h.trim());
-      setCsvHeaders(headers);
-      setPreviewRecipient(null);
-      
-      const allTemplateTexts = [
-        templateA.subject, templateA.body,
-        templateB.subject, templateB.body,
-        whatsappTemplate,
-        smsTemplate,
-        instagramTemplate,
-        twitterTemplate,
-        ...followUpTemplates.flatMap(t => [t.subject, t.body])
-      ];
-      
-      const allVars = [...new Set([
-        ...allTemplateTexts.flatMap(text => extractTemplateVariables(text)),
-        'sender_name',
-        ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
-        ...headers
-      ])];
-      
-      const initialMappings = {};
-      allVars.forEach(varName => {
-        if (headers.includes(varName)) {
-          initialMappings[varName] = varName;
-        }
-      });
-      
-      if (headers.includes('email')) initialMappings.email = 'email';
-      initialMappings.sender_name = 'sender_name';
-      setFieldMappings(initialMappings);
-      
-      let hotEmails = 0, warmEmails = 0;
-      const validPhoneContacts = [];
-      const newLeadScores = {};
-      const newLastSent = {};
-      let firstValid = null;
-      
-      const hasLeadQualityCol = headers.includes('lead_quality');
-      
-      for (let i = 1; i < lines.length; i++) {
-        const values = parseCsvRow(lines[i]);
-        if (values.length !== headers.length) continue;
+      try {
+        const rawContent = e.target.result;
+        const normalizedContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
         
-        const row = {};
-        headers.forEach((header, idx) => {
-          row[header] = values[idx] || '';
+        if (lines.length < 2) {
+          addNotification('CSV must have headers and data rows', 'error');
+          return;
+        }
+        
+        const headers = parseCsvRow(lines[0]).map(h => h.trim());
+        setCsvHeaders(headers);
+        setPreviewRecipient(null);
+        
+        // Extract all template variables
+        const allTemplateTexts = [
+          templateA.subject, templateA.body,
+          templateB.subject, templateB.body,
+          whatsappTemplate,
+          smsTemplate,
+          instagramTemplate,
+          twitterTemplate,
+          linkedinTemplate,
+          ...followUpTemplates.flatMap(t => [t.subject || '', t.body || ''])
+        ];
+        
+        const allVars = [...new Set([
+          ...allTemplateTexts.flatMap(text => extractTemplateVariables(text)),
+          'sender_name',
+          ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
+          ...headers
+        ])];
+        
+        // Auto-map fields
+        const initialMappings = {};
+        allVars.forEach(varName => {
+          if (headers.includes(varName)) {
+            initialMappings[varName] = varName;
+          }
         });
         
-        let includeEmail = true;
-        if (hasLeadQualityCol) {
-          const quality = (row.lead_quality || '').trim() || 'HOT';
-          if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
-            includeEmail = false;
-          }
-        }
+        // Common mappings
+        const commonMappings = {
+          email: ['email', 'email_address', 'email_primary'],
+          phone: ['phone', 'phone_number', 'whatsapp_number', 'phone_raw'],
+          business_name: ['business_name', 'business', 'company', 'company_name'],
+          website: ['website', 'url', 'site'],
+          address: ['address', 'location']
+        };
         
-        const hasValidEmail = isValidEmail(row.email);
-        if (hasValidEmail && includeEmail) {
-          let score = 50;
-          const quality = (row.lead_quality || '').trim() || 'HOT';
-          if (quality === 'HOT') score += 30;
-          if (parseFloat(row.rating) >= 4.8) score += 20;
-          if (parseInt(row.review_count) > 100) score += 10;
-          if (clickStats[row.email]?.count > 0) score += 20;
-          if (dealStage[row.email] === 'contacted') score += 10;
-          score = Math.min(100, Math.max(0, score));
-          newLeadScores[row.email] = score;
+        Object.entries(commonMappings).forEach(([varName, possibleCols]) => {
+          if (!initialMappings[varName]) {
+            const found = possibleCols.find(col => headers.includes(col));
+            if (found) {
+              initialMappings[varName] = found;
+            }
+          }
+        });
+        
+        initialMappings.sender_name = 'sender_name';
+        setFieldMappings(initialMappings);
+        
+        // Process rows
+        let hotEmails = 0;
+        let warmEmails = 0;
+        const validPhoneContacts = [];
+        const newLeadScores = {};
+        const hasLeadQualityCol = headers.includes('lead_quality');
+        
+        for (let i = 1; i < lines.length; i++) {
+          const values = parseCsvRow(lines[i]);
           
-          if (!hasLeadQualityCol || quality === 'HOT') {
-            hotEmails++;
-          } else if (quality === 'WARM') {
-            warmEmails++;
+          if (values.length !== headers.length) {
+            continue;
           }
           
-          if (!firstValid) firstValid = row;
-        }
-        
-        const rawPhone = row.whatsapp_number || row.phone_raw || row.phone;
-        const formattedPhone = formatForDialing(rawPhone);
-        if (formattedPhone) {
-          const contactId = `${row.email || 'no-email'}-${formattedPhone}-${Date.now()}-${Math.random()}`;
-          validPhoneContacts.push({
-            id: contactId,
-            business: row.business_name || 'Business',
-            address: row.address || '',
-            phone: formattedPhone,
-            email: row.email || null,
-            place_id: row.place_id || '',
-            website: row.website || '',
-            instagram: row.instagram || '',
-            twitter: row.twitter || '',
-            facebook: row.facebook || '',
-            youtube: row.youtube || '',
-            tiktok: row.tiktok || '',
-            linkedin_company: row.linkedin_company || '',
-            linkedin_ceo: row.linkedin_ceo || '',
-            linkedin_founder: row.linkedin_founder || '',
-            contact_page_found: row.contact_page_found || 'No',
-            social_media_score: row.social_media_score || '0',
-            email_primary: row.email_primary || row.email || '',
-            phone_primary: row.phone_primary || formattedPhone || '',
-            lead_quality_score: row.lead_quality_score || '0',
-            contact_confidence: row.contact_confidence || 'Low',
-            best_contact_method: row.best_contact_method || 'Email',
-            decision_maker_found: row.decision_maker_found || 'No',
-            tech_stack_detected: row.tech_stack_detected || '',
-            company_size_indicator: row.company_size_indicator || 'unknown',
-            url: `https://wa.me/${formattedPhone}?text=${encodeURIComponent(
-              renderPreviewText(whatsappTemplate, row, fieldMappings, senderName)
-            )}`
+          const row = {};
+          headers.forEach((header, idx) => {
+            row[header] = values[idx] || '';
           });
-          if (!firstValid) firstValid = row;
+          
+          // Filter by lead quality
+          let includeEmail = true;
+          if (hasLeadQualityCol) {
+            const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
+            if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
+              includeEmail = false;
+            }
+          }
+          
+          // Validate email
+          const emailCol = initialMappings.email || 'email';
+          const hasValidEmail = isValidEmail(row[emailCol]);
+          
+          if (hasValidEmail && includeEmail) {
+            const score = calculateScore(row);
+            const email = row[emailCol].toLowerCase().trim();
+            newLeadScores[email] = score;
+            
+            const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
+            if (quality === 'HOT') {
+              hotEmails++;
+            } else if (quality === 'WARM') {
+              warmEmails++;
+            }
+          }
+          
+          // Validate phone
+          const phoneCol = initialMappings.phone || 'phone';
+          const rawPhone = row[phoneCol] || row.whatsapp_number || row.phone_raw;
+          const formattedPhone = formatForDialing(rawPhone);
+          
+          if (formattedPhone) {
+            const businessCol = initialMappings.business_name || 'business_name';
+            const contactId = generateId();
+            
+            validPhoneContacts.push({
+              id: contactId,
+              business: row[businessCol] || 'Business',
+              address: row.address || '',
+              phone: formattedPhone,
+              email: hasValidEmail ? row[emailCol].toLowerCase().trim() : null,
+              place_id: row.place_id || '',
+              website: row.website || '',
+              instagram: row.instagram || '',
+              twitter: row.twitter || '',
+              facebook: row.facebook || '',
+              youtube: row.youtube || '',
+              tiktok: row.tiktok || '',
+              linkedin_company: row.linkedin_company || '',
+              linkedin_ceo: row.linkedin_ceo || '',
+              linkedin_founder: row.linkedin_founder || '',
+              contact_page_found: row.contact_page_found || 'No',
+              social_media_score: row.social_media_score || '0',
+              email_primary: row.email_primary || row[emailCol] || '',
+              phone_primary: row.phone_primary || formattedPhone || '',
+              lead_quality_score: row.lead_quality_score || '0',
+              contact_confidence: row.contact_confidence || 'Low',
+              best_contact_method: row.best_contact_method || 'Email',
+              decision_maker_found: row.decision_maker_found || 'No',
+              tech_stack_detected: row.tech_stack_detected || '',
+              company_size_indicator: row.company_size_indicator || 'unknown',
+              lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
+              rating: row.rating || '0',
+              review_count: row.review_count || '0',
+              createdAt: new Date().toISOString()
+            });
+          }
         }
+        
+        // Set first valid as preview
+        if (validPhoneContacts.length > 0) {
+          setPreviewRecipient(validPhoneContacts[0]);
+        }
+        
+        // Update counts
+        if (leadQualityFilter === 'HOT') {
+          setValidEmails(hotEmails);
+        } else if (leadQualityFilter === 'WARM') {
+          setValidEmails(warmEmails);
+        } else {
+          setValidEmails(hotEmails + warmEmails);
+        }
+        
+        setValidWhatsApp(validPhoneContacts.length);
+        setWhatsappLinks(validPhoneContacts);
+        setLeadScores(newLeadScores);
+        setCsvContent(normalizedContent);
+        
+        addNotification(
+          `✅ CSV loaded successfully!\n${validPhoneContacts.length} contacts\n${hotEmails + warmEmails} valid emails`,
+          'success'
+        );
+      } catch (error) {
+        console.error('CSV upload error:', error);
+        addNotification(`❌ CSV upload failed: ${error.message}`, 'error');
       }
-      
-      setPreviewRecipient(firstValid);
-      if (leadQualityFilter === 'HOT') setValidEmails(hotEmails);
-      else if (leadQualityFilter === 'WARM') setValidEmails(warmEmails);
-      else setValidEmails(hotEmails + warmEmails);
-      
-      setValidWhatsApp(validPhoneContacts.length);
-      setWhatsappLinks(validPhoneContacts);
-      setLeadScores(newLeadScores);
-      setLastSent(newLastSent);
-      setCsvContent(normalizedContent);
     };
+    
+    reader.onerror = () => {
+      addNotification('Failed to read file', 'error');
+    };
+    
     reader.readAsText(file);
   };
-
+  
   // ============================================================================
   // HANDLE FIELD MAPPING CHANGE
   // ============================================================================
   const handleMappingChange = (varName, csvColumn) => {
     setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
   };
-
+  
   // ============================================================================
   // HANDLE IMAGE UPLOAD
   // ============================================================================
   const handleImageUpload = (e) => {
-    const files = Array.from(e.target.files).slice(0, 3);
-    const newImages = files.map((file, index) => {
+    const files = Array.from(e.target.files).slice(0, CONFIG.MAX_IMAGES_PER_EMAIL);
+    
+    if (files.length === 0) {
+      addNotification('No files selected', 'info');
+      return;
+    }
+    
+    // Validate file sizes
+    const validFiles = files.filter(file => file.size <= CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024);
+    
+    if (validFiles.length < files.length) {
+      addNotification(`${files.length - validFiles.length} file(s) exceeded ${CONFIG.MAX_IMAGE_SIZE_MB}MB limit`, 'warning');
+    }
+    
+    const newImages = validFiles.map((file, index) => {
       const preview = URL.createObjectURL(file);
       const cid = `img${index + 1}@massmailer`;
-      return { file, preview, cid, placeholder: `{{image${index + 1}}}` };
+      return { 
+        file, 
+        preview, 
+        cid, 
+        placeholder: `{{image${index + 1}}}`,
+        size: file.size,
+        type: file.type
+      };
     });
+    
     setEmailImages(newImages);
+    addNotification(`✅ ${newImages.length} image(s) uploaded`, 'success');
   };
-
+  
   // ============================================================================
   // LOAD SENT LEADS FROM API
   // ============================================================================
   const loadSentLeads = async () => {
     if (!user?.uid) return;
+    
     setLoadingSentLeads(true);
+    
     try {
       const res = await fetch('/api/list-sent-leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
+      
       const data = await res.json();
+      
       if (res.ok) {
         setSentLeads(data.leads || []);
+        
         const history = {};
-        let replied = 0, followedUp = 0, readyForFU = 0, awaiting = 0;
+        let replied = 0;
+        let followedUp = 0;
+        let readyForFU = 0;
+        let awaiting = 0;
+        
         (data.leads || []).forEach(lead => {
           if (lead.replied) {
             replied++;
           }
+          
           const followUpCount = lead.followUpCount || 0;
           if (followUpCount > 0) {
             followedUp++;
           }
+          
           history[lead.email] = {
             count: followUpCount,
             lastFollowUpAt: lead.lastFollowUpAt || null,
             dates: lead.followUpDates || []
           };
+          
           const followUpAt = new Date(lead.followUpAt);
           const now = new Date();
+          
           if (!lead.replied && followUpAt <= now) {
             readyForFU++;
           } else if (!lead.replied) {
             awaiting++;
           }
         });
+        
         const interested = (data.leads || []).filter(lead =>
           lead.seemsInterested && !lead.replied
         );
+        
         setInterestedLeadsList(interested);
         setFollowUpHistory(history);
         setFollowUpStats({
@@ -1842,319 +3025,84 @@ export default function Dashboard() {
           awaitingReply: awaiting,
           interestedLeads: interested.length
         });
-        if (data.deletedCount && data.deletedCount > 0) {
-          console.log(`🗑️ Cleaned up ${data.deletedCount} old closed loops (>30 days)`);
-        }
-        console.log('✅ Follow-up tracking loaded:', { followUpStats: { totalSent: data.leads?.length, totalReplied: replied }, history });
       } else {
-        alert('Failed to load sent leads');
+        addNotification('Failed to load sent leads', 'error');
       }
     } catch (err) {
       console.error('Load sent leads error:', err);
-      alert('Error loading sent leads');
+      addNotification('Error loading sent leads', 'error');
     } finally {
       setLoadingSentLeads(false);
     }
   };
-
-  // ============================================================================
-  // CHECK FOR REPLIES VIA GMAIL API
-  // ============================================================================
-  const checkForReplies = async () => {
-    if (!user?.uid) return;
-    setStatus('🔍 Checking for replies...');
-    try {
-      const accessToken = await requestGmailToken();
-      const res = await fetch('/api/check-replies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accessToken, userId: user.uid })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setStatus(`✅ Found ${data.repliedCount} new replies!`);
-        loadDeals();
-        loadRepliedAndFollowUp();
-      } else {
-        setStatus(`❌ Reply check failed: ${data.error}`);
-      }
-    } catch (err) {
-      console.error('Check replies error:', err);
-      setStatus(`❌ ${err.message}`);
-    }
-  };
-
-  // ============================================================================
-  // SEND FOLLOW-UP WITH GMAIL TOKEN
-  // ============================================================================
-  const sendFollowUpWithToken = async (email, accessToken) => {
-    if (!user?.uid || !email || !accessToken) {
-      alert('Missing required data to send follow-up.');
-      return;
-    }
-    if (repliedLeads[email]) {
-      alert(`❌ Cannot send follow-up: ${email} has already replied. Loop is closed.`);
-      return;
-    }
-    const history = followUpHistory[email];
-    const followUpCount = history?.count || 0;
-    if (followUpCount >= 3) {
-      alert(
-        `❌ Cannot send follow-up: ${email} has already received ${followUpCount} follow-ups (maximum reached).\nThe loop has been closed. No further emails will be sent to prevent spam complaints.`
-      );
-      return;
-    }
-    try {
-      const res = await fetch('/api/send-followup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          accessToken,
-          userId: user.uid,
-          senderName
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        const isFinalFollowUp = data.followUpCount >= 3;
-        alert(
-          `✅ Follow-up #${data.followUpCount} sent to ${email}` +
-          (isFinalFollowUp ? '\n⚠️ Loop closed - no further emails will be sent to this lead.' : '')
-        );
-        setFollowUpHistory(prev => ({
-          ...prev,
-          [email]: {
-            count: data.followUpCount || (prev[email]?.count || 0) + 1,
-            lastFollowUpAt: new Date().toISOString(),
-            dates: [...(prev[email]?.dates || []), new Date().toISOString()],
-            loopClosed: isFinalFollowUp
-          }
-        }));
-        await loadSentLeads();
-        await loadRepliedAndFollowUp();
-        await loadDeals();
-      } else {
-        if (data.code === 'ALREADY_REPLIED' || data.code === 'MAX_FOLLOWUPS_REACHED') {
-          alert(`❌ ${data.error}\nThis prevents duplicate emails and spam complaints.`);
-        } else {
-          alert(`❌ Follow-up failed: ${data.error || 'Unknown error'}`);
-        }
-      }
-    } catch (err) {
-      console.error('Follow-up send error:', err);
-      alert(`❌ Error: ${err.message || 'Failed to send follow-up'}`);
-    }
-  };
-
-  // ============================================================================
-  // SEND MASS FOLLOW-UP TO ALL ELIGIBLE LEADS
-  // ============================================================================
-  const sendMassFollowUp = async (accessToken) => {
-    if (!user?.uid || !accessToken) return;
-    const eligibleLeads = sentLeads.filter(isEligibleForFollowUp);
-    const confirmed = confirm(`Send follow-up to all eligible leads (${eligibleLeads.length})?`);
-    if (!confirmed) return;
-    
-    setIsSending(true);
-    setStatus('📤 Sending mass follow-ups...');
-    let successCount = 0;
-    let errorCount = 0;
-    
-    for (const lead of eligibleLeads) {
-      if (!isEligibleForFollowUp(lead)) continue;
-      const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
-      if (followUpCount >= 3) {
-        console.warn(`Skipping ${lead.email}: already has ${followUpCount} follow-ups`);
-        continue;
-      }
-      try {
-        const res = await fetch('/api/send-followup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: lead.email,
-            accessToken,
-            userId: user.uid,
-            senderName,
-          })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          successCount++;
-          const isFinalFollowUp = data.followUpCount >= 3;
-          setFollowUpHistory(prev => ({
-            ...prev,
-            [lead.email]: {
-              count: data.followUpCount || followUpCount + 1,
-              lastFollowUpAt: new Date().toISOString(),
-              dates: [...(prev[lead.email]?.dates || []), new Date().toISOString()],
-              loopClosed: isFinalFollowUp
-            }
-          }));
-        } else {
-          errorCount++;
-          if (data.code !== 'ALREADY_REPLIED' && data.code !== 'MAX_FOLLOWUPS_REACHED') {
-            console.error(`Failed to send to ${lead.email}:`, data.error);
-          }
-        }
-      } catch (err) {
-        errorCount++;
-        console.error(`Error sending to ${lead.email}:`, err);
-      }
-    }
-    
-    setIsSending(false);
-    alert(`✅ Sent follow-ups to ${successCount} leads.${errorCount > 0 ? ` ${errorCount} failed.` : ''}`);
-    await loadSentLeads();
-    await loadRepliedAndFollowUp();
-  };
-
-  // ============================================================================
-  // CHECK IF LEAD IS ELIGIBLE FOR FOLLOW-UP
-  // ============================================================================
-  const isEligibleForFollowUp = (lead) => {
-    if (!lead || !lead.email || lead.replied) return false;
-    const now = new Date();
-    const followUpAt = new Date(lead.followUpAt);
-    if (followUpAt > now) return false;
-    const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
-    if (followUpCount >= 3) return false;
-    return true;
-  };
-
-  // ============================================================================
-  // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
-  // ============================================================================
-  const handleSendToNewLeads = async () => {
-    if (!user?.uid) {
-      alert('Please sign in first.');
-      return;
-    }
-    const newLeads = getNewLeads();
-    if (newLeads.length === 0) {
-      alert('✅ No new leads to email. All contacts have already been reached out to.');
-      return;
-    }
-    const remainingQuota = 500 - dailyEmailCount;
-    if (remainingQuota <= 0) {
-      alert(`⚠️ Daily email limit reached (500 emails/day). ${dailyEmailCount} emails sent today. Please try again tomorrow.`);
-      return;
-    }
-    const leadsToSend = newLeads.slice(0, Math.min(remainingQuota, newLeads.length));
-    const potentialValue = Math.round((leadsToSend.length * 0.15 * 5000) / 1000);
-    const confirmMsg = `🚀 Smart New Lead Outreach\n\n📊 ${leadsToSend.length} new leads ready (${newLeads.length} total available)\n📈 Prioritized by lead quality for maximum business value\n💰 Estimated potential value: $${potentialValue}k\n📧 Daily quota: ${dailyEmailCount}/500 (${remainingQuota} remaining today)\n✅ Prevents duplicates & spam automatically\n🎯 Only contacts never emailed before\n\nSend to ${leadsToSend.length} leads now?`;
-    if (!confirm(confirmMsg)) return;
-    
-    if (!templateA.subject?.trim()) {
-      alert('Email subject is required.');
-      return;
-    }
-    
-    setIsSending(true);
-    setStatus('Getting Gmail access...');
-    
-    try {
-      const accessToken = await requestGmailToken();
-      setStatus(`Sending to ${leadsToSend.length} new leads...`);
-      
-      const imagesWithBase64 = await Promise.all(
-        emailImages.map(async (img, index) => {
-          const base64 = await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result.split(',')[1]);
-            reader.readAsDataURL(img.file);
-          });
-          return {
-            cid: img.cid,
-            mimeType: img.file.type,
-            base64,
-            placeholder: img.placeholder
-          };
-        })
-      );
-      
-      const res = await fetch('/api/send-new-leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          recipients: leadsToSend,
-          senderName,
-          fieldMappings,
-          accessToken,
-          template: templateA,
-          userId: user.uid,
-          emailImages: imagesWithBase64
-        })
-      });
-      
-      const data = await res.json();
-      if (res.ok) {
-        setStatus(`✅ ${data.sent}/${data.total} emails sent to new leads!`);
-        setDailyEmailCount(data.dailyCount || dailyEmailCount + data.sent);
-        
-        const successMsg = `✅ Successfully sent ${data.sent} emails!\n\n📊 Stats:\n• Sent: ${data.sent}\n• Failed: ${data.failed || 0}\n• Skipped (already sent): ${data.skipped || 0}\n• Daily count: ${data.dailyCount}/500\n• Remaining today: ${data.remainingToday}\n\n💰 Estimated value: $${Math.round((data.sent * 0.15 * 5000) / 1000)}k`;
-        alert(successMsg);
-        
-        await loadSentLeads();
-        await loadDailyEmailCount();
-      } else {
-        if (res.status === 429) {
-          alert(`⚠️ Daily limit reached!\n${data.error}\nDaily count: ${data.dailyCount}/${data.limit}`);
-          setDailyEmailCount(data.dailyCount || 500);
-        } else {
-          alert(`❌ Error: ${data.error || 'Failed to send emails'}`);
-        }
-        setStatus(`❌ ${data.error || 'Failed'}`);
-      }
-    } catch (err) {
-      console.error('Send new leads error:', err);
-      alert(`❌ Error: ${err.message || 'Failed to send emails'}`);
-      setStatus(`❌ ${err.message || 'Error'}`);
-    } finally {
-      setIsSending(false);
-    }
-  };
-
+  
   // ============================================================================
   // SEND EMAILS (MAIN FUNCTION)
   // ============================================================================
   const handleSendEmails = async (templateToSend = null) => {
     const lines = csvContent?.split('\n').filter(line => line.trim() !== '') || [];
+    
     if (lines.length < 2) {
-      alert('Please upload a valid CSV file first.');
+      addNotification('Please upload a valid CSV file first', 'error');
       return;
     }
+    
     if (!senderName.trim() || validEmails === 0) {
-      alert('Check sender name and valid emails.');
+      addNotification('Check sender name and valid emails', 'error');
       return;
     }
+    
+    // Check quota
+    const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
+    if (remainingQuota <= 0) {
+      addNotification(
+        `⚠️ Daily email limit reached (${CONFIG.MAX_DAILY_EMAILS} emails/day). Try again tomorrow.`,
+        'warning'
+      );
+      return;
+    }
+    
     if (abTestMode && !templateToSend) {
-      alert('Please select Template A or B.');
+      addNotification('Please select Template A or B', 'error');
       return;
     }
+    
     if (abTestMode) {
       if (templateToSend === 'A' && !templateA.subject?.trim()) {
-        alert('Template A subject is required.');
+        addNotification('Template A subject is required', 'error');
         return;
       }
       if (templateToSend === 'B' && !templateB.subject?.trim()) {
-        alert('Template B subject is required.');
+        addNotification('Template B subject is required', 'error');
         return;
       }
     } else {
       if (!templateA.subject?.trim()) {
-        alert('Email subject is required.');
+        addNotification('Email subject is required', 'error');
         return;
       }
     }
     
+    // Confirm before sending
+    if (userPreferences.confirmBeforeSend) {
+      const confirmed = window.confirm(
+        `Send emails to ${validEmails} leads?\n\nDaily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}\nRemaining: ${remainingQuota}`
+      );
+      
+      if (!confirmed) return;
+    }
+    
     setIsSending(true);
     setStatus('Getting Gmail access...');
+    setStatusType('info');
+    setSendProgress({ current: 0, total: validEmails });
     
     try {
       const accessToken = await requestGmailToken();
       
+      setStatus(`Sending to ${validEmails} leads...`);
+      
+      // Process images
       const imagesWithBase64 = await Promise.all(
         emailImages.map(async (img, index) => {
           const base64 = await new Promise((resolve) => {
@@ -2162,6 +3110,7 @@ export default function Dashboard() {
             reader.onload = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(img.file);
           });
+          
           return {
             cid: img.cid,
             mimeType: img.file.type,
@@ -2173,12 +3122,16 @@ export default function Dashboard() {
       
       const headers = parseCsvRow(lines[0]).map(h => h.trim());
       let validRecipients = [];
+      
       const emailColumnName = Object.entries(fieldMappings).find(([key, val]) => key === 'email')?.[1] || 'email';
       const qualityColumnName = Object.entries(fieldMappings).find(([key, val]) => key === 'lead_quality')?.[1] || 'lead_quality';
       
       for (let i = 1; i < lines.length; i++) {
         const values = parseCsvRow(lines[i]);
-        if (values.length !== headers.length) continue;
+        
+        if (values.length !== headers.length) {
+          continue;
+        }
         
         const row = {};
         headers.forEach((header, idx) => {
@@ -2186,41 +3139,50 @@ export default function Dashboard() {
         });
         
         const emailValue = row[emailColumnName] || '';
+        
         if (!isValidEmail(emailValue)) {
-          console.log('❌ Invalid email:', emailValue);
           continue;
         }
         
         const hasQualityColumn = headers.includes(qualityColumnName);
-        const quality = hasQualityColumn ? (row[qualityColumnName] || '').trim() || 'HOT' : 'HOT';
+        const quality = hasQualityColumn ? (row[qualityColumnName] || '').trim().toUpperCase() || 'HOT' : 'HOT';
         
         if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
-          console.log(`⏭️ Skipping ${emailValue} - Quality mismatch`);
           continue;
         }
         
-        const normalizedRow = { ...row, email: emailValue };
+        const normalizedRow = { ...row, email: emailValue.toLowerCase().trim() };
         validRecipients.push(normalizedRow);
       }
       
       let recipientsToSend = [];
+      
       if (abTestMode && templateToSend) {
         const half = Math.ceil(validRecipients.length / 2);
-        if (templateToSend === 'A') recipientsToSend = validRecipients.slice(0, half);
-        else recipientsToSend = validRecipients.slice(half);
+        if (templateToSend === 'A') {
+          recipientsToSend = validRecipients.slice(0, half);
+        } else {
+          recipientsToSend = validRecipients.slice(half);
+        }
       } else {
         recipientsToSend = validRecipients;
       }
       
+      // Limit by quota
+      if (recipientsToSend.length > remainingQuota) {
+        recipientsToSend = recipientsToSend.slice(0, remainingQuota);
+        addNotification(`Limited to ${remainingQuota} emails due to daily quota`, 'warning');
+      }
+      
       if (recipientsToSend.length === 0) {
-        setStatus('❌ No valid leads for selected criteria.');
+        setStatus('❌ No valid leads for selected criteria');
+        setStatusType('error');
         setIsSending(false);
-        alert(`❌ No valid recipients found!\nEmail column: ${emailColumnName}\nQuality column: ${qualityColumnName}\nFilter: ${leadQualityFilter}\nCheck browser console for details.`);
+        addNotification('No valid recipients found', 'error');
         return;
       }
       
-      setStatus(`Sending to ${recipientsToSend.length} leads...`);
-      
+      // Reconstruct CSV
       const csvLines = [headers.join(',')];
       for (const row of recipientsToSend) {
         const csvFields = headers.map(h => {
@@ -2240,6 +3202,7 @@ export default function Dashboard() {
         body: JSON.stringify({
           csvContent: reconstructedCsv,
           senderName,
+          senderEmail,
           fieldMappings,
           accessToken,
           abTestMode,
@@ -2253,61 +3216,200 @@ export default function Dashboard() {
       });
       
       const data = await res.json();
+      
       if (res.ok) {
-        setStatus(`✅ ${data.sent}/${data.total} emails sent!`);
+        const sentCount = data.sent || 0;
+        setStatus(`✅ ${sentCount}/${recipientsToSend.length} emails sent!`);
+        setStatusType('success');
+        
+        // Update A/B test results
         if (abTestMode) {
           const newResults = { ...abResults };
-          if (templateToSend === 'A') newResults.a.sent = data.sent;
-          else newResults.b.sent = data.sent;
+          if (templateToSend === 'A') {
+            newResults.a.sent = (newResults.a.sent || 0) + sentCount;
+          } else {
+            newResults.b.sent = (newResults.b.sent || 0) + sentCount;
+          }
           setAbResults(newResults);
-          await setDoc(doc(db, 'ab_results', user.uid), newResults);
+          
+          if (db) {
+            await setDoc(doc(db, 'ab_results', user.uid), newResults);
+          }
         }
+        
+        // Update daily count
+        setDailyEmailCount(prev => prev + sentCount);
+        incrementQuota('emails', sentCount);
+        
+        addNotification(
+          `✅ Successfully sent ${sentCount} emails!\nFailed: ${data.failed || 0}\nSkipped: ${data.skipped || 0}`,
+          'success'
+        );
+        
+        await loadSentLeads();
+        await loadDailyEmailCount();
       } else {
         setStatus(`❌ ${data.error}`);
-        console.error('╔════════════════════════════════════════════════════════════╗');
-        console.error('║          EMAIL SEND ERROR - DEBUG INFORMATION              ║');
-        console.error('╚════════════════════════════════════════════════════════════╝');
-        console.error('');
-        console.error('ERROR STATS:', data.stats);
-        console.error('EMAIL COLUMN:', data.emailColumn);
-        console.error('');
-        console.error('FIRST 5 INVALID EMAILS (THIS IS YOUR KEY):');
-        if (data.invalidDetails && data.invalidDetails.length > 0) {
-          data.invalidDetails.forEach((invalid, idx) => {
-            console.error(`  ${idx + 1}. Raw: "${invalid.raw}"`);
-            console.error(`     Cleaned: "${invalid.cleaned}"`);
-            console.error(`     Reasons: ${invalid.reasons.join(', ')}`);
-            console.error('');
-          });
+        setStatusType('error');
+        
+        if (res.status === 429) {
+          addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
+          setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
         } else {
-          console.error('  (No invalidDetails found)');
+          addNotification(`❌ Error: ${data.error || 'Failed to send emails'}`, 'error');
         }
-        console.error('FULL RESPONSE:', data);
-        console.error('');
-        console.error('📋 COPY THE SECTION ABOVE AND SEND IT TO DEVELOPER');
-        console.error('╔════════════════════════════════════════════════════════════╗');
-        alert(`❌ Error: ${data.error}\nCheck Console (F12) for detailed debugging info. Look for "FIRST 5 INVALID EMAILS"`);
       }
     } catch (err) {
       console.error('Send error:', err);
       setStatus(`❌ ${err.message || 'Failed to send'}`);
-      alert(`❌ ${err.message || 'Failed to send emails'}`);
+      setStatusType('error');
+      addNotification(`❌ ${err.message || 'Failed to send emails'}`, 'error');
     } finally {
       setIsSending(false);
+      setSendProgress({ current: 0, total: 0 });
     }
   };
-
+  
+  // ============================================================================
+  // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
+  // ============================================================================
+  const handleSendToNewLeads = async () => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    
+    const newLeads = getNewLeads();
+    
+    if (newLeads.length === 0) {
+      addNotification('✅ No new leads to email. All contacts have been reached.', 'success');
+      return;
+    }
+    
+    const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
+    
+    if (remainingQuota <= 0) {
+      addNotification(
+        `⚠️ Daily email limit reached (${CONFIG.MAX_DAILY_EMAILS} emails/day). ${dailyEmailCount} emails sent today.`,
+        'warning'
+      );
+      return;
+    }
+    
+    const leadsToSend = newLeads.slice(0, Math.min(remainingQuota, newLeads.length));
+    const potentialValue = Math.round((leadsToSend.length * 0.15 * CONFIG.DEFAULT_AVG_DEAL_VALUE) / 1000);
+    
+    const confirmMsg = `🚀 Smart New Lead Outreach\n\n` +
+      `📊 ${leadsToSend.length} new leads ready (${newLeads.length} total available)\n` +
+      `📈 Prioritized by lead quality\n` +
+      `💰 Estimated potential value: $${potentialValue}k\n` +
+      `📧 Daily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} (${remainingQuota} remaining)\n\n` +
+      `Send to ${leadsToSend.length} leads now?`;
+    
+    if (!window.confirm(confirmMsg)) return;
+    
+    if (!templateA.subject?.trim()) {
+      addNotification('Email subject is required', 'error');
+      return;
+    }
+    
+    setIsSending(true);
+    setStatus('Getting Gmail access...');
+    setStatusType('info');
+    setSendProgress({ current: 0, total: leadsToSend.length });
+    
+    try {
+      const accessToken = await requestGmailToken();
+      setStatus(`Sending to ${leadsToSend.length} new leads...`);
+      
+      const imagesWithBase64 = await Promise.all(
+        emailImages.map(async (img, index) => {
+          const base64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(img.file);
+          });
+          
+          return {
+            cid: img.cid,
+            mimeType: img.file.type,
+            base64,
+            placeholder: img.placeholder
+          };
+        })
+      );
+      
+      const res = await fetch('/api/send-new-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipients: leadsToSend,
+          senderName,
+          senderEmail,
+          fieldMappings,
+          accessToken,
+          template: templateA,
+          userId: user.uid,
+          emailImages: imagesWithBase64
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        const sentCount = data.sent || 0;
+        setStatus(`✅ ${sentCount}/${leadsToSend.length} emails sent to new leads!`);
+        setStatusType('success');
+        
+        setDailyEmailCount(data.dailyCount || dailyEmailCount + sentCount);
+        
+        addNotification(
+          `✅ Successfully sent ${sentCount} emails!\n` +
+          `📊 Stats:\n` +
+          `• Sent: ${sentCount}\n` +
+          `• Failed: ${data.failed || 0}\n` +
+          `• Skipped: ${data.skipped || 0}\n` +
+          `• Daily count: ${data.dailyCount}/${CONFIG.MAX_DAILY_EMAILS}`,
+          'success'
+        );
+        
+        await loadSentLeads();
+        await loadDailyEmailCount();
+      } else {
+        if (res.status === 429) {
+          addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
+          setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
+        } else {
+          addNotification(`❌ Error: ${data.error || 'Failed to send emails'}`, 'error');
+        }
+        setStatus(`❌ ${data.error || 'Failed'}`);
+        setStatusType('error');
+      }
+    } catch (err) {
+      console.error('Send new leads error:', err);
+      addNotification(`❌ Error: ${err.message || 'Failed to send emails'}`, 'error');
+      setStatus(`❌ ${err.message || 'Error'}`);
+      setStatusType('error');
+    } finally {
+      setIsSending(false);
+      setSendProgress({ current: 0, total: 0 });
+    }
+  };
+  
   // ============================================================================
   // AI RESEARCH COMPANY
   // ============================================================================
   const researchCompany = async (companyName, companyWebsite, email) => {
     if (!user?.uid) {
-      alert('Please sign in to use AI research');
+      addNotification('Please sign in to use AI research', 'error');
       return;
     }
+    
     setResearchingCompany(email);
+    
     try {
       const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
+      
       const res = await fetch('/api/research-company', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2318,194 +3420,207 @@ export default function Dashboard() {
           userId: user.uid
         })
       });
+      
       const data = await res.json();
+      
       if (res.ok) {
         setResearchResults(prev => ({
           ...prev,
           [email]: data
         }));
         setShowResearchModal(true);
+        addNotification('✅ AI research completed', 'success');
       } else {
-        alert(`Research failed: ${data.error || 'Unknown error'}`);
+        addNotification(`Research failed: ${data.error || 'Unknown error'}`, 'error');
       }
     } catch (err) {
       console.error('Research error:', err);
-      alert(`Error: ${err.message || 'Failed to research company'}`);
+      addNotification(`Error: ${err.message || 'Failed to research company'}`, 'error');
     } finally {
       setResearchingCompany(null);
     }
   };
-
+  
   // ============================================================================
-  // CALCULATE PREDICTIVE SCORE
+  // EXPORT DATA
   // ============================================================================
-  const calculatePredictiveScore = async (leadEmail, leadData) => {
-    if (!user?.uid || predictiveScores[leadEmail]) return;
+  const exportData = async (type) => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    
     try {
-      const res = await fetch('/api/predictive-lead-scoring', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
-          leadData: {
-            ...leadData,
-            email: leadEmail
-          }
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setPredictiveScores(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
+      let data = [];
+      let filename = '';
+      
+      if (type === 'contacts') {
+        data = whatsappLinks;
+        filename = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
+      } else if (type === 'sent-leads') {
+        data = sentLeads;
+        filename = `sent-leads-${new Date().toISOString().split('T')[0]}.csv`;
+      } else if (type === 'call-history') {
+        await loadCallHistory();
+        data = callHistory;
+        filename = `call-history-${new Date().toISOString().split('T')[0]}.csv`;
       }
-    } catch (err) {
-      console.error('Predictive scoring error:', err);
+      
+      if (data.length === 0) {
+        addNotification('No data to export', 'warning');
+        return;
+      }
+      
+      // Convert to CSV
+      const headers = Object.keys(data[0]);
+      const csvContent = [
+        headers.join(','),
+        ...data.map(row => 
+          headers.map(h => {
+            const val = (row[h] || '').toString();
+            if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+              return `"${val.replace(/"/g, '""')}"`;
+            }
+            return val;
+          }).join(',')
+        )
+      ].join('\n');
+      
+      // Download
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      
+      addNotification(`✅ Exported ${data.length} records`, 'success');
+    } catch (error) {
+      console.error('Export error:', error);
+      addNotification('Failed to export data', 'error');
     }
   };
-
+  
   // ============================================================================
-  // GENERATE SMART FOLLOW-UP
+  // BACKUP DATA
   // ============================================================================
-  const generateSmartFollowUp = async (leadEmail, leadData, followUpNumber = 1) => {
-    if (!user?.uid) return;
+  const backupData = async () => {
+    if (!user?.uid || isBackingUp) return;
+    
+    setIsBackingUp(true);
+    
     try {
-      const lead = sentLeads.find(l => l.email === leadEmail);
-      const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
-      const res = await fetch('/api/smart-followup-generator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyName: leadData.business || leadEmail,
-          leadBehavior: {
-            opened: lead?.opened || false,
-            openedCount: lead?.openedCount || 0,
-            clicked: lead?.clicked || false,
-            clickCount: lead?.clickCount || 0,
-            replied: lead?.replied || false,
-            interestScore: lead?.interestScore || 0,
-            daysSinceSent: lead ? Math.floor((new Date() - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24)) : 0
-          },
-          previousEmails: lead?.followUpCount || 0,
-          defaultTemplate,
-          followUpNumber
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSmartFollowUpSuggestions(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
-        return data;
-      }
-    } catch (err) {
-      console.error('Smart follow-up error:', err);
-    }
-    return null;
-  };
-
-  // ============================================================================
-  // ANALYZE REPLY SENTIMENT
-  // ============================================================================
-  const analyzeReplySentiment = async (replyText, leadEmail) => {
-    if (!replyText) return;
-    try {
-      const res = await fetch('/api/sentiment-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ replyText, leadEmail })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSentimentAnalysis(prev => ({
-          ...prev,
-          [leadEmail]: data
-        }));
-      }
-    } catch (err) {
-      console.error('Sentiment analysis error:', err);
-    }
-  };
-
-  // ============================================================================
-  // UPDATE DEALS FROM CLICKS
-  // ============================================================================
-  useEffect(() => {
-    const updateDealsFromClicks = async () => {
-      const updates = [];
-      Object.entries(clickStats).forEach(([clid, data]) => {
-        if (data.count > 0 && data.email) {
-          updates.push(updateDoc(doc(db, 'deals', data.email), {
-            stage: 'contacted',
-            lastUpdate: new Date().toISOString()
-          }));
+      const backup = {
+        userId: user.uid,
+        timestamp: new Date().toISOString(),
+        contacts: whatsappLinks,
+        sentLeads,
+        followUpHistory,
+        dealStage,
+        templates: {
+          templateA,
+          templateB,
+          whatsappTemplate,
+          smsTemplate,
+          instagramTemplate,
+          twitterTemplate,
+          linkedinTemplate,
+          followUpTemplates
+        },
+        settings: {
+          senderName,
+          senderEmail,
+          fieldMappings,
+          abTestMode,
+          smsConsent,
+          userPreferences
         }
-      });
-      if (updates.length > 0) {
-        await Promise.all(updates);
-        loadDeals();
+      };
+      
+      // Save to Firebase
+      if (db) {
+        const backupRef = doc(db, 'backups', `${user.uid}_${Date.now()}`);
+        await setDoc(backupRef, backup);
       }
-    };
-    if (Object.keys(clickStats).length > 0) {
-      updateDealsFromClicks();
+      
+      // Save to localStorage
+      localStorageHelper.set(`backup_${user.uid}`, backup);
+      
+      setLastBackup(new Date().toISOString());
+      addNotification('✅ Backup completed successfully', 'success');
+    } catch (error) {
+      console.error('Backup error:', error);
+      addNotification('Failed to create backup', 'error');
+    } finally {
+      setIsBackingUp(false);
     }
-  }, [clickStats, loadDeals]);
-
-  // ============================================================================
-  // UPDATE VALID EMAILS COUNT ON FILTER CHANGE
-  // ============================================================================
-  useEffect(() => {
-    if (!csvContent) return;
-    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-    if (lines.length < 2) return;
-    const headers = parseCsvRow(lines[0]).map(h => h.trim());
-    let hot = 0, warm = 0;
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCsvRow(lines[i]);
-      if (values.length !== headers.length) continue;
-      const row = {};
-      headers.forEach((header, idx) => {
-        row[header] = values[idx] || '';
-      });
-      if (!isValidEmail(row.email)) continue;
-      const quality = (row.lead_quality || '').trim() || 'HOT';
-      if (quality === 'HOT') hot++;
-      else if (quality === 'WARM') warm++;
-    }
-    if (leadQualityFilter === 'HOT') setValidEmails(hot);
-    else if (leadQualityFilter === 'WARM') setValidEmails(warm);
-    else setValidEmails(hot + warm);
-  }, [leadQualityFilter, csvContent]);
-
+  };
+  
   // ============================================================================
   // LOADING STATE
   // ============================================================================
   if (loadingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <div className="text-lg text-white">Loading your strategic outreach dashboard...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500 mx-auto mb-4"></div>
+          <div className="text-lg text-white font-medium">Loading your strategic outreach dashboard...</div>
+          <div className="text-sm text-gray-400 mt-2">Please wait</div>
+        </div>
       </div>
     );
   }
-
+  
   // ============================================================================
   // NOT AUTHENTICATED STATE
   // ============================================================================
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-900">
-        <button
-          onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition"
-        >
-          Sign in to Continue
-        </button>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+        <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700 max-w-md w-full mx-4">
+          <div className="text-center mb-6">
+            <h1 className="text-3xl font-bold text-white mb-2">B2B Growth Engine</h1>
+            <p className="text-gray-400">Strategic Outreach Automation</p>
+          </div>
+          
+          <div className="space-y-4">
+            <button
+              onClick={() => {
+                setAuthError(null);
+                signInWithPopup(auth, new GoogleAuthProvider()).catch(err => {
+                  setAuthError(err.message);
+                  addNotification(`Sign in failed: ${err.message}`, 'error');
+                });
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-xl transition font-medium flex items-center justify-center gap-3"
+            >
+              <svg className="w-6 h-6" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Sign in with Google
+            </button>
+            
+            {authError && (
+              <div className="bg-red-900/30 border border-red-700 text-red-300 p-3 rounded-lg text-sm">
+                {authError}
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-6 pt-6 border-t border-gray-700">
+            <div className="text-xs text-gray-500 text-center">
+              Secure authentication powered by Firebase
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
-
+  
   // ============================================================================
   // EXTRACT ALL TEMPLATE VARIABLES FOR UI
   // ============================================================================
@@ -2518,107 +3633,205 @@ export default function Dashboard() {
     ...extractTemplateVariables(smsTemplate),
     ...extractTemplateVariables(instagramTemplate),
     ...extractTemplateVariables(twitterTemplate),
+    ...extractTemplateVariables(linkedinTemplate),
     'sender_name',
     ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
     ...csvHeaders
   ])];
-
+  
   // ============================================================================
   // A/B TEST SUMMARY
   // ============================================================================
   const abSummary = abTestMode ? (
-    <div className="bg-blue-50 p-3 rounded-lg mt-4">
-      <h3 className="text-sm font-bold text-blue-800">📊 A/B Test Results</h3>
-      <div className="flex justify-between text-xs mt-1">
-        <span>Template A: {abResults.a.sent || 0} sent</span>
-        <span>Template B: {abResults.b.sent || 0} sent</span>
+    <div className="bg-blue-900/30 p-4 rounded-xl mt-4 border border-blue-700/50">
+      <h3 className="text-sm font-bold text-blue-300 mb-3">📊 A/B Test Results</h3>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-blue-800/30 p-3 rounded-lg">
+          <div className="text-xs text-blue-300">Template A</div>
+          <div className="text-xl font-bold text-white">{abResults.a.sent || 0} sent</div>
+          <div className="text-xs text-blue-400">{abResults.a.replied || 0} replied</div>
+        </div>
+        <div className="bg-purple-800/30 p-3 rounded-lg">
+          <div className="text-xs text-purple-300">Template B</div>
+          <div className="text-xl font-bold text-white">{abResults.b.sent || 0} sent</div>
+          <div className="text-xs text-purple-400">{abResults.b.replied || 0} replied</div>
+        </div>
       </div>
-      <div className="text-xs text-blue-700 mt-1">
+      <div className="text-xs text-blue-400 mt-3">
         Check back in 48h for open/click rates
       </div>
     </div>
   ) : null;
-
+  
   // ============================================================================
   // MAIN DASHBOARD UI
   // ============================================================================
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-gray-200">
       <Head>
         <title>B2B Growth Engine | Strategic Outreach</title>
+        <meta name="description" content="Marketing automation dashboard for B2B outreach" />
       </Head>
       
+      {/* NOTIFICATIONS */}
+      <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
+        {notifications.slice(0, 5).map(notification => (
+          <div
+            key={notification.id}
+            className={`p-4 rounded-lg shadow-lg border backdrop-blur-sm animate-fade-in ${
+              notification.type === 'success' ? 'bg-green-900/80 border-green-700 text-green-200' :
+              notification.type === 'error' ? 'bg-red-900/80 border-red-700 text-red-200' :
+              notification.type === 'warning' ? 'bg-yellow-900/80 border-yellow-700 text-yellow-200' :
+              'bg-blue-900/80 border-blue-700 text-blue-200'
+            }`}
+          >
+            <div className="flex justify-between items-start">
+              <div className="text-sm whitespace-pre-line">{notification.message}</div>
+              <button
+                onClick={() => markNotificationRead(notification.id)}
+                className="ml-2 text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      
       {/* HEADER */}
-      <header className="bg-gray-800 shadow-sm border-b border-gray-700">
-        <div className="container mx-auto px-2 sm:px-4 py-3 sm:py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <h1 className="text-lg sm:text-xl font-bold text-white">B2B Growth Engine</h1>
-          <div className="flex flex-wrap items-center gap-1 sm:gap-2 w-full sm:w-auto">
-            <button
-              onClick={() => {
-                loadCallHistory();
-                setShowCallHistoryModal(true);
-              }}
-              className="text-xs sm:text-sm bg-green-700 hover:bg-green-600 text-white px-2 sm:px-3 py-1.5 rounded"
-            >
-              📞 Call History
-            </button>
-            <button
-              onClick={() => {
-                loadSentLeads();
-                setShowFollowUpModal(true);
-              }}
-              className="text-xs sm:text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-2 sm:px-3 py-1.5 rounded"
-            >
-              📬 Reply Center
-            </button>
-            <button
-              onClick={() => setShowAdvancedAnalytics(!showAdvancedAnalytics)}
-              className="text-xs sm:text-sm bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white px-2 sm:px-3 py-1.5 rounded font-medium"
-            >
-              🤖 AI Analytics
-            </button>
-            <button
-              onClick={() => router.push('/format')}
-              className="text-xs sm:text-sm bg-green-700 hover:bg-green-600 text-white px-2 sm:px-3 py-1.5 rounded"
-            >
-              🔥 Scrape
-            </button>
-            <button
-              onClick={() => signOut(auth)}
-              className="text-xs sm:text-sm text-gray-300 hover:text-white px-2 sm:px-3 py-1.5"
-            >
-              Sign Out
-            </button>
+      <header className="bg-gray-800/80 backdrop-blur-sm shadow-lg border-b border-gray-700 sticky top-0 z-40">
+        <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-2 rounded-lg">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div>
+                <h1 className="text-lg sm:text-xl font-bold text-white">B2B Growth Engine</h1>
+                <p className="text-xs text-gray-400 hidden sm:block">Strategic Outreach Automation</p>
+              </div>
+            </div>
+            
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => {
+                  loadCallHistory();
+                  setShowCallHistoryModal(true);
+                }}
+                className="text-xs sm:text-sm bg-green-700 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
+              >
+                <span>📞</span>
+                <span className="hidden sm:inline">Call History</span>
+              </button>
+              
+              <button
+                onClick={() => {
+                  loadSentLeads();
+                  setShowFollowUpModal(true);
+                }}
+                className="text-xs sm:text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
+              >
+                <span>📬</span>
+                <span className="hidden sm:inline">Reply Center</span>
+              </button>
+              
+              <button
+                onClick={() => setShowAdvancedAnalytics(!showAdvancedAnalytics)}
+                className="text-xs sm:text-sm bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white px-3 py-2 rounded-lg transition font-medium flex items-center gap-2"
+              >
+                <span>🤖</span>
+                <span className="hidden sm:inline">AI Analytics</span>
+              </button>
+              
+              <button
+                onClick={() => router.push('/format')}
+                className="text-xs sm:text-sm bg-green-700 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
+              >
+                <span>🔥</span>
+                <span className="hidden sm:inline">Scrape</span>
+              </button>
+              
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="text-xs sm:text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg transition"
+              >
+                ⚙️
+              </button>
+              
+              <button
+                onClick={() => signOut(auth)}
+                className="text-xs sm:text-sm text-gray-300 hover:text-white px-3 py-2 rounded-lg transition"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </header>
-
-      <main className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
+      
+      <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6">
+        {/* STATUS BAR */}
+        {status && (
+          <div className={`mb-4 p-4 rounded-xl border backdrop-blur-sm ${
+            statusType === 'success' ? 'bg-green-900/30 border-green-700 text-green-200' :
+            statusType === 'error' ? 'bg-red-900/30 border-red-700 text-red-200' :
+            statusType === 'warning' ? 'bg-yellow-900/30 border-yellow-700 text-yellow-200' :
+            'bg-blue-900/30 border-blue-700 text-blue-200'
+          }`}>
+            <div className="whitespace-pre-line text-sm sm:text-base">{status}</div>
+            {sendProgress.total > 0 && (
+              <div className="mt-3">
+                <div className="flex justify-between text-xs mb-1">
+                  <span>Progress</span>
+                  <span>{sendProgress.current}/{sendProgress.total}</span>
+                </div>
+                <div className="w-full bg-gray-700 rounded-full h-2">
+                  <div 
+                    className="bg-blue-500 h-2 rounded-full transition-all"
+                    style={{ width: `${(sendProgress.current / sendProgress.total) * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        
         {/* DASHBOARD STATS */}
         {whatsappLinks.length > 0 && (
           <div className="mb-6 sm:mb-8">
-            <div className={`grid grid-cols-2 sm:grid-cols-3 ${followUpStats.interestedLeads > 0 ? 'lg:grid-cols-7' : 'lg:grid-cols-6'} gap-2 sm:gap-3`}>
-              <div className="bg-gradient-to-br from-blue-900 to-blue-800 p-3 sm:p-4 rounded-lg shadow border border-blue-700 hover:border-blue-600 transition">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+              <div className="bg-gradient-to-br from-blue-900/50 to-blue-800/50 p-4 rounded-xl shadow border border-blue-700/50 hover:border-blue-600 transition">
                 <div className="text-xs text-blue-300 font-semibold">📊 Total</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">{whatsappLinks.length}</div>
                 <div className="text-xs text-blue-200 mt-1">contacts loaded</div>
               </div>
-              <div className="bg-gradient-to-br from-green-900 to-green-800 p-3 sm:p-4 rounded-lg shadow border border-green-700 hover:border-green-600 transition">
+              
+              <div className="bg-gradient-to-br from-green-900/50 to-green-800/50 p-4 rounded-xl shadow border border-green-700/50 hover:border-green-600 transition">
                 <div className="text-xs text-green-300 font-semibold">✅ Replied</div>
-                <div className="text-2xl sm:text-3xl font-bold text-white mt-1">{Object.values(repliedLeads).filter(Boolean).length}</div>
-                <div className="text-xs text-green-200 mt-1">{Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}% reply rate</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
+                  {Object.values(repliedLeads).filter(Boolean).length}
+                </div>
+                <div className="text-xs text-green-200 mt-1">
+                  {Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}% reply rate
+                </div>
               </div>
+              
               {followUpStats.interestedLeads > 0 && (
-                <div className="bg-gradient-to-br from-pink-900 to-pink-800 p-3 sm:p-4 rounded-lg shadow border border-pink-700 hover:border-pink-600 transition cursor-pointer"
+                <div 
+                  className="bg-gradient-to-br from-pink-900/50 to-pink-800/50 p-4 rounded-xl shadow border border-pink-700/50 hover:border-pink-600 transition cursor-pointer"
                   onClick={() => {
                     document.getElementById('interested-leads-section')?.scrollIntoView({ behavior: 'smooth' });
-                  }}>
+                  }}
+                >
                   <div className="text-xs text-pink-300 font-semibold">🔥 Interested</div>
                   <div className="text-2xl sm:text-3xl font-bold text-white mt-1">{followUpStats.interestedLeads}</div>
                   <div className="text-xs text-pink-200 mt-1">opens/clicks (no reply)</div>
                 </div>
               )}
-              <div className="bg-gradient-to-br from-yellow-900 to-yellow-800 p-3 sm:p-4 rounded-lg shadow border border-yellow-700 hover:border-yellow-600 transition">
+              
+              <div className="bg-gradient-to-br from-yellow-900/50 to-yellow-800/50 p-4 rounded-xl shadow border border-yellow-700/50 hover:border-yellow-600 transition">
                 <div className="text-xs text-yellow-300 font-semibold">⭐ Quality</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
                   {Object.values(leadScores).length > 0
@@ -2628,34 +3841,29 @@ export default function Dashboard() {
                 </div>
                 <div className="text-xs text-yellow-200 mt-1">avg lead score</div>
               </div>
-              <div className="bg-gradient-to-br from-purple-900 to-purple-800 p-3 sm:p-4 rounded-lg shadow border border-purple-700 hover:border-purple-600 transition">
+              
+              <div className="bg-gradient-to-br from-purple-900/50 to-purple-800/50 p-4 rounded-xl shadow border border-purple-700/50 hover:border-purple-600 transition">
                 <div className="text-xs text-purple-300 font-semibold">💰 Pipeline</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
                   ${(Object.values(repliedLeads).filter(Boolean).length * 5).toFixed(0)}k
                 </div>
                 <div className="text-xs text-purple-200 mt-1">potential revenue</div>
               </div>
-              <div className="bg-gradient-to-br from-orange-900 to-orange-800 p-3 sm:p-4 rounded-lg shadow border border-orange-700 hover:border-orange-600 transition">
+              
+              <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/50 p-4 rounded-xl shadow border border-orange-700/50 hover:border-orange-600 transition">
                 <div className="text-xs text-orange-300 font-semibold">📈 Monthly</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
                   ${Math.round((calculateRevenueForecasts().expectedMonthlyRevenue) / 1000)}k
                 </div>
                 <div className="text-xs text-orange-200 mt-1">forecast (30d)</div>
               </div>
-              <div className="bg-gradient-to-br from-indigo-900 to-indigo-800 p-3 sm:p-4 rounded-lg shadow border border-indigo-700 hover:border-indigo-600 transition flex flex-col justify-center">
-                <button
-                  onClick={() => setShowDetailedAnalytics(!showDetailedAnalytics)}
-                  className="w-full text-xs sm:text-sm font-bold bg-indigo-700 hover:bg-indigo-600 text-white py-2 rounded transition"
-                >
-                  {showDetailedAnalytics ? '✕ Hide' : '🧠 Analytics'}
-                </button>
-              </div>
             </div>
+            
             {showAdvancedAnalytics && (
-              <div className="mt-4 bg-gradient-to-br from-purple-900/20 via-indigo-900/20 to-blue-900/20 p-4 sm:p-6 rounded-lg border-2 border-purple-500/30">
+              <div className="mt-4 bg-gradient-to-br from-purple-900/20 via-indigo-900/20 to-blue-900/20 p-4 sm:p-6 rounded-xl border-2 border-purple-500/30">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-lg sm:text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-indigo-400 to-blue-400">
-                    🤖 AI-Powered Analytics (2026)
+                    🤖 AI-Powered Analytics
                   </h2>
                   <button
                     onClick={() => setShowAdvancedAnalytics(false)}
@@ -2664,6 +3872,7 @@ export default function Dashboard() {
                     ✕
                   </button>
                 </div>
+                
                 {sendTimeOptimization && (
                   <div className="bg-gray-800/50 p-4 rounded-lg border border-purple-700 mb-4">
                     <h3 className="text-sm font-bold text-purple-300 mb-2">⏰ Optimal Send Time</h3>
@@ -2674,179 +3883,84 @@ export default function Dashboard() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-400">Potential Improvement:</span>
-                        <span className="font-bold text-green-400">+{sendTimeOptimization.potentialImprovement}</span>
-                      </div>
-                      <div className="text-gray-300 mt-2">
-                        {sendTimeOptimization.insights?.map((insight, i) => (
-                          <div key={i}>• {insight}</div>
-                        ))}
+                        <span className="font-bold text-green-400">+{sendTimeOptimization.potentialImprovement}%</span>
                       </div>
                     </div>
                   </div>
                 )}
               </div>
             )}
-            {showDetailedAnalytics && (
-              <div className="mt-4 bg-gradient-to-b from-gray-850 to-gray-900 p-4 sm:p-6 rounded-lg border border-gray-700">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg sm:text-xl font-bold text-white">📊 Campaign Intelligence</h2>
-                  <button
-                    onClick={() => setShowAdvancedAnalytics(!showAdvancedAnalytics)}
-                    className="text-xs bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white px-3 py-1.5 rounded font-medium"
-                  >
-                    {showAdvancedAnalytics ? '🤖 Hide AI Analytics' : '🤖 Show AI Analytics'}
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {(() => {
-                    const funnel = calculateConversionFunnel();
-                    return (
-                      <div className="bg-gray-800 p-4 rounded border border-gray-700">
-                        <div className="text-sm font-bold text-blue-300 mb-3">📊 Conversion Funnel</div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between items-center">
-                            <span className="text-gray-400">Sent</span>
-                            <span className="font-bold text-blue-400">{funnel.stages.sent}</span>
-                          </div>
-                          <div className="w-full h-1 bg-gray-700 rounded overflow-hidden"><div className="h-full bg-blue-500" style={{width: '100%'}}></div></div>
-                          <div className="flex justify-between items-center mt-2">
-                            <span className="text-gray-400">Open Rate ({funnel.conversionRate.openRate}%)</span>
-                            <span className="font-bold text-green-400">{funnel.stages.opened}</span>
-                          </div>
-                          <div className="w-full h-1 bg-gray-700 rounded overflow-hidden"><div className="h-full bg-green-500" style={{width: `${funnel.conversionRate.openRate}%`}}></div></div>
-                          <div className="flex justify-between items-center mt-2">
-                            <span className="text-gray-400">Reply Rate ({funnel.conversionRate.replyRate}%)</span>
-                            <span className="font-bold text-yellow-400">{funnel.stages.replied}</span>
-                          </div>
-                          <div className="w-full h-1 bg-gray-700 rounded overflow-hidden"><div className="h-full bg-yellow-500" style={{width: `${funnel.conversionRate.replyRate}%`}}></div></div>
-                          <div className="flex justify-between items-center mt-2">
-                            <span className="text-gray-400">Closed ({funnel.conversionRate.closeRate}% of demos)</span>
-                            <span className="font-bold text-green-300">{funnel.stages.closed}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    const segments = segmentLeads();
-                    return (
-                      <div className="bg-gray-800 p-4 rounded border border-gray-700">
-                        <div className="text-sm font-bold text-purple-300 mb-3">🎯 Lead Segments</div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between items-center bg-green-900/20 p-2 rounded">
-                            <span className="text-gray-300">🔥 Very Hot (Replied)</span>
-                            <span className="font-bold text-green-400">{segments.veryHot.length}</span>
-                          </div>
-                          <div className="flex justify-between items-center bg-orange-900/20 p-2 rounded">
-                            <span className="text-gray-300">🔥 Hot (80+)</span>
-                            <span className="font-bold text-orange-400">{segments.hot.length}</span>
-                          </div>
-                          <div className="flex justify-between items-center bg-yellow-900/20 p-2 rounded">
-                            <span className="text-gray-300">🟡 Warm (60-79)</span>
-                            <span className="font-bold text-yellow-400">{segments.warm.length}</span>
-                          </div>
-                          <div className="flex justify-between items-center bg-blue-900/20 p-2 rounded">
-                            <span className="text-gray-300">🔵 Cold (40-59)</span>
-                            <span className="font-bold text-blue-400">{segments.cold.length}</span>
-                          </div>
-                          <div className="flex justify-between items-center bg-gray-700/20 p-2 rounded">
-                            <span className="text-gray-300">Inactive (&lt;40)</span>
-                            <span className="font-bold text-gray-400">{segments.inactive.length}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  {(() => {
-                    const forecast = calculateRevenueForecasts();
-                    return (
-                      <div className="bg-gray-800 p-4 rounded border border-gray-700">
-                        <div className="text-sm font-bold text-green-300 mb-3">💹 Revenue Forecast</div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Current Pipeline</span>
-                            <span className="font-bold text-green-400">${(forecast.currentPipeline / 1000).toFixed(0)}k</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Demo Opportunities</span>
-                            <span className="font-bold text-yellow-400">${(forecast.demoOpportunities / 1000).toFixed(0)}k</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">30-Day Expected</span>
-                            <span className="font-bold text-blue-400">${(forecast.expectedMonthlyRevenue / 1000).toFixed(0)}k</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Annual Run Rate</span>
-                            <span className="font-bold text-purple-400">${(forecast.successMetrics.expectedAnnualRunRate / 1000).toFixed(0)}k</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
           </div>
         )}
-
+        
         {/* MAIN GRID LAYOUT */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 lg:gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* LEFT COLUMN - UPLOAD & SETTINGS */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            {/* CSV Upload */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-4 text-white">1. Upload Leads CSV</h2>
               <input
                 type="file"
                 accept=".csv"
                 onChange={handleCsvUpload}
-                className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded"
+                className="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700"
               />
-              <p className="text-xs text-gray-400 mt-2">Auto-scores leads and binds fields.</p>
-              <div className="mt-3">
-                <label className="block text-sm font-medium mb-1 text-gray-200">
+              {csvFileName && (
+                <div className="mt-2 text-xs text-gray-400">
+                  📁 {csvFileName} • {csvUploadDate ? new Date(csvUploadDate).toLocaleDateString() : ''}
+                </div>
+              )}
+              <p className="text-xs text-gray-400 mt-3">Auto-scores leads and binds fields</p>
+              
+              <div className="mt-4">
+                <label className="block text-sm font-medium mb-2 text-gray-200">
                   Target Lead Quality
                 </label>
                 <select
                   value={leadQualityFilter}
                   onChange={(e) => setLeadQualityFilter(e.target.value)}
-                  className="w-full p-1 bg-gray-700 text-white border border-gray-600 rounded text-sm"
+                  className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg text-sm"
                 >
                   <option value="HOT">🔥 HOT Leads Only</option>
                   <option value="WARM">📈 WARM Leads Only</option>
                   <option value="all">💥 All Leads</option>
                 </select>
-                <p className="text-xs text-green-400 mt-1">
+                <p className="text-xs text-green-400 mt-2">
                   {validEmails} {leadQualityFilter} leads ready
                 </p>
               </div>
-              <div className="mt-3">
-                <label className="flex items-center text-sm text-gray-200">
+              
+              <div className="mt-4">
+                <label className="flex items-center text-sm text-gray-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={smsConsent}
                     onChange={(e) => setSmsConsent(e.target.checked)}
-                    className="mr-2"
+                    className="mr-2 w-4 h-4"
                   />
                   SMS Consent (for compliant outreach)
                 </label>
               </div>
             </div>
-
+            
+            {/* Search & Filter */}
             {whatsappLinks.length > 0 && (
-              <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+              <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
                 <h2 className="text-lg font-bold mb-3 text-white">🔍 Smart Contact Search</h2>
                 <input
                   type="text"
                   placeholder="Search by name, email, phone..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded mb-2 text-sm"
+                  className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg mb-3 text-sm"
                 />
-                <div className="flex flex-col sm:flex-row gap-2">
+                
+                <div className="flex flex-col sm:flex-row gap-2 mb-3">
                   <select
                     value={contactFilter}
                     onChange={(e) => setContactFilter(e.target.value)}
-                    className="flex-1 p-1 bg-gray-700 text-white border border-gray-600 rounded text-xs"
+                    className="flex-1 p-2 bg-gray-700 text-white border border-gray-600 rounded-lg text-xs"
                   >
                     <option value="all">All Status</option>
                     <option value="replied">✅ Replied</option>
@@ -2854,128 +3968,137 @@ export default function Dashboard() {
                     <option value="high-quality">⭐ High Quality</option>
                     <option value="contacted">📞 Contacted</option>
                     <option value="not-contacted">🆕 Not Contacted</option>
+                    <option value="hot-leads">🔥 Hot Leads</option>
+                    <option value="warm-leads">🟡 Warm Leads</option>
                   </select>
+                  
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
-                    className="flex-1 p-1 bg-gray-700 text-white border border-gray-600 rounded text-xs"
+                    className="flex-1 p-2 bg-gray-700 text-white border border-gray-600 rounded-lg text-xs"
                   >
-                    <option value="score">Score ↓</option>
+                    <option value="score">Score</option>
                     <option value="recent">Recent</option>
                     <option value="name">A-Z</option>
+                    <option value="added">Added</option>
                   </select>
+                  
+                  <button
+                    onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
+                    className="px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs"
+                  >
+                    {sortOrder === 'desc' ? '↓' : '↑'}
+                  </button>
                 </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  Showing {getFilteredAndSortedContacts().length} of {whatsappLinks.length} contacts
+                
+                <div className="text-xs text-gray-400">
+                  Showing {paginatedContacts.contacts.length} of {paginatedContacts.total} contacts
                 </div>
               </div>
             )}
-
+            
+            {/* Field Mappings */}
             {csvHeaders.length > 0 && (
-              <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700 max-h-96 overflow-y-auto">
-                <h2 className="text-lg sm:text-xl font-bold mb-4 text-white sticky top-0 bg-gray-800 pb-2">2. Field Mappings</h2>
-                {(() => {
-                  const allVars = [...new Set([
-                    ...extractTemplateVariables(templateA.subject),
-                    ...extractTemplateVariables(templateA.body),
-                    ...extractTemplateVariables(templateB.subject),
-                    ...extractTemplateVariables(templateB.body),
-                    ...extractTemplateVariables(whatsappTemplate),
-                    ...extractTemplateVariables(smsTemplate),
-                    ...extractTemplateVariables(instagramTemplate),
-                    ...extractTemplateVariables(twitterTemplate),
-                    ...followUpTemplates.flatMap(t => [
-                      ...extractTemplateVariables(t.subject || ''),
-                      ...extractTemplateVariables(t.body || '')
-                    ]),
-                    'sender_name',
-                    ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
-                    ...csvHeaders
-                  ])];
-                  return allVars.map(varName => (
-                    <div key={varName} className="flex items-center mb-2">
-                      <span className="bg-gray-700 px-1.5 py-0.5 rounded text-xs font-mono mr-2 text-gray-200 min-w-max">
-                        {`{{${varName}}}`}
-                      </span>
-                      <select
-                        value={fieldMappings[varName] || ''}
-                        onChange={(e) => handleMappingChange(varName, e.target.value)}
-                        className="text-xs bg-gray-700 text-gray-200 border border-gray-600 rounded px-2 py-1 flex-1 min-w-0"
-                      >
-                        <option value="">-- Map to Column --</option>
-                        {csvHeaders.map(col => (
-                          <option key={col} value={col} className="bg-gray-800 text-gray-200">{col}</option>
-                        ))}
-                        {varName === 'sender_name' && (
-                          <option value="sender_name" className="bg-gray-800 text-gray-200">Use sender name</option>
-                        )}
-                      </select>
-                    </div>
-                  ));
-                })()}
+              <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700 max-h-96 overflow-y-auto">
+                <h2 className="text-lg sm:text-xl font-bold mb-4 text-white sticky top-0 bg-gray-800 pb-2">
+                  2. Field Mappings
+                </h2>
+                {uiVars.map(varName => (
+                  <div key={varName} className="flex items-center mb-2">
+                    <span className="bg-gray-700 px-2 py-1 rounded text-xs font-mono mr-2 text-gray-200 min-w-max">
+                      {`{{${varName}}}`}
+                    </span>
+                    <select
+                      value={fieldMappings[varName] || ''}
+                      onChange={(e) => handleMappingChange(varName, e.target.value)}
+                      className="text-xs bg-gray-700 text-gray-200 border border-gray-600 rounded px-2 py-1 flex-1 min-w-0"
+                    >
+                      <option value="">-- Map to Column --</option>
+                      {csvHeaders.map(col => (
+                        <option key={col} value={col} className="bg-gray-800 text-gray-200">{col}</option>
+                      ))}
+                      {varName === 'sender_name' && (
+                        <option value="sender_name" className="bg-gray-800 text-gray-200">Use sender name</option>
+                      )}
+                    </select>
+                  </div>
+                ))}
               </div>
             )}
           </div>
-
+          
           {/* MIDDLE COLUMN - TEMPLATES & SEND */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
-              <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">3. Your Name (Sender)</h2>
-              <input
-                type="text"
-                value={senderName}
-                onChange={(e) => setSenderName(e.target.value)}
-                className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded"
-                placeholder="e.g., Alex from GrowthCo"
-              />
+            {/* Sender Info */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+              <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">3. Your Info</h2>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={senderName}
+                  onChange={(e) => setSenderName(e.target.value)}
+                  className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg"
+                  placeholder="Your Name"
+                />
+                <input
+                  type="email"
+                  value={senderEmail}
+                  onChange={(e) => setSenderEmail(e.target.value)}
+                  className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg"
+                  placeholder="Your Email"
+                  readOnly
+                />
+              </div>
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* Email Template */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
                 <h2 className="text-lg sm:text-xl font-bold text-white">4. Email Template</h2>
-                <label className="flex items-center text-sm text-gray-200">
+                <label className="flex items-center text-sm text-gray-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={abTestMode}
                     onChange={(e) => setAbTestMode(e.target.checked)}
-                    className="mr-2"
+                    className="mr-2 w-4 h-4"
                   />
                   A/B Testing
                 </label>
               </div>
+              
               {abTestMode ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="border border-gray-700 rounded p-3 bg-gray-750">
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="border border-gray-700 rounded-lg p-3 bg-gray-750">
                     <h3 className="font-bold text-green-400 mb-2">Template A</h3>
                     <input
                       type="text"
                       value={templateA.subject}
                       onChange={(e) => setTemplateA({ ...templateA, subject: e.target.value })}
-                      className="w-full p-1 bg-gray-700 text-white border border-gray-600 rounded mb-1 text-sm"
+                      className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg mb-2 text-sm"
                       placeholder="Subject A"
                     />
                     <textarea
                       value={templateA.body}
                       onChange={(e) => setTemplateA({ ...templateA, body: e.target.value })}
-                      rows="3"
-                      className="w-full p-1 font-mono text-sm bg-gray-700 text-white border border-gray-600 rounded"
+                      rows="4"
+                      className="w-full p-2 font-mono text-sm bg-gray-700 text-white border border-gray-600 rounded-lg"
                       placeholder="Body A..."
                     />
                   </div>
-                  <div className="border border-gray-700 rounded p-3 bg-gray-750">
+                  <div className="border border-gray-700 rounded-lg p-3 bg-gray-750">
                     <h3 className="font-bold text-blue-400 mb-2">Template B</h3>
                     <input
                       type="text"
                       value={templateB.subject}
                       onChange={(e) => setTemplateB({ ...templateB, subject: e.target.value })}
-                      className="w-full p-1 bg-gray-700 text-white border border-gray-600 rounded mb-1 text-sm"
+                      className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg mb-2 text-sm"
                       placeholder="Subject B"
                     />
                     <textarea
                       value={templateB.body}
                       onChange={(e) => setTemplateB({ ...templateB, body: e.target.value })}
-                      rows="3"
-                      className="w-full p-1 font-mono text-sm bg-gray-700 text-white border border-gray-600 rounded"
+                      rows="4"
+                      className="w-full p-2 font-mono text-sm bg-gray-700 text-white border border-gray-600 rounded-lg"
                       placeholder="Body B..."
                     />
                   </div>
@@ -2986,24 +4109,25 @@ export default function Dashboard() {
                     type="text"
                     value={templateA.subject}
                     onChange={(e) => setTemplateA({ ...templateA, subject: e.target.value })}
-                    className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded mb-2"
+                    className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg mb-3"
                     placeholder="Subject"
                   />
                   <textarea
                     value={templateA.body}
                     onChange={(e) => setTemplateA({ ...templateA, body: e.target.value })}
-                    rows="4"
-                    className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded"
+                    rows="6"
+                    className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded-lg"
                     placeholder="Hello {{business_name}}, ..."
                   />
                 </div>
               )}
+              
               {abTestMode ? (
                 <div className="space-y-2 mt-4">
                   <button
                     onClick={() => handleSendEmails('A')}
                     disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
-                    className={`w-full py-2.5 rounded font-bold ${
+                    className={`w-full py-3 rounded-lg font-bold transition ${
                       isSending || !csvContent || !senderName.trim() || validEmails === 0
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
@@ -3014,7 +4138,7 @@ export default function Dashboard() {
                   <button
                     onClick={() => handleSendEmails('B')}
                     disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
-                    className={`w-full py-2.5 rounded font-bold ${
+                    className={`w-full py-3 rounded-lg font-bold transition ${
                       isSending || !csvContent || !senderName.trim() || validEmails === 0
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-blue-700 hover:bg-blue-600 text-white'
@@ -3027,7 +4151,8 @@ export default function Dashboard() {
                 <>
                   <button
                     onClick={() => handleSendEmails()}
-                    className={`w-full py-2.5 rounded font-bold mt-4 ${
+                    disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
+                    className={`w-full py-3 rounded-lg font-bold mt-4 transition ${
                       isSending || !csvContent || !senderName.trim() || validEmails === 0
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
@@ -3037,49 +4162,52 @@ export default function Dashboard() {
                   </button>
                   <button
                     onClick={handleSendToNewLeads}
-                    disabled={isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= 500}
-                    className={`w-full py-2.5 rounded font-bold mt-3 ${
-                      isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= 500
+                    disabled={isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS}
+                    className={`w-full py-3 rounded-lg font-bold mt-3 transition ${
+                      isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS
                         ? 'bg-gray-600 cursor-not-allowed text-gray-400'
                         : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-lg'
                     }`}
-                    title={dailyEmailCount >= 500 ? 'Daily limit reached (500 emails/day)' : `Send to ${getNewLeads().length} new leads (${500 - dailyEmailCount} remaining today)`}
+                    title={dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS ? 'Daily limit reached' : `Send to ${getNewLeads().length} new leads`}
                   >
                     🚀 Smart New Lead Outreach ({getNewLeads().length} new leads)
                     <div className="text-xs font-normal mt-1 opacity-90">
-                      {dailyEmailCount >= 500 ? '⚠️ Daily limit reached' : `${dailyEmailCount}/500 sent today • Prevents duplicates`}
+                      {dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS ? '⚠️ Daily limit reached' : `${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} sent today • Prevents duplicates`}
                     </div>
                   </button>
                 </>
               )}
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* WhatsApp Template */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">5. WhatsApp Template</h2>
               <textarea
                 value={whatsappTemplate}
                 onChange={(e) => setWhatsappTemplate(e.target.value)}
                 rows="3"
-                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded"
+                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded-lg"
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* SMS Template */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">6. SMS Template</h2>
               <textarea
                 value={smsTemplate}
                 onChange={(e) => setSmsTemplate(e.target.value)}
                 rows="3"
-                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded"
+                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded-lg"
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* Follow-Up Sequences */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">7. Follow-Up Sequences</h2>
               {followUpTemplates.map((template, index) => (
-                <div key={template.id} className="border border-gray-700 rounded p-3 mb-3 bg-gray-750">
+                <div key={template.id} className="border border-gray-700 rounded-lg p-3 mb-3 bg-gray-750">
                   <div className="flex justify-between items-start">
                     <h3 className="font-bold text-purple-400">{template.name}</h3>
                     <label className="flex items-center">
@@ -3170,46 +4298,37 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* Instagram Template */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">8. Instagram Template</h2>
               <textarea
                 value={instagramTemplate}
                 onChange={(e) => setInstagramTemplate(e.target.value)}
                 rows="3"
-                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded"
+                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded-lg"
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-
-            <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
+            
+            {/* Twitter Template */}
+            <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">9. Twitter Template</h2>
               <textarea
                 value={twitterTemplate}
                 onChange={(e) => setTwitterTemplate(e.target.value)}
                 rows="3"
-                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded"
+                className="w-full p-2 font-mono bg-gray-700 text-white border border-gray-600 rounded-lg"
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-
-            {status && (
-              <div
-                className={`p-3 rounded text-center whitespace-pre-line ${
-                  status.includes('✅')
-                    ? 'bg-green-900/50 text-green-300 border border-green-700'
-                    : 'bg-red-900/50 text-red-300 border border-red-700'
-                }`}
-              >
-                {status}
-              </div>
-            )}
           </div>
-
+          
           {/* RIGHT COLUMN - ANALYTICS & MULTI-CHANNEL */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             {whatsappLinks.length > 0 && (
               <div className="space-y-4">
+                {/* Campaign Performance */}
                 <div className="bg-gradient-to-br from-purple-900 to-purple-800 p-4 sm:p-6 rounded-xl shadow border border-purple-700">
                   <h2 className="text-lg sm:text-xl font-bold mb-4 text-white">📊 Campaign Performance</h2>
                   <div className="grid grid-cols-2 gap-3">
@@ -3220,8 +4339,12 @@ export default function Dashboard() {
                     </div>
                     <div className="bg-purple-800/50 p-3 rounded">
                       <div className="text-xs text-purple-300">Engagement Rate</div>
-                      <div className="text-xl sm:text-2xl font-bold text-green-400">{Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}%</div>
-                      <div className="text-xs text-green-200 mt-1">{Object.values(repliedLeads).filter(Boolean).length} replied</div>
+                      <div className="text-xl sm:text-2xl font-bold text-green-400">
+                        {Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}%
+                      </div>
+                      <div className="text-xs text-green-200 mt-1">
+                        {Object.values(repliedLeads).filter(Boolean).length} replied
+                      </div>
                     </div>
                     <div className="bg-purple-800/50 p-3 rounded">
                       <div className="text-xs text-purple-300">Quality Score</div>
@@ -3236,11 +4359,14 @@ export default function Dashboard() {
                     <div className="bg-purple-800/50 p-3 rounded">
                       <div className="text-xs text-purple-300">Hot Leads</div>
                       <div className="text-xl sm:text-2xl font-bold text-orange-400">{validEmails}</div>
-                      <div className="text-xs text-orange-200 mt-1">{Math.round((validEmails / Math.max(whatsappLinks.length, 1)) * 100)}% of pool</div>
+                      <div className="text-xs text-orange-200 mt-1">
+                        {Math.round((validEmails / Math.max(whatsappLinks.length, 1)) * 100)}% of pool
+                      </div>
                     </div>
                   </div>
                 </div>
-
+                
+                {/* Revenue Potential */}
                 <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 p-4 rounded-xl border border-green-700/50">
                   <h3 className="text-sm font-bold text-green-300 mb-3">💰 Revenue Potential</h3>
                   <div className="grid grid-cols-2 gap-3">
@@ -3260,7 +4386,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
-
+                
+                {/* Outreach Funnel */}
                 <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 p-4 rounded-xl border border-blue-700/50">
                   <h3 className="text-sm font-bold text-blue-300 mb-3">🎯 Outreach Funnel</h3>
                   <div className="space-y-2 text-xs">
@@ -3279,7 +4406,9 @@ export default function Dashboard() {
                         <div className="w-20 h-2 bg-blue-900 rounded-full overflow-hidden">
                           <div className="h-full bg-yellow-500" style={{width: `${Math.round((Math.max(0, whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length) / whatsappLinks.length) * 100)}%`}}></div>
                         </div>
-                        <span className="font-bold text-yellow-300 w-12">{whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length}</span>
+                        <span className="font-bold text-yellow-300 w-12">
+                          {whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length}
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
@@ -3288,14 +4417,17 @@ export default function Dashboard() {
                         <div className="w-20 h-2 bg-blue-900 rounded-full overflow-hidden">
                           <div className="h-full bg-green-500" style={{width: `${Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}%`}}></div>
                         </div>
-                        <span className="font-bold text-green-300 w-12">{Object.values(repliedLeads).filter(Boolean).length}</span>
+                        <span className="font-bold text-green-300 w-12">
+                          {Object.values(repliedLeads).filter(Boolean).length}
+                        </span>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
             )}
-
+            
+            {/* Interested Leads Section */}
             {interestedLeadsList.length > 0 && (
               <div id="interested-leads-section" className="bg-gradient-to-br from-pink-900/20 to-rose-900/20 p-4 sm:p-6 rounded-xl border border-pink-700/50 mb-6">
                 <h2 className="text-lg font-bold mb-4 text-pink-300 flex items-center gap-2">
@@ -3342,29 +4474,6 @@ export default function Dashboard() {
                             >
                               {researchingCompany === lead.email ? '⏳ Researching...' : '🤖 AI Research'}
                             </button>
-                            <button
-                              onClick={() => {
-                                calculatePredictiveScore(lead.email, { ...lead, ...leadData });
-                                const score = predictiveScores[lead.email];
-                                if (score) {
-                                  alert(`Predictive Score: ${score.predictiveScore}/100\nConversion Probability: ${score.conversionProbability}%\nRisk: ${score.riskLevel}\n${score.recommendations?.join('\n')}`);
-                                }
-                              }}
-                              className="text-xs bg-gradient-to-r from-blue-700 to-cyan-700 hover:from-blue-600 hover:to-cyan-600 text-white px-3 py-1.5 rounded font-medium"
-                            >
-                              📊 Score
-                            </button>
-                            <button
-                              onClick={async () => {
-                                const followUp = await generateSmartFollowUp(lead.email, leadData, (lead.followUpCount || 0) + 1);
-                                if (followUp) {
-                                  alert(`Smart Follow-up Generated!\nSubject: ${followUp.followUpEmail.subject}\nStrategy: ${followUp.followUpEmail.strategy}\n${followUp.recommendations?.join('\n')}`);
-                                }
-                              }}
-                              className="text-xs bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 text-white px-3 py-1.5 rounded font-medium"
-                            >
-                              ✉️ Smart FU
-                            </button>
                           </div>
                         </div>
                       </div>
@@ -3373,7 +4482,8 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
-
+            
+            {/* Campaign Intelligence */}
             {whatsappLinks.length > 0 && (
               <div className="bg-gradient-to-br from-indigo-900/20 to-purple-900/20 p-4 sm:p-6 rounded-xl border border-indigo-700/50">
                 <h2 className="text-lg font-bold mb-4 text-indigo-300">🧠 Campaign Intelligence</h2>
@@ -3434,7 +4544,8 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
-
+            
+            {/* Email Preview */}
             <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">10. Email Preview</h2>
               <div className="bg-gray-750 p-4 rounded border border-gray-600">
@@ -3454,7 +4565,8 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-
+            
+            {/* Multi-Channel Outreach - MOBILE RESPONSIVE */}
             {whatsappLinks.length > 0 && (
               <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
@@ -3471,7 +4583,7 @@ export default function Dashboard() {
                 </div>
                 <div className="max-h-96 overflow-y-auto space-y-3">
                   {/* ✅ UPDATED: Use sortedWhatsappLinks to show 077 numbers first, contacted at bottom */}
-                  {sortedWhatsappLinks.map((link) => {
+                  {sortedWhatsappLinks.slice(0, 10).map((link) => {
                     const contactKey = link.email || link.phone;
                     const last = lastSent[contactKey];
                     const lastWA = lastWhatsAppSent[contactKey];
@@ -3484,7 +4596,14 @@ export default function Dashboard() {
                     const isContacted = isContactedOnAnyChannel(link);
                     
                     return (
-                      <div key={link.id} className={`p-3 rounded-lg border ${isContacted ? 'bg-gray-800/50 border-gray-600 opacity-70' : 'bg-gray-750 border-gray-600'}`}>
+                      <div 
+                        key={link.id} 
+                        className={`p-3 rounded-lg border ${
+                          isContacted 
+                            ? 'bg-gray-800/50 border-gray-600 opacity-70' 
+                            : 'bg-gray-750 border-gray-600'
+                        }`}
+                      >
                         <div className="flex justify-between">
                           <div>
                             <div className="font-medium text-white">{link.business}</div>
@@ -3494,7 +4613,6 @@ export default function Dashboard() {
                             ) : (
                               <div className="text-xs text-gray-500 italic">No email (phone-only)</div>
                             )}
-                            
                             {/* ✅ Channel tracking badges */}
                             <div className="flex gap-1 mt-1 flex-wrap">
                               {last && (
@@ -3518,12 +4636,6 @@ export default function Dashboard() {
                                 </span>
                               )}
                             </div>
-                            
-                            {last && (
-                              <div className="text-xs text-green-400 mt-1">
-                                📅 Last: {new Date(last).toLocaleDateString()}
-                              </div>
-                            )}
                             {isReplied && (
                               <span className="inline-block bg-green-900/30 text-green-300 text-xs px-1.5 py-0.5 rounded mt-1">
                                 Replied
@@ -3622,6 +4734,17 @@ export default function Dashboard() {
                             ) : (
                               <div className="text-xs text-gray-500 mt-1 italic">No email → CRM not tracked</div>
                             )}
+                            {/* ✅ Manual Contact Mark Button */}
+                            <button
+                              onClick={() => markContactManually(link, !isContacted, 'Manual update')}
+                              className={`text-xs px-2 py-1 rounded mt-1 w-full ${
+                                isContacted
+                                  ? 'bg-gray-600 hover:bg-gray-500 text-white'
+                                  : 'bg-green-600 hover:bg-green-500 text-white'
+                              }`}
+                            >
+                              {isContacted ? '↩️ Mark Not Contacted' : '✅ Mark Contacted'}
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -3644,7 +4767,7 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
-
+      
       {/* FOLLOW-UP MODAL */}
       {showFollowUpModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -3706,33 +4829,6 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
-            <div className="p-6 border-b border-gray-700/50 bg-gradient-to-r from-gray-800/30 to-gray-900/30">
-              <button
-                onClick={() => {
-                  const safe = getSafeFollowUpCandidates();
-                  if (safe.length === 0) {
-                    alert('No leads ready for safe follow-up yet. Check timing.');
-                    return;
-                  }
-                  const msg = `📧 Smart Selective Mode\nWill send to ${safe.length} safe contacts:\n${safe.slice(0, 3).map(c => `  • ${c.email} (${Math.ceil(c.daysSinceSent)} days)`).join('\n')}${safe.length > 3 ? `\n  ... and ${safe.length - 3} more` : ''}\nThese contacts won't be over-emailed.`;
-                  alert(msg);
-                }}
-                className="w-full relative group overflow-hidden"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 opacity-90 group-hover:opacity-100 transition-all"></div>
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 opacity-0 group-hover:opacity-20 blur-xl transition-all"></div>
-                <div className="relative px-8 py-5 text-white font-bold text-xl flex items-center justify-center gap-3">
-                  <span className="text-2xl">📬</span>
-                  <span>Send Smart Follow-Ups</span>
-                  <span className="bg-white/20 px-3 py-1 rounded-full text-base">
-                    {getSafeFollowUpCandidates().length} leads
-                  </span>
-                </div>
-              </button>
-              <p className="text-xs text-gray-400 text-center mt-3">
-                ✓ Respects contact frequency • ✓ Prevents spam • ✓ Shows safety score
-              </p>
-            </div>
             <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-900/30 to-gray-800/30">
               {getSafeFollowUpCandidates().length === 0 ? (
                 <div className="text-center py-16">
@@ -3752,10 +4848,7 @@ export default function Dashboard() {
                   {getSafeFollowUpCandidates().map((contact) => {
                     const followUpCount = contact.followUpCount;
                     return (
-                      <div
-                        key={contact.email}
-                        className="group relative"
-                      >
+                      <div key={contact.email} className="group relative">
                         <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all"></div>
                         <div className="relative p-5 rounded-xl bg-gradient-to-br from-gray-800/80 to-gray-900/80 border border-gray-700 hover:border-indigo-500/50 transition-all flex items-center justify-between">
                           <div className="flex-1">
@@ -3767,7 +4860,11 @@ export default function Dashboard() {
                               <span className="text-purple-400 font-medium">
                                 📨 Follow-up #{followUpCount + 1}
                               </span>
-                              <span className={`font-bold ${contact.safetyScore >= 80 ? 'text-green-400' : contact.safetyScore >= 60 ? 'text-yellow-400' : 'text-orange-400'}`}>
+                              <span className={`font-bold ${
+                                contact.safetyScore >= 80 ? 'text-green-400' : 
+                                contact.safetyScore >= 60 ? 'text-yellow-400' : 
+                                'text-orange-400'
+                              }`}>
                                 ✓ {Math.round(contact.safetyScore)}% safe
                               </span>
                             </div>
@@ -3810,7 +4907,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
+      
       {/* CALL HISTORY MODAL */}
       {showCallHistoryModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -3857,40 +4954,6 @@ export default function Dashboard() {
                 <div className="text-xs text-gray-400">Voicemail</div>
               </div>
             </div>
-            <div className="p-4 border-b border-gray-700 flex space-x-2">
-              <button
-                onClick={loadCallHistory}
-                disabled={loadingCallHistory}
-                className="text-xs bg-blue-700 hover:bg-blue-600 text-white px-3 py-1.5 rounded disabled:bg-gray-700"
-              >
-                {loadingCallHistory ? '🔄 Loading...' : '🔄 Refresh'}
-              </button>
-              <button
-                onClick={() => {
-                  const csvContent = [
-                    ['Business', 'Phone', 'Status', 'Duration', 'Answered By', 'Date', 'Call SID'].join(','),
-                    ...callHistory.map(call => [
-                      call.businessName,
-                      call.toPhone,
-                      call.status,
-                      call.duration || 0,
-                      call.answeredBy || 'unknown',
-                      new Date(call.createdAt).toLocaleString(),
-                      call.callSid
-                    ].join(','))
-                  ].join('\n');
-                  const blob = new Blob([csvContent], { type: 'text/csv' });
-                  const url = window.URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `call-history-${new Date().toISOString().split('T')[0]}.csv`;
-                  a.click();
-                }}
-                className="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded"
-              >
-                📥 Export CSV
-              </button>
-            </div>
             <div className="flex-1 overflow-y-auto p-4">
               {loadingCallHistory ? (
                 <div className="text-center py-12">
@@ -3934,30 +4997,17 @@ export default function Dashboard() {
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2 text-sm text-gray-400 mt-2">
-                              <div>
-                                <span className="font-medium">📞 Phone:</span> {call.toPhone}
+                              <div><span className="font-medium">📞 Phone:</span> {call.toPhone}</div>
+                              <div><span className="font-medium">⏱️ Duration:</span> {call.duration || 0}s</div>
+                              <div><span className="font-medium">🎤 Answered by:</span>{' '}
+                                {call.answeredBy === 'human' ? '👤 Human' : call.answeredBy?.includes('machine') ? '📠 Voicemail' : '❓ Unknown'}
                               </div>
-                              <div>
-                                <span className="font-medium">⏱️ Duration:</span> {call.duration || 0}s
-                              </div>
-                              <div>
-                                <span className="font-medium">🎤 Answered by:</span>{' '}
-                                {call.answeredBy === 'human'
-                                  ? '👤 Human'
-                                  : call.answeredBy?.includes('machine')
-                                  ? '📠 Voicemail'
-                                  : '❓ Unknown'}
-                              </div>
-                              <div>
-                                <span className="font-medium">📅 Date:</span>{' '}
-                                {new Date(call.createdAt).toLocaleDateString() + ' ' +
-                                new Date(call.createdAt).toLocaleTimeString()}
+                              <div><span className="font-medium">📅 Date:</span>{' '}
+                                {new Date(call.createdAt).toLocaleDateString() + ' ' + new Date(call.createdAt).toLocaleTimeString()}
                               </div>
                             </div>
                             {call.callSid && (
-                              <div className="text-xs text-gray-500 mt-2 font-mono">
-                                SID: {call.callSid}
-                              </div>
+                              <div className="text-xs text-gray-500 mt-2 font-mono">SID: {call.callSid}</div>
                             )}
                             {call.error && (
                               <div className="mt-2 p-2 bg-red-900/20 rounded text-xs text-red-300">
@@ -3984,9 +5034,7 @@ export default function Dashboard() {
                             {call.toPhone && (
                               <button
                                 onClick={() => {
-                                  let contact = whatsappLinks.find(c =>
-                                    c.phone === call.toPhone.replace(/\D/g, '')
-                                  );
+                                  let contact = whatsappLinks.find(c => c.phone === call.toPhone.replace(/\D/g, ''));
                                   if (!contact) {
                                     contact = {
                                       business: call.businessName || 'Unknown Business',
@@ -4010,26 +5058,15 @@ export default function Dashboard() {
                 </div>
               )}
             </div>
-            <div className="p-4 border-t border-gray-700 bg-gray-800 text-xs text-gray-500">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                <div>
-                  <strong>💡 Tip:</strong> Calls are tracked in real-time
-                </div>
-                <div>
-                  <strong>🎙️ Recordings:</strong> Available for completed calls
-                </div>
-                <div>
-                  <strong>📊 Analytics:</strong> Filter and export your data
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       )}
-
+      
       {/* MULTI-CHANNEL OUTREACH MODAL - ✅ MOBILE RESPONSIVE */}
       {showMultiChannelModal && (
-        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${isMultiChannelFullscreen ? '' : 'p-2 sm:p-4'}`}>
+        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${
+          isMultiChannelFullscreen ? '' : 'p-2 sm:p-4'
+        }`}>
           <div className={`bg-gray-800 rounded-xl shadow-2xl ${
             isMultiChannelFullscreen
               ? 'w-screen h-screen max-h-screen rounded-none'
@@ -4038,7 +5075,9 @@ export default function Dashboard() {
             <div className="p-3 sm:p-4 border-b border-gray-700 flex justify-between items-center bg-gradient-to-r from-indigo-900/20 to-blue-900/20">
               <div className="flex-1 min-w-0">
                 <h2 className="text-base sm:text-2xl font-bold text-white truncate">🌐 Multi-Channel Outreach Manager</h2>
-                <p className="text-xs sm:text-sm text-gray-400 truncate">Manage all your communication channels ({whatsappLinks.length} contacts)</p>
+                <p className="text-xs sm:text-sm text-gray-400 truncate">
+                  Manage all your communication channels ({whatsappLinks.length} contacts)
+                </p>
               </div>
               <div className="flex gap-1 sm:gap-2 flex-shrink-0">
                 <button
@@ -4151,7 +5190,9 @@ export default function Dashboard() {
                           <div className="flex justify-between">
                             <span className="text-gray-400">Score:</span>
                             <span className={`font-bold ${
-                              score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-orange-400'
+                              score >= 70 ? 'text-green-400' : 
+                              score >= 50 ? 'text-yellow-400' : 
+                              'text-orange-400'
                             }`}>
                               {score}/100
                             </span>
@@ -4167,7 +5208,6 @@ export default function Dashboard() {
                             </span>
                           </div>
                         )}
-                        
                         {/* Channel Badges */}
                         <div className="flex gap-1 flex-wrap mt-1">
                           {lastSent[contactKey] && (
@@ -4227,6 +5267,17 @@ export default function Dashboard() {
                             <option value="won">Won</option>
                           </select>
                         )}
+                        {/* ✅ Manual Contact Mark Button */}
+                        <button
+                          onClick={() => markContactManually(link, !isContacted, 'Manual update from modal')}
+                          className={`w-full text-[10px] sm:text-xs px-1 sm:px-2 py-1 rounded font-medium transition ${
+                            isContacted
+                              ? 'bg-gray-600 hover:bg-gray-500 text-white'
+                              : 'bg-green-600 hover:bg-green-500 text-white'
+                          }`}
+                        >
+                          {isContacted ? '↩️ Mark Not Contacted' : '✅ Mark Contacted'}
+                        </button>
                       </div>
                     </div>
                   );
@@ -4237,7 +5288,7 @@ export default function Dashboard() {
             {/* Footer */}
             <div className="p-2 sm:p-4 border-t border-gray-700 bg-gray-800 flex justify-between items-center">
               <div className="text-[10px] sm:text-xs text-gray-500">
-                💡 Contacted contacts shown at bottom
+                💡 Contacted contacts shown at bottom • 077 numbers prioritized
               </div>
               <button
                 onClick={() => setShowMultiChannelModal(false)}
@@ -4249,7 +5300,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
+      
       {/* AI RESEARCH MODAL */}
       {showResearchModal && researchingCompany && researchResults[researchingCompany] && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
