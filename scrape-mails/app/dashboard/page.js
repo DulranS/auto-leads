@@ -2387,16 +2387,173 @@ export default function Dashboard() {
       addNotification(`❌ Error: ${err.message}`, 'error');
     }
   };
-  
+
   // ============================================================================
-  // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+  // MASS EMAIL FOLLOW-UP TO ALL SAFE LEADS
   // ============================================================================
-  const handleSendWhatsApp = async (contact) => {
+  const handleMassEmailFollowUps = useCallback(async () => {
     if (!user?.uid) {
       addNotification('Please sign in first', 'error');
       return;
     }
+
+    const safeCandidates = getSafeFollowUpCandidates();
     
+    if (safeCandidates.length === 0) {
+      addNotification('No safe leads available for follow-up', 'warning');
+      return;
+    }
+
+    // Check email quota
+    const quotaCheck = canUse('email', safeCandidates.length);
+    if (!quotaCheck.available) {
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `📧 Send follow-up emails to ${safeCandidates.length} safe leads?\n\n` +
+      `This will use ${safeCandidates.length} of your daily email quota.\n\n` +
+      `Each lead will receive their next scheduled follow-up.\n\n` +
+      `Continue with mass send?`
+    );
+
+    if (!confirmed) return;
+
+    setIsSending(true);
+    setStatus('📧 Initiating mass follow-up send...');
+    setSendProgress({ current: 0, total: safeCandidates.length });
+
+    let successCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+    const results = [];
+
+    try {
+      // Get Gmail token once for all sends
+      const accessToken = await requestGmailToken();
+      
+      setStatus(`📧 Sending follow-ups to ${safeCandidates.length} leads...`);
+
+      // Process leads in batches to avoid overwhelming the API
+      const batchSize = Math.min(10, safeCandidates.length);
+      
+      for (let i = 0; i < safeCandidates.length; i += batchSize) {
+        const batch = safeCandidates.slice(i, i + batchSize);
+        
+        for (const contact of batch) {
+          try {
+            // Double-check safety before sending
+            if (repliedLeads[contact.email]) {
+              skipCount++;
+              results.push({ email: contact.email, status: 'skipped', reason: 'Already replied' });
+              continue;
+            }
+
+            const followUpCount = followUpHistory[contact.email]?.count || contact.followUpCount || 0;
+            if (followUpCount >= 3) {
+              skipCount++;
+              results.push({ email: contact.email, status: 'skipped', reason: 'Max follow-ups reached' });
+              continue;
+            }
+
+            // Send the follow-up
+            const res = await fetch('/api/send-followup', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: contact.email,
+                accessToken,
+                userId: user.uid,
+                senderName
+              })
+            });
+
+            const data = await res.json();
+            
+            if (res.ok) {
+              successCount++;
+              results.push({ 
+                email: contact.email, 
+                status: 'success', 
+                followUpCount: data.followUpCount,
+                loopClosed: data.followUpCount >= 3
+              });
+
+              // Update local state immediately
+              setFollowUpHistory(prev => ({
+                ...prev,
+                [contact.email]: {
+                  count: data.followUpCount || (prev[contact.email]?.count || 0) + 1,
+                  lastFollowUpAt: new Date().toISOString(),
+                  dates: [...(prev[contact.email]?.dates || []), new Date().toISOString()],
+                  loopClosed: data.followUpCount >= 3
+                }
+              }));
+
+              // Update quota
+              incrementQuota('email', 1);
+              
+            } else {
+              failCount++;
+              results.push({ email: contact.email, status: 'failed', reason: data.error || 'API error' });
+            }
+
+          } catch (error) {
+            failCount++;
+            results.push({ email: contact.email, status: 'failed', reason: error.message });
+            console.error(`Failed to send follow-up to ${contact.email}:`, error);
+          }
+
+          // Update progress
+          setSendProgress({ current: i + batch.indexOf(contact) + 1, total: safeCandidates.length });
+          
+          // Small delay between sends to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
+        }
+
+        // Brief pause between batches
+        if (i + batchSize < safeCandidates.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+
+      // Refresh data after all sends complete
+      await loadSentLeads();
+      await loadRepliedAndFollowUp();
+      await loadDeals();
+
+      // Show comprehensive results
+      const message = `📊 Mass Follow-Up Complete!\n\n` +
+        `✅ Success: ${successCount}\n` +
+        `❌ Failed: ${failCount}\n` +
+        `⏭️ Skipped: ${skipCount}\n` +
+        `📈 Total: ${safeCandidates.length}\n\n` +
+        `Email quota used: ${successCount}/${quotaCheck.limit}`;
+
+      if (failCount > 0) {
+        const failedEmails = results.filter(r => r.status === 'failed').slice(0, 3);
+        const failedList = failedEmails.map(f => `• ${f.email}: ${f.reason}`).join('\n');
+        addNotification(message + `\n\n❌ Failed sends:\n${failedList}${failCount > 3 ? `\n... and ${failCount - 3} more` : ''}`, 
+          failCount > 0 ? 'warning' : 'success');
+      } else {
+        addNotification(message, 'success');
+      }
+
+    } catch (error) {
+      console.error('Mass follow-up error:', error);
+      addNotification(`❌ Mass follow-up failed: ${error.message}`, 'error');
+    } finally {
+      setIsSending(false);
+      setStatus('');
+      setSendProgress({ current: 0, total: 0 });
+    }
+  }, [user?.uid, getSafeFollowUpCandidates, canUse, incrementQuota, repliedLeads, followUpHistory, loadSentLeads, loadRepliedAndFollowUp, loadDeals, addNotification]);
+
+  // ============================================================================
+  // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+  // ============================================================================
+  const handleSendWhatsApp = async (contact) => {
     if (!contact?.phone) {
       addNotification('No phone number for this contact', 'error');
       return;
@@ -4982,6 +5139,55 @@ export default function Dashboard() {
                     <span className="text-2xl">🎯</span>
                     <span>{getSafeFollowUpCandidates().length} leads ready for intelligent follow-up</span>
                   </div>
+                  
+                  {/* MASS EMAIL BUTTON */}
+                  {getSafeFollowUpCandidates().length > 0 && (
+                    <div className="mb-6">
+                      <button
+                        onClick={handleMassEmailFollowUps}
+                        disabled={isSending}
+                        className={`w-full relative group overflow-hidden rounded-xl transition-all duration-300 ${
+                          isSending 
+                            ? 'bg-gray-600 cursor-not-allowed opacity-60' 
+                            : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-lg hover:shadow-xl transform hover:scale-[1.02]'
+                        }`}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="relative px-8 py-4 text-white font-bold text-lg">
+                          <div className="flex items-center justify-center gap-3">
+                            <span className="text-2xl">📧</span>
+                            <span>{isSending ? 'Sending...' : `Mass Email All Safe Leads (${getSafeFollowUpCandidates().length})`}</span>
+                            {!isSending && <span className="text-lg">→</span>}
+                          </div>
+                          {!isSending && (
+                            <div className="text-sm font-normal text-indigo-100 mt-1 text-center">
+                              Send follow-up emails to all safe leads at once with tracking
+                            </div>
+                          )}
+                          {isSending && sendProgress.total > 0 && (
+                            <div className="mt-3">
+                              <div className="w-full bg-white/20 rounded-full h-2">
+                                <div 
+                                  className="bg-white rounded-full h-2 transition-all duration-300"
+                                  style={{ width: `${(sendProgress.current / sendProgress.total) * 100}%` }}
+                                ></div>
+                              </div>
+                              <div className="text-xs text-indigo-100 mt-1 text-center">
+                                {sendProgress.current} / {sendProgress.total} sent
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                      
+                      {/* Status message during mass send */}
+                      {isSending && status && (
+                        <div className="mt-3 text-center text-sm text-indigo-300 bg-indigo-900/30 rounded-lg px-4 py-2">
+                          {status}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {getSafeFollowUpCandidates().map((contact) => {
                     const followUpCount = contact.followUpCount;
                     return (
