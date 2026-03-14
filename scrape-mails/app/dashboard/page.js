@@ -2350,6 +2350,120 @@ export default function Dashboard() {
   };
   
   // ============================================================================
+  // DEBUG FOLLOW-UP FUNCTION
+  // ============================================================================
+  const testFollowUpSend = async () => {
+    console.log('🧪 Starting follow-up test...');
+    
+    // Test 1: Check basic setup
+    console.log('👤 User:', user);
+    console.log('📧 Sender Name:', senderName);
+    console.log('🔑 Google Client ID:', process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? '✅' : '❌ Missing');
+    
+    // Test 2: Check quotas
+    console.log('💳 Current quotas:', quotas);
+    console.log('📧 Email quota:', quotas.email);
+    
+    // Test 3: Check safe candidates
+    const candidates = getSafeFollowUpCandidates();
+    console.log('📊 Safe candidates:', candidates.length);
+    
+    if (candidates.length === 0) {
+      console.log('❌ No safe candidates found');
+      addNotification('No safe candidates available for testing', 'warning');
+      return;
+    }
+    
+    const testCandidate = candidates[0];
+    console.log('🎯 Test candidate:', testCandidate.email);
+    
+    try {
+      // Test 4: Request Gmail token
+      console.log('🔐 Testing Gmail token request...');
+      const accessToken = await requestGmailToken();
+      console.log('✅ Gmail token obtained:', accessToken ? 'Success' : 'Failed');
+      
+      if (!accessToken) {
+        addNotification('❌ Failed to get Gmail token', 'error');
+        return;
+      }
+      
+      // Test 5: Test API call
+      console.log('📡 Testing API call to /api/send-followup...');
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: testCandidate.email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+      
+      console.log('📬 API Response status:', res.status);
+      const data = await res.json();
+      console.log('📬 API Response data:', data);
+      
+      if (res.ok) {
+        addNotification(`✅ Test follow-up sent to ${testCandidate.email}`, 'success');
+        // Refresh data after successful test
+        await loadSentLeads();
+        await loadRepliedAndFollowUp();
+      } else {
+        addNotification(`❌ Test failed: ${data.error || 'Unknown error'}`, 'error');
+      }
+      
+    } catch (error) {
+      console.error('💥 Test failed:', error);
+      addNotification(`❌ Test error: ${error.message}`, 'error');
+    }
+  };
+
+  // ============================================================================
+  // BYPASS QUOTA TEST (For debugging only)
+  // ============================================================================
+  const testFollowUpBypassQuota = async () => {
+    console.log('🚀 Starting bypass quota test...');
+    
+    const candidates = getSafeFollowUpCandidates();
+    if (candidates.length === 0) {
+      addNotification('No safe candidates available', 'warning');
+      return;
+    }
+    
+    const testCandidate = candidates[0];
+    
+    try {
+      // Skip quota check
+      console.log('⚡ Bypassing quota check...');
+      const accessToken = await requestGmailToken();
+      
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: testCandidate.email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        addNotification(`✅ Bypass test successful: ${testCandidate.email}`, 'success');
+      } else {
+        addNotification(`❌ Bypass test failed: ${data.error}`, 'error');
+      }
+      
+    } catch (error) {
+      addNotification(`❌ Bypass test error: ${error.message}`, 'error');
+    }
+  };
+
+  // ============================================================================
   // SEND FOLLOW-UP WITH GMAIL TOKEN
   // ============================================================================
   const sendFollowUpWithToken = async (email, accessToken) => {
@@ -5249,7 +5363,7 @@ export default function Dashboard() {
                       
                       {/* Debug Info Button */}
                       {!isSending && (
-                        <div className="mt-3 text-center">
+                        <div className="mt-3 text-center space-y-2">
                           <button
                             onClick={() => {
                               console.log('🔍 DEBUG - Mass Email Diagnostic Info:');
@@ -5266,6 +5380,20 @@ export default function Dashboard() {
                             className="text-xs text-gray-400 hover:text-indigo-300 underline"
                           >
                             🔍 Debug Info
+                          </button>
+                          
+                          <button
+                            onClick={testFollowUpSend}
+                            className="text-xs text-orange-400 hover:text-orange-300 underline block w-full"
+                          >
+                            🧪 Test Single Follow-Up
+                          </button>
+                          
+                          <button
+                            onClick={testFollowUpBypassQuota}
+                            className="text-xs text-red-400 hover:text-red-300 underline block w-full"
+                          >
+                            ⚡ Bypass Quota Test
                           </button>
                         </div>
                       )}
