@@ -1,7 +1,7 @@
-// app/api/send-email/route.js
+// app/api/send-new-leads/route.js
 import { NextResponse } from 'next/server';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, setDoc, increment } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { google } from 'googleapis';
 
 // ============================================================================
@@ -25,38 +25,7 @@ const db = getFirestore(app);
 // ============================================================================
 const CONFIG = {
   MAX_DAILY_EMAILS: 500,
-  RATE_LIMIT_DELAY_MS: 200,
-  MAX_IMAGES_PER_EMAIL: 3
-};
-
-// ============================================================================
-// PARSE CSV
-// ============================================================================
-const parseCsvRow = (str) => {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === '"' && !inQuotes) {
-      inQuotes = true;
-    } else if (char === '"' && inQuotes) {
-      if (i + 1 < str.length && str[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = false;
-      }
-    } else if (char === ',' && !inQuotes) {
-      result.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-  result.push(current);
-  return result.map(field => field.replace(/[\r\n]/g, '').trim());
+  RATE_LIMIT_DELAY_MS: 200
 };
 
 // ============================================================================
@@ -73,13 +42,7 @@ const isValidEmail = (email) => {
 // ============================================================================
 // CREATE MIME MESSAGE
 // ============================================================================
-const createMimeMessage = async ({
-  from,
-  to,
-  subject,
-  body,
-  images = []
-}) => {
+const createMimeMessage = ({ from, to, subject, body, images = [] }) => {
   const boundary = 'boundary_' + Date.now();
   
   let mimeMessage = `From: ${from}\r\n`;
@@ -88,28 +51,24 @@ const createMimeMessage = async ({
   mimeMessage += `MIME-Version: 1.0\r\n`;
   mimeMessage += `Content-Type: multipart/related; boundary="${boundary}"\r\n\r\n`;
   
-  // HTML Body
   mimeMessage += `--${boundary}\r\n`;
   mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
   mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
   
   let htmlBody = body.replace(/\n/g, '<br>');
   
-  // Add inline images
   images.forEach((img, index) => {
     const cid = `img${index + 1}@massmailer`;
-    htmlBody = htmlBody.replace(`{{image${index + 1}}}`, `<img src="cid:${cid}" style="max-width: 100%; height: auto;" />`);
+    htmlBody = htmlBody.replace(`{{image${index + 1}}}`, `<img src="cid:${cid}" style="max-width: 100%;" />`);
   });
   
   mimeMessage += htmlBody + '\r\n\r\n';
   
-  // Add images
   for (const img of images) {
     mimeMessage += `--${boundary}\r\n`;
     mimeMessage += `Content-Type: ${img.mimeType}\r\n`;
     mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
-    mimeMessage += `Content-ID: <${img.cid}>\r\n`;
-    mimeMessage += `Content-Disposition: inline; filename="image${images.indexOf(img) + 1}"\r\n\r\n`;
+    mimeMessage += `Content-ID: <${img.cid}>\r\n\r\n`;
     mimeMessage += img.base64 + '\r\n\r\n';
   }
   
@@ -124,23 +83,19 @@ const createMimeMessage = async ({
 export async function POST(request) {
   try {
     const {
-      csvContent,
+      recipients,
       senderName,
       senderEmail,
       fieldMappings,
       accessToken,
-      abTestMode,
-      templateA,
-      templateB,
-      templateToSend,
-      leadQualityFilter,
-      emailImages = [],
-      userId
+      template,
+      userId,
+      emailImages = []
     } = await request.json();
     
-    if (!userId || !accessToken || !csvContent) {
+    if (!userId || !accessToken || !recipients || !Array.isArray(recipients)) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing or invalid required fields' },
         { status: 400 }
       );
     }
@@ -155,53 +110,42 @@ export async function POST(request) {
     );
     const emailSnapshot = await getDocs(emailQuery);
     
-    if (emailSnapshot.size >= CONFIG.MAX_DAILY_EMAILS) {
+    const remainingQuota = CONFIG.MAX_DAILY_EMAILS - emailSnapshot.size;
+    
+    if (remainingQuota <= 0) {
       return NextResponse.json(
         {
           error: 'Daily email limit reached',
           dailyCount: emailSnapshot.size,
-          limit: CONFIG.MAX_DAILY_EMAILS
+          limit: CONFIG.MAX_DAILY_EMAILS,
+          remainingToday: 0
         },
         { status: 429 }
       );
     }
     
-    // Parse CSV
-    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
-    if (lines.length < 2) {
-      return NextResponse.json(
-        { error: 'Invalid CSV format' },
-        { status: 400 }
+    // Filter to only new leads (not already sent)
+    const newRecipients = [];
+    for (const recipient of recipients) {
+      const email = recipient.email?.trim().toLowerCase();
+      if (!isValidEmail(email)) continue;
+      
+      const existingQuery = query(
+        collection(db, 'sent_emails'),
+        where('userId', '==', userId),
+        where('to', '==', email)
       );
-    }
-    
-    const headers = parseCsvRow(lines[0]);
-    const emailColumnName = fieldMappings.email || 'email';
-    const businessColumnName = fieldMappings.business_name || 'business_name';
-    
-    // Process recipients
-    const recipients = [];
-    const invalidEmails = [];
-    
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCsvRow(lines[i]);
-      if (values.length !== headers.length) continue;
+      const existingSnapshot = await getDocs(existingQuery);
       
-      const row = {};
-      headers.forEach((header, idx) => {
-        row[header] = values[idx] || '';
-      });
-      
-      const email = row[emailColumnName]?.trim().toLowerCase();
-      if (!isValidEmail(email)) {
-        invalidEmails.push({ raw: row[emailColumnName], cleaned: email });
-        continue;
+      if (existingSnapshot.empty) {
+        newRecipients.push(recipient);
       }
-      
-      recipients.push(row);
     }
     
-    // Send emails
+    // Limit by quota
+    const recipientsToSend = newRecipients.slice(0, remainingQuota);
+    
+    // Setup Gmail API
     const oauth2Client = new google.auth.OAuth2(
       process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
@@ -215,33 +159,15 @@ export async function POST(request) {
     let failedCount = 0;
     let skippedCount = 0;
     
-    for (const recipient of recipients) {
-      const email = recipient[emailColumnName].trim().toLowerCase();
-      const businessName = recipient[businessColumnName] || 'Contact';
-      
-      // Check if already sent
-      const existingQuery = query(
-        collection(db, 'sent_emails'),
-        where('userId', '==', userId),
-        where('to', '==', email)
-      );
-      const existingSnapshot = await getDocs(existingQuery);
-      
-      if (!existingSnapshot.empty) {
-        skippedCount++;
-        continue;
-      }
-      
-      // Select template
-      const template = abTestMode && templateToSend 
-        ? (templateToSend === 'A' ? templateA : templateB)
-        : templateA;
+    for (const recipient of recipientsToSend) {
+      const email = recipient.email.trim().toLowerCase();
+      const businessName = recipient.business_name || recipient.business || 'Contact';
       
       // Render template
       let subject = template.subject;
       let body = template.body;
       
-      Object.entries(fieldMappings).forEach(([varName, col]) => {
+      Object.entries(fieldMappings || {}).forEach(([varName, col]) => {
         const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
         if (varName === 'sender_name') {
           subject = subject.replace(regex, senderName || 'Team');
@@ -253,8 +179,7 @@ export async function POST(request) {
       });
       
       try {
-        // Create MIME message
-        const rawMessage = await createMimeMessage({
+        const rawMessage = createMimeMessage({
           from: `${senderName} <${senderEmail}>`,
           to: email,
           subject,
@@ -262,20 +187,18 @@ export async function POST(request) {
           images: emailImages
         });
         
-        // Send via Gmail API
         const response = await gmail.users.messages.send({
           userId: 'me',
           requestBody: { raw: rawMessage }
         });
         
-        // Save to Firebase
-        const emailData = {
+        await addDoc(collection(db, 'sent_emails'), {
           userId,
           to: email,
           businessName,
           subject,
           body,
-          template: abTestMode ? templateToSend : 'A',
+          template: 'A',
           sentAt: new Date().toISOString(),
           opened: false,
           openedCount: 0,
@@ -283,18 +206,11 @@ export async function POST(request) {
           clickCount: 0,
           replied: false,
           followUpCount: 0,
-          followUpAt: null,
-          lastFollowUpAt: null,
-          followUpDates: [],
           messageId: response.data.id,
           threadId: response.data.threadId
-        };
-        
-        await addDoc(collection(db, 'sent_emails'), emailData);
+        });
         
         sentCount++;
-        
-        // Rate limiting
         await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
         
       } catch (error) {
@@ -303,18 +219,20 @@ export async function POST(request) {
       }
     }
     
+    const newDailyCount = emailSnapshot.size + sentCount;
+    
     return NextResponse.json({
       sent: sentCount,
       failed: failedCount,
       skipped: skippedCount,
-      total: recipients.length,
-      dailyCount: emailSnapshot.size + sentCount,
+      total: recipientsToSend.length,
+      dailyCount: newDailyCount,
       limit: CONFIG.MAX_DAILY_EMAILS,
-      invalidDetails: invalidEmails.slice(0, 5)
+      remainingToday: CONFIG.MAX_DAILY_EMAILS - newDailyCount
     });
     
   } catch (error) {
-    console.error('Send email error:', error);
+    console.error('Send new leads error:', error);
     return NextResponse.json(
       { 
         error: 'Failed to send emails',
