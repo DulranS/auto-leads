@@ -803,7 +803,16 @@ const useDailyQuotas = (userId) => {
   
   // Check if quota available
   const canUse = useCallback((channel, count = 1) => {
-    const quota = quotas[channel];
+    // Map channel names to quota keys
+    const channelMap = {
+      'email': 'emails',
+      'whatsapp': 'whatsapp', 
+      'sms': 'sms',
+      'call': 'calls'
+    };
+    
+    const quotaKey = channelMap[channel] || channel;
+    const quota = quotas[quotaKey];
     if (!quota) return { available: false, reason: 'Invalid channel' };
     
     const remaining = quota.limit - quota.used;
@@ -828,11 +837,21 @@ const useDailyQuotas = (userId) => {
   
   // Increment quota usage
   const incrementQuota = useCallback((channel, count = 1) => {
+    // Map channel names to quota keys
+    const channelMap = {
+      'email': 'emails',
+      'whatsapp': 'whatsapp', 
+      'sms': 'sms',
+      'call': 'calls'
+    };
+    
+    const quotaKey = channelMap[channel] || channel;
+    
     setQuotas(prev => ({
       ...prev,
-      [channel]: {
-        ...prev[channel],
-        used: prev[channel].used + count
+      [quotaKey]: {
+        ...prev[quotaKey],
+        used: prev[quotaKey].used + count
       }
     }));
   }, []);
