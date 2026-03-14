@@ -5,20 +5,27 @@ import { getFirestore, collection, addDoc, query, where, getDocs } from 'firebas
 import { google } from 'googleapis';
 
 // ============================================================================
-// FIREBASE CONFIGURATION
+// FIREBASE CONFIGURATION WITH ERROR HANDLING
 // ============================================================================
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || '',
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || '',
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID || ''
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+let app;
+let db;
+
+try {
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+}
 
 // ============================================================================
 // CONFIGURATION
@@ -81,7 +88,23 @@ const createMimeMessage = ({ from, to, subject, body, images = [] }) => {
 // POST HANDLER
 // ============================================================================
 export async function POST(request) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-cache, no-store, must-revalidate'
+  };
+  
   try {
+    // Check Firebase initialization
+    if (!app || !db) {
+      return NextResponse.json(
+        { 
+          error: 'Firebase not properly initialized',
+          details: 'Missing or invalid Firebase configuration'
+        },
+        { status: 500, headers }
+      );
+    }
+    
     const {
       recipients,
       senderName,
@@ -96,7 +119,7 @@ export async function POST(request) {
     if (!userId || !accessToken || !recipients || !Array.isArray(recipients)) {
       return NextResponse.json(
         { error: 'Missing or invalid required fields' },
-        { status: 400 }
+        { status: 400, headers }
       );
     }
     
@@ -120,7 +143,7 @@ export async function POST(request) {
           limit: CONFIG.MAX_DAILY_EMAILS,
           remainingToday: 0
         },
-        { status: 429 }
+        { status: 429, headers }
       );
     }
     
@@ -229,7 +252,7 @@ export async function POST(request) {
       dailyCount: newDailyCount,
       limit: CONFIG.MAX_DAILY_EMAILS,
       remainingToday: CONFIG.MAX_DAILY_EMAILS - newDailyCount
-    });
+    }, { headers });
     
   } catch (error) {
     console.error('Send new leads error:', error);
@@ -241,7 +264,7 @@ export async function POST(request) {
         failed: 0,
         skipped: 0
       },
-      { status: 500 }
+      { status: 500, headers }
     );
   }
 }
