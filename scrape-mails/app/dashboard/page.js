@@ -2367,11 +2367,11 @@ export default function Dashboard() {
       addNotification('Failed to update deal stage', 'error');
     }
   };
-  
+
   // ============================================================================
   // DEBUG FOLLOW-UP FUNCTION
   // ============================================================================
-  const testFollowUpSend = async () => {
+  const testFollowUpSend = useCallback(async () => {
     console.log('🧪 Starting follow-up test...');
     
     // Test 1: Check basic setup
@@ -2381,7 +2381,7 @@ export default function Dashboard() {
     
     // Test 2: Check quotas
     console.log('💳 Current quotas:', quotas);
-    console.log('📧 Email quota:', quotas.email);
+    console.log('📧 Email quota:', quotas.emails);
     
     // Test 3: Check safe candidates
     const candidates = getSafeFollowUpCandidates();
@@ -2437,12 +2437,12 @@ export default function Dashboard() {
       console.error('💥 Test failed:', error);
       addNotification(`❌ Test error: ${error.message}`, 'error');
     }
-  };
+  }, [user, senderName, quotas, getSafeFollowUpCandidates, requestGmailToken, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
 
   // ============================================================================
   // BYPASS QUOTA TEST (For debugging only)
   // ============================================================================
-  const testFollowUpBypassQuota = async () => {
+  const testFollowUpBypassQuota = useCallback(async () => {
     console.log('🚀 Starting bypass quota test...');
     
     const candidates = getSafeFollowUpCandidates();
@@ -2480,12 +2480,12 @@ export default function Dashboard() {
     } catch (error) {
       addNotification(`❌ Bypass test error: ${error.message}`, 'error');
     }
-  };
+  }, [getSafeFollowUpCandidates, requestGmailToken, user, senderName, addNotification]);
 
   // ============================================================================
   // SEND FOLLOW-UP WITH GMAIL TOKEN
   // ============================================================================
-  const sendFollowUpWithToken = async (email, accessToken) => {
+  const sendFollowUpWithToken = useCallback(async (email, accessToken) => {
     if (!user?.uid || !email || !accessToken) {
       addNotification('Missing required data to send follow-up.', 'error');
       return;
@@ -2546,7 +2546,7 @@ export default function Dashboard() {
       console.error('Follow-up send error:', err);
       addNotification(`❌ Error: ${err.message}`, 'error');
     }
-  };
+  }, [user, repliedLeads, followUpHistory, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
 
   // ============================================================================
   // MASS EMAIL FOLLOW-UP TO ALL SAFE LEADS
