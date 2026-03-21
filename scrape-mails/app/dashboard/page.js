@@ -2771,12 +2771,6 @@ export default function Dashboard() {
       if (!confirmed) return;
     }
     
-    const confirmed = window.confirm(
-      `Send WhatsApp to ${business} at ${formatPhoneForDisplay(contact.phone)}?`
-    );
-    
-    if (!confirmed) return;
-    
     try {
       const message = renderPreviewText(
         whatsappTemplate,
