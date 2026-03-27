@@ -56,40 +56,124 @@ export async function POST(request) {
     const { startOfDay, endOfDay } = getTodayRange();
     
     // Get email count
-    const emailQuery = query(
-      collection(db, 'sent_emails'),
-      where('userId', '==', userId),
-      where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
-      where('sentAt', '<=', Timestamp.fromDate(endOfDay))
-    );
-    const emailSnapshot = await getDocs(emailQuery);
+    let emailSnapshot;
+    try {
+      const emailQuery = query(
+        collection(db, 'sent_emails'),
+        where('userId', '==', userId),
+        where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
+        where('sentAt', '<=', Timestamp.fromDate(endOfDay))
+      );
+      emailSnapshot = await getDocs(emailQuery);
+    } catch (indexError) {
+      if (indexError.code === 'failed-precondition') {
+        console.warn('Index not ready for sent_emails, using fallback query');
+        // Fallback: get all user emails and filter by date in code
+        const fallbackQuery = query(
+          collection(db, 'sent_emails'),
+          where('userId', '==', userId)
+        );
+        const allEmails = await getDocs(fallbackQuery);
+        emailSnapshot = {
+          size: allEmails.docs.filter(doc => {
+            const sentAt = doc.data().sentAt?.toDate();
+            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+          }).length
+        };
+      } else {
+        throw indexError;
+      }
+    }
     
     // Get WhatsApp count
-    const whatsappQuery = query(
-      collection(db, 'whatsapp_sent'),
-      where('userId', '==', userId),
-      where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
-      where('sentAt', '<=', Timestamp.fromDate(endOfDay))
-    );
-    const whatsappSnapshot = await getDocs(whatsappQuery);
+    let whatsappSnapshot;
+    try {
+      const whatsappQuery = query(
+        collection(db, 'whatsapp_sent'),
+        where('userId', '==', userId),
+        where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
+        where('sentAt', '<=', Timestamp.fromDate(endOfDay))
+      );
+      whatsappSnapshot = await getDocs(whatsappQuery);
+    } catch (indexError) {
+      if (indexError.code === 'failed-precondition') {
+        console.warn('Index not ready for whatsapp_sent, using fallback query');
+        // Fallback: get all user WhatsApp and filter by date in code
+        const fallbackQuery = query(
+          collection(db, 'whatsapp_sent'),
+          where('userId', '==', userId)
+        );
+        const allWhatsapp = await getDocs(fallbackQuery);
+        whatsappSnapshot = {
+          size: allWhatsapp.docs.filter(doc => {
+            const sentAt = doc.data().sentAt?.toDate();
+            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+          }).length
+        };
+      } else {
+        throw indexError;
+      }
+    }
     
     // Get SMS count
-    const smsQuery = query(
-      collection(db, 'sms_sent'),
-      where('userId', '==', userId),
-      where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
-      where('sentAt', '<=', Timestamp.fromDate(endOfDay))
-    );
-    const smsSnapshot = await getDocs(smsQuery);
+    let smsSnapshot;
+    try {
+      const smsQuery = query(
+        collection(db, 'sms_sent'),
+        where('userId', '==', userId),
+        where('sentAt', '>=', Timestamp.fromDate(startOfDay)),
+        where('sentAt', '<=', Timestamp.fromDate(endOfDay))
+      );
+      smsSnapshot = await getDocs(smsQuery);
+    } catch (indexError) {
+      if (indexError.code === 'failed-precondition') {
+        console.warn('Index not ready for sms_sent, using fallback query');
+        // Fallback: get all user SMS and filter by date in code
+        const fallbackQuery = query(
+          collection(db, 'sms_sent'),
+          where('userId', '==', userId)
+        );
+        const allSms = await getDocs(fallbackQuery);
+        smsSnapshot = {
+          size: allSms.docs.filter(doc => {
+            const sentAt = doc.data().sentAt?.toDate();
+            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+          }).length
+        };
+      } else {
+        throw indexError;
+      }
+    }
     
     // Get call count
-    const callQuery = query(
-      collection(db, 'calls'),
-      where('userId', '==', userId),
-      where('createdAt', '>=', Timestamp.fromDate(startOfDay)),
-      where('createdAt', '<=', Timestamp.fromDate(endOfDay))
-    );
-    const callSnapshot = await getDocs(callQuery);
+    let callSnapshot;
+    try {
+      const callQuery = query(
+        collection(db, 'calls'),
+        where('userId', '==', userId),
+        where('createdAt', '>=', Timestamp.fromDate(startOfDay)),
+        where('createdAt', '<=', Timestamp.fromDate(endOfDay))
+      );
+      callSnapshot = await getDocs(callQuery);
+    } catch (indexError) {
+      if (indexError.code === 'failed-precondition') {
+        console.warn('Index not ready for calls, using fallback query');
+        // Fallback: get all user calls and filter by date in code
+        const fallbackQuery = query(
+          collection(db, 'calls'),
+          where('userId', '==', userId)
+        );
+        const allCalls = await getDocs(fallbackQuery);
+        callSnapshot = {
+          size: allCalls.docs.filter(doc => {
+            const createdAt = doc.data().createdAt?.toDate();
+            return createdAt && createdAt >= startOfDay && createdAt <= endOfDay;
+          }).length
+        };
+      } else {
+        throw indexError;
+      }
+    }
     
     // Calculate reset time (midnight tomorrow)
     const tomorrow = new Date(startOfDay);
