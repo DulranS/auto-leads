@@ -87,12 +87,26 @@ export async function POST(request) {
     const snapshot = await getDocs(q);
     const leads = [];
     let deletedCount = 0;
+    // Helper function to safely convert timestamp to Date
+    const safeToDate = (timestamp) => {
+      if (!timestamp) return new Date();
+      if (typeof timestamp?.toDate === 'function') {
+        return timestamp.toDate();
+      } else if (timestamp instanceof Date) {
+        return timestamp;
+      } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+        return new Date(timestamp);
+      } else {
+        return new Date();
+      }
+    };
+    
     const now = new Date();
     
     snapshot.forEach(docSnapshot => {
       const data = docSnapshot.data();
       try {
-        const sentAt = data.sentAt?.toDate ? data.sentAt.toDate() : (data.sentAt ? new Date(data.sentAt) : new Date());
+        const sentAt = safeToDate(data.sentAt);
         const daysSinceSent = (now - sentAt) / (1000 * 60 * 60 * 24);
         
         // Check if loop should be closed (30 days or 3 follow-ups)
@@ -112,10 +126,10 @@ export async function POST(request) {
           clickCount: data.clickCount || 0,
           followUpCount: data.followUpCount || 0,
           followUpAt: data.followUpAt ? 
-            (data.followUpAt.toDate ? data.followUpAt.toDate().toISOString() : data.followUpAt) : 
+            safeToDate(data.followUpAt).toISOString() : 
             null,
           lastFollowUpAt: data.lastFollowUpAt ?
-            (data.lastFollowUpAt.toDate ? data.lastFollowUpAt.toDate().toISOString() : data.lastFollowUpAt) :
+            safeToDate(data.lastFollowUpAt).toISOString() :
             null,
           followUpDates: data.followUpDates || [],
           seemsInterested: (data.openedCount || 0) > 0 || (data.clickCount || 0) > 0,

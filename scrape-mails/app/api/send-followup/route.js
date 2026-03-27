@@ -158,9 +158,23 @@ export async function POST(request) {
       );
     }
     
+    // Helper function to safely convert timestamp to Date
+    const safeToDate = (timestamp) => {
+      if (!timestamp) return new Date();
+      if (typeof timestamp?.toDate === 'function') {
+        return timestamp.toDate();
+      } else if (timestamp instanceof Date) {
+        return timestamp;
+      } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+        return new Date(timestamp);
+      } else {
+        return new Date();
+      }
+    };
+    
     const lastFollowUpAt = existingData.lastFollowUpAt ? 
-      (existingData.lastFollowUpAt.toDate ? existingData.lastFollowUpAt.toDate() : new Date(existingData.lastFollowUpAt)) :
-      (existingData.sentAt.toDate ? existingData.sentAt.toDate() : new Date(existingData.sentAt));
+      safeToDate(existingData.lastFollowUpAt) :
+      safeToDate(existingData.sentAt);
     
     const daysSinceLastContact = (new Date() - lastFollowUpAt) / (1000 * 60 * 60 * 24);
     if (daysSinceLastContact < CONFIG.MIN_DAYS_BETWEEN_FOLLOWUP) {

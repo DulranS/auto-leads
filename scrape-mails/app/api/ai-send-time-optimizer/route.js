@@ -25,10 +25,24 @@ const db = getFirestore(app);
 const analyzeSendTimes = (emails) => {
   const hourCounts = {};
   const dayCounts = {};
+  // Helper function to safely convert timestamp to Date
+  const safeToDate = (timestamp) => {
+    if (!timestamp) return new Date();
+    if (typeof timestamp?.toDate === 'function') {
+      return timestamp.toDate();
+    } else if (timestamp instanceof Date) {
+      return timestamp;
+    } else if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+      return new Date(timestamp);
+    } else {
+      return new Date();
+    }
+  };
+  
   const replyRates = {};
   
   emails.forEach(email => {
-    const sentAt = email.sentAt?.toDate ? email.sentAt.toDate() : new Date(email.sentAt);
+    const sentAt = safeToDate(email.sentAt);
     const hour = sentAt.getHours();
     const day = sentAt.getDay();
     
