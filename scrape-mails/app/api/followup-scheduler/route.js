@@ -1,8 +1,8 @@
 // app/api/followup-scheduler/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
 import { google } from 'googleapis';
-import { generateReplyForIntent } from '../../lib/ai-responder';
+import { generateReplyForIntent } from '../../../lib/ai-responder';
 
 // ============================================================================
 // CONFIGURATION

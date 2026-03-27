@@ -1,6 +1,6 @@
 // app/api/followup-debug/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
 
 // ============================================================================
 // DEBUG FOLLOWUP SYSTEM - COMPREHENSIVE ANALYSIS
@@ -257,7 +257,7 @@ export async function POST(request) {
     }
     
     // Import and use the processFollowup function
-    const { processFollowup } = await import('../followup-scheduler/route');
+    const { processFollowup } = await import('../followup-scheduler/route.js');
     
     // Update status to processing
     await supabaseAdmin

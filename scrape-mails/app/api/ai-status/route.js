@@ -1,7 +1,7 @@
 // app/api/ai-status/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
-import { getProcessorStatus } from '../../lib/ai-background-processor';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { getProcessorStatus } from '../../../lib/ai-background-processor';
 
 // ============================================================================
 // GET HANDLER - COMPREHENSIVE AI SYSTEM STATUS
@@ -232,7 +232,7 @@ export async function POST(request) {
         break;
         
       case 'cleanup':
-        const { triggerCleanup } = await import('../../lib/ai-background-processor');
+        const { triggerCleanup } = await import('../../../lib/ai-background-processor');
         result = await triggerCleanup();
         activityType = 'manual_cleanup_trigger';
         break;

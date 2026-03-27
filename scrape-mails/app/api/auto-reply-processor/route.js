@@ -1,8 +1,8 @@
 // app/api/auto-reply-processor/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
 import { google } from 'googleapis';
-import { handleIncomingReply } from '../../lib/ai-responder';
+import { handleIncomingReply } from '../../../lib/ai-responder';
 
 // ============================================================================
 // CONFIGURATION

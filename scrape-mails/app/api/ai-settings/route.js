@@ -1,6 +1,6 @@
 // app/api/ai-settings/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
 
 // ============================================================================
 // GET HANDLER - FETCH AI SETTINGS

@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
 import { google } from 'googleapis';
 import { supabaseAdmin } from './supabaseClient';
 
@@ -325,4 +325,7 @@ export async function handleIncomingReply({ lead, gmail, message, threadRow }) {
 
   return { intent, aiReplyText, sentAt };
 }
+
+// Export additional functions for use in other modules
+export { classifyIntent, generateReplyForIntent };
 

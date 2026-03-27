@@ -1,7 +1,7 @@
 // app/api/test-ai-system/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
-import { handleIncomingReply } from '../../lib/ai-responder';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { handleIncomingReply } from '../../../lib/ai-responder';
 
 // ============================================================================
 // TEST AI SYSTEM FUNCTIONALITY
@@ -82,7 +82,7 @@ async function testIntentClassification(testData) {
     }
     
     // Import the classifyIntent function
-    const { classifyIntent } = await import('../../lib/ai-responder');
+    const { classifyIntent } = await import('../../../lib/ai-responder');
     
     const startTime = Date.now();
     const classification = await classifyIntent(replyBody, lead);
@@ -120,7 +120,7 @@ async function testAIReplyGeneration(testData) {
     }
     
     // Import the generateReplyForIntent function
-    const { generateReplyForIntent } = await import('../../lib/ai-responder');
+    const { generateReplyForIntent } = await import('../../../lib/ai-responder');
     
     const startTime = Date.now();
     const reply = await generateReplyForIntent(intent, replyBody, lead, originalSubject);
