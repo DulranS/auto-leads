@@ -1,7 +1,7 @@
 // app/api/saas-research/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
-import { CrunchbaseClient, DecisionMakerFinder, SmartResearchAgent } from '../../lib/saas-lead-finder';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { CrunchbaseClient, DecisionMakerFinder, SmartResearchAgent } from '../../../lib/saas-lead-finder';
 
 // ============================================================================
 // ADVANCED RESEARCH ENDPOINT

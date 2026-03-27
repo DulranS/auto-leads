@@ -1,7 +1,7 @@
 // app/api/saas-scheduler/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
-import SAASLeadGenerationOrchestrator from '../../lib/saas-lead-finder';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import SAASLeadGenerationOrchestrator from '../../../lib/saas-lead-finder';
 
 // ============================================================================
 // AUTOMATED SCHEDULER FOR SAAS LEAD GENERATION

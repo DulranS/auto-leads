@@ -1,6 +1,7 @@
 // app/api/saas-dashboard/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { SAASLeadGenerationOrchestrator, CrunchbaseClient, DecisionMakerFinder, SmartResearchAgent } from '../../../lib/saas-lead-finder';
 
 // ============================================================================
 // SAAS LEAD GENERATION DASHBOARD API

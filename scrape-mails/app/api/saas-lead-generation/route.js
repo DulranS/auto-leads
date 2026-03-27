@@ -1,7 +1,7 @@
 // app/api/saas-lead-generation/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../lib/supabaseClient';
-import SAASLeadGenerationOrchestrator from '../../lib/saas-lead-finder';
+import { supabaseAdmin } from '../../../lib/supabaseClient';
+import SAASLeadGenerationOrchestrator from '../../../lib/saas-lead-finder';
 
 // ============================================================================
 // MAIN LEAD GENERATION ENDPOINT
