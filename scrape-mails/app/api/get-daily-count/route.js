@@ -76,8 +76,23 @@ export async function POST(request) {
         const allEmails = await getDocs(fallbackQuery);
         emailSnapshot = {
           size: allEmails.docs.filter(doc => {
-            const sentAt = doc.data().sentAt?.toDate();
-            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+            const data = doc.data();
+            const sentAt = data.sentAt;
+            if (!sentAt) return false;
+            
+            // Handle different timestamp formats
+            let date;
+            if (typeof sentAt?.toDate === 'function') {
+              date = sentAt.toDate();
+            } else if (sentAt instanceof Date) {
+              date = sentAt;
+            } else if (typeof sentAt === 'string' || typeof sentAt === 'number') {
+              date = new Date(sentAt);
+            } else {
+              return false;
+            }
+            
+            return date >= startOfDay && date <= endOfDay;
           }).length
         };
       } else {
@@ -106,8 +121,23 @@ export async function POST(request) {
         const allWhatsapp = await getDocs(fallbackQuery);
         whatsappSnapshot = {
           size: allWhatsapp.docs.filter(doc => {
-            const sentAt = doc.data().sentAt?.toDate();
-            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+            const data = doc.data();
+            const sentAt = data.sentAt;
+            if (!sentAt) return false;
+            
+            // Handle different timestamp formats
+            let date;
+            if (typeof sentAt?.toDate === 'function') {
+              date = sentAt.toDate();
+            } else if (sentAt instanceof Date) {
+              date = sentAt;
+            } else if (typeof sentAt === 'string' || typeof sentAt === 'number') {
+              date = new Date(sentAt);
+            } else {
+              return false;
+            }
+            
+            return date >= startOfDay && date <= endOfDay;
           }).length
         };
       } else {
@@ -136,8 +166,23 @@ export async function POST(request) {
         const allSms = await getDocs(fallbackQuery);
         smsSnapshot = {
           size: allSms.docs.filter(doc => {
-            const sentAt = doc.data().sentAt?.toDate();
-            return sentAt && sentAt >= startOfDay && sentAt <= endOfDay;
+            const data = doc.data();
+            const sentAt = data.sentAt;
+            if (!sentAt) return false;
+            
+            // Handle different timestamp formats
+            let date;
+            if (typeof sentAt?.toDate === 'function') {
+              date = sentAt.toDate();
+            } else if (sentAt instanceof Date) {
+              date = sentAt;
+            } else if (typeof sentAt === 'string' || typeof sentAt === 'number') {
+              date = new Date(sentAt);
+            } else {
+              return false;
+            }
+            
+            return date >= startOfDay && date <= endOfDay;
           }).length
         };
       } else {
@@ -166,8 +211,23 @@ export async function POST(request) {
         const allCalls = await getDocs(fallbackQuery);
         callSnapshot = {
           size: allCalls.docs.filter(doc => {
-            const createdAt = doc.data().createdAt?.toDate();
-            return createdAt && createdAt >= startOfDay && createdAt <= endOfDay;
+            const data = doc.data();
+            const createdAt = data.createdAt;
+            if (!createdAt) return false;
+            
+            // Handle different timestamp formats
+            let date;
+            if (typeof createdAt?.toDate === 'function') {
+              date = createdAt.toDate();
+            } else if (createdAt instanceof Date) {
+              date = createdAt;
+            } else if (typeof createdAt === 'string' || typeof createdAt === 'number') {
+              date = new Date(createdAt);
+            } else {
+              return false;
+            }
+            
+            return date >= startOfDay && date <= endOfDay;
           }).length
         };
       } else {
