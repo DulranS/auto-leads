@@ -298,7 +298,7 @@ function formatPhoneForDisplay(phone) {
  */
 const extractTemplateVariables = (text) => {
   if (!text) return [];
-  const matches = text.match(/\{\{\s*([^}]+?)\s*\}\}/g) || [];
+  const matches = text.match(/\{\{\s*([^]+?)\s*\}\}/g) || [];
   return [...new Set(matches.map(m => m.replace(/\{\{\s*|\s*\}\}/g, '').trim()))];
 };
 
@@ -412,7 +412,6 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
   });
   
   return result;
-};
 
 /**
  * Generate social media handle from business name
@@ -557,11 +556,6 @@ const sessionStorageHelper = {
     }
   }
 };
-
-// ============================================================================
-// EXPORT TEMPLATES FOR API USE
-// ============================================================================
-export { DEFAULT_FOLLOW_UP_TEMPLATES };
 
 // ============================================================================
 // CUSTOM HOOKS
@@ -3000,6 +2994,8 @@ const handleMassEmailFollowUps = useCallback(async () => {
     }
   };
   
+  }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, updateContact, dealStage, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals, repliedLeads, followUpHistory, incrementQuota, setDailySMSCount, setDailyCallCount, lastSMSSent, lastCallMade, contactedChannels, getContactHistory, leadScores, isContactedOnAnyChannel, isPriorityPhone, setIsSending, setSendProgress, setLoadingCallHistory, setCallHistory, db, getDoc, doc, collection, query, where, getDocs, increment, renderPreviewText, formatForDialing, formatPhoneForDisplay, requestGmailToken, getSafeFollowUpCandidates, setIsBackingUp, setLastBackup, localStorageHelper]);
+  
   // ============================================================================
   // OPEN NATIVE SMS APP
   // ============================================================================
@@ -3565,13 +3561,6 @@ const handleMassEmailFollowUps = useCallback(async () => {
   };
   
   // ============================================================================
-  // HANDLE FIELD MAPPING CHANGE
-  // ============================================================================
-  const handleMappingChange = (varName, csvColumn) => {
-    setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
-  };
-  
-  // ============================================================================
   // HANDLE IMAGE UPLOAD
   // ============================================================================
   const handleImageUpload = (e) => {
@@ -4127,25 +4116,12 @@ const handleMassEmailFollowUps = useCallback(async () => {
     }
   };
   
-  }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, updateContact, dealStage, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals, repliedLeads, followUpHistory, incrementQuota, setDailySMSCount, setDailyCallCount, lastSMSSent, lastCallMade, contactedChannels, getContactHistory, leadScores, isContactedOnAnyChannel, isPriorityPhone, setIsSending, setSendProgress, setLoadingCallHistory, setCallHistory, db, getDoc, doc, collection, query, where, getDocs, increment, renderPreviewText, formatForDialing, formatPhoneForDisplay, requestGmailToken, getSafeFollowUpCandidates, setIsBackingUp, setLastBackup, localStorageHelper]);
-  
   // ============================================================================
-  // EXTRACT ALL TEMPLATE VARIABLES FOR UI
+  // HANDLE FIELD MAPPING CHANGE
   // ============================================================================
-  const uiVars = [...new Set([
-    ...extractTemplateVariables(templateA.subject),
-    ...extractTemplateVariables(templateA.body),
-    ...extractTemplateVariables(templateB.subject),
-    ...extractTemplateVariables(templateB.body),
-    ...extractTemplateVariables(whatsappTemplate),
-    ...extractTemplateVariables(smsTemplate),
-    ...extractTemplateVariables(instagramTemplate),
-    ...extractTemplateVariables(twitterTemplate),
-    ...extractTemplateVariables(linkedinTemplate),
-    'sender_name',
-    ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
-    ...csvHeaders
-  ])];
+  const handleMappingChange = (varName, csvColumn) => {
+    setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
+  };
   
   // ============================================================================
   // A/B TEST SUMMARY
