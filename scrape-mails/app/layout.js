@@ -1,5 +1,6 @@
 // app/layout.js
 import './globals.css';
+import ExtensionCleaner from './components/ExtensionCleaner';
 
 export default function RootLayout({ children }) {
   return (
@@ -7,7 +8,10 @@ export default function RootLayout({ children }) {
       <head>
         <script async src="https://accounts.google.com/gsi/client" />
       </head>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        <ExtensionCleaner />
+        {children}
+      </body>
     </html>
   );
 }
