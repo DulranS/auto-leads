@@ -6,29 +6,58 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <script async src="https://accounts.google.com/gsi/client" />
         <script dangerouslySetInnerHTML={{
           __html: `
-            // Block extension interference
+            // Suppress extension errors before they happen
             (function() {
-              const originalDefineProperty = Object.defineProperty;
-              Object.defineProperty = function(obj, prop, descriptor) {
-                if (prop === 'ethereum' && window.ethereum) {
-                  return;
-                }
-                return originalDefineProperty.call(this, obj, prop, descriptor);
+              const originalError = console.error;
+              const originalWarn = console.warn;
+              const originalLog = console.log;
+              
+              function shouldSuppress(...args) {
+                const str = args.join(' ').toString();
+                return str.includes('webextension') || 
+                       str.includes('TronWeb') || 
+                       str.includes('bybit') ||
+                       str.includes('gethookd') ||
+                       str.includes('evmAsk') ||
+                       str.includes('frame_ant') ||
+                       str.includes('lockdown-install');
+              }
+              
+              console.error = function(...args) {
+                if (shouldSuppress(...args)) return;
+                return originalError.apply(console, args);
               };
+              
+              console.warn = function(...args) {
+                if (shouldSuppress(...args)) return;
+                return originalWarn.apply(console, args);
+              };
+              
+              console.log = function(...args) {
+                if (shouldSuppress(...args)) return;
+                return originalLog.apply(console, args);
+              };
+              
+              // Prevent extension DOM manipulation
+              Object.defineProperty(document.documentElement, 'setAttribute', {
+                value: function(name, value) {
+                  if (name.startsWith('data-bybit') || 
+                      name.startsWith('data-extension') ||
+                      name.includes('channel-name') ||
+                      name.includes('wallet')) {
+                    return;
+                  }
+                  return HTMLElement.prototype.setAttribute.call(this, name, value);
+                }
+              });
             })();
           `
         }} />
       </head>
       <body suppressHydrationWarning>
-        <noscript>
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-            <h1>JavaScript must be enabled to use this application</h1>
-          </div>
-        </noscript>
         <ExtensionCleaner />
         {children}
       </body>
