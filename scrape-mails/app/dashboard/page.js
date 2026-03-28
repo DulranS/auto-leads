@@ -4127,6 +4127,8 @@ const handleMassEmailFollowUps = useCallback(async () => {
     }
   };
   
+  }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, updateContact, dealStage, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals, repliedLeads, followUpHistory, incrementQuota, setDailySMSCount, setDailyCallCount, lastSMSSent, lastCallMade, contactedChannels, getContactHistory, leadScores, isContactedOnAnyChannel, isPriorityPhone, setIsSending, setSendProgress, setLoadingCallHistory, setCallHistory, db, getDoc, doc, collection, query, where, getDocs, increment, renderPreviewText, formatForDialing, formatPhoneForDisplay, requestGmailToken, getSafeFollowUpCandidates, setIsBackingUp, setLastBackup, localStorageHelper]);
+  
   // ============================================================================
   // EXTRACT ALL TEMPLATE VARIABLES FOR UI
   // ============================================================================
