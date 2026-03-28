@@ -6082,4 +6082,4 @@ const handleMassEmailFollowUps = useCallback(async () => {
       )}
     </div>
   );
-})}
+}
