@@ -3450,6 +3450,8 @@ const handleMassEmailFollowUps = useCallback(async () => {
         });
         
         initialMappings.sender_name = 'sender_name';
+        initialMappings.email = 'email';
+        initialMappings.lead_quality = 'lead_quality';
         setFieldMappings(initialMappings);
         
         // Process rows
