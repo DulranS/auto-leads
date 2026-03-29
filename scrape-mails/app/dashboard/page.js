@@ -993,6 +993,21 @@ export default function Dashboard() {
   const [activeTemplateTab, setActiveTemplateTab] = useState('email');
   
   // ============================================================================
+  // TEMPLATE VARIABLES COLLECTION
+  // ============================================================================
+  const uiVars = [...new Set([
+    ...extractTemplateVariables(templateA.subject),
+    ...extractTemplateVariables(templateA.body),
+    ...extractTemplateVariables(templateB.subject),
+    ...extractTemplateVariables(templateB.body),
+    ...extractTemplateVariables(whatsappTemplate),
+    ...extractTemplateVariables(smsTemplate),
+    ...extractTemplateVariables(instagramTemplate),
+    ...extractTemplateVariables(twitterTemplate),
+    ...extractTemplateVariables(linkedinTemplate)
+  ])];
+  
+  // ============================================================================
   // CONTACT TRACKING STATES (Using custom hook)
   // ============================================================================
   const {
