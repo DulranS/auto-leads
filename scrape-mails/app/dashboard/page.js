@@ -412,6 +412,7 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
   });
   
   return result;
+};
 
 /**
  * Generate social media handle from business name
