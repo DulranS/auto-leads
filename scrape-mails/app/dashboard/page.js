@@ -102,12 +102,31 @@ Reply YES or NO.`;
 
 // --- UTILITY FUNCTIONS ---
 function formatForDialing(raw) {
-  if (!raw || raw === 'N/A') return null;
+  if (!raw || raw === 'N/A' || raw === 'n/a' || raw === 'NA') return null;
+  
   let cleaned = raw.toString().replace(/\D/g, '');
+  
+  // Handle Sri Lankan numbers
   if (cleaned.startsWith('0') && cleaned.length >= 9) {
     cleaned = '94' + cleaned.slice(1);
   }
-  return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
+  
+  // Handle numbers that already have country code
+  if (!cleaned.startsWith('94') && cleaned.length >= 9 && cleaned.length <= 15) {
+    // Assume Sri Lankan if no country code and length matches
+    if (cleaned.length === 9 || cleaned.length === 10) {
+      cleaned = '94' + cleaned;
+    }
+  }
+  
+  // Validate phone number format
+  const phoneRegex = /^[1-9]\d{8,14}$/;
+  if (!phoneRegex.test(cleaned)) {
+    console.warn('Invalid phone format:', raw, '->', cleaned);
+    return null;
+  }
+  
+  return cleaned;
 }
 
 const extractTemplateVariables = (text) => {
@@ -292,6 +311,53 @@ Would you be open to a quick chat?`);
     ...extractTemplateVariables(twitterTemplate),
     ...followUpTemplates.flatMap(t => [t.subject, t.body])
   ])];
+
+  useEffect(() => {
+    if (!csvContent) return;
+    
+    // Recalculate valid emails when lead quality filter changes
+    const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+    if (lines.length < 2) return;
+    
+    const headers = parseCsvRow(lines[0]).map(h => h.trim());
+    const hasLeadQualityCol = headers.includes('lead_quality');
+    
+    let hotEmails = 0, warmEmails = 0;
+    
+    for (let i = 1; i < lines.length; i++) {
+      const values = parseCsvRow(lines[i]);
+      if (values.length !== headers.length) continue;
+      
+      const row = {};
+      headers.forEach((header, idx) => {
+        row[header] = values[idx] || '';
+      });
+      
+      const hasValidEmail = isValidEmail(row.email);
+      if (!hasValidEmail) continue;
+      
+      let includeEmail = true;
+      if (hasLeadQualityCol) {
+        const quality = (row.lead_quality || '').trim() || 'HOT';
+        if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
+          includeEmail = false;
+        }
+      }
+      
+      if (includeEmail) {
+        const quality = (row.lead_quality || '').trim() || 'HOT';
+        if (!hasLeadQualityCol || quality === 'HOT') {
+          hotEmails++;
+        } else if (quality === 'WARM') {
+          warmEmails++;
+        }
+      }
+    }
+    
+    if (leadQualityFilter === 'HOT') setValidEmails(hotEmails);
+    else if (leadQualityFilter === 'WARM') setValidEmails(warmEmails);
+    else setValidEmails(hotEmails + warmEmails);
+  }, [leadQualityFilter, csvContent]);
 
   useEffect(() => {
     if (window.google?.accounts?.oauth2?.initTokenClient) {
@@ -513,6 +579,21 @@ Would you be open to a quick chat?`);
         const formattedPhone = formatForDialing(rawPhone);
         if (formattedPhone) {
           const contactId = `${row.email || 'no-email'}-${formattedPhone}-${Date.now()}-${Math.random()}`;
+          
+          // Generate WhatsApp message with fallback
+          let whatsappMessage = '';
+          try {
+            whatsappMessage = renderPreviewText(whatsappTemplate, row, fieldMappings, senderName);
+          } catch (error) {
+            console.warn('Error rendering WhatsApp template:', error);
+            whatsappMessage = `Hi ${row.business_name || 'there'}, I'm ${senderName || 'interested in connecting'}`;
+          }
+          
+          // Ensure message is not empty and properly encoded
+          if (!whatsappMessage || whatsappMessage.trim() === '') {
+            whatsappMessage = `Hi ${row.business_name || 'there'}, I'm ${senderName || 'interested in connecting'}`;
+          }
+          
           validPhoneContacts.push({
             id: contactId,
             business: row.business_name || 'Business',
@@ -539,9 +620,7 @@ Would you be open to a quick chat?`);
             decision_maker_found: row.decision_maker_found || 'No',
             tech_stack_detected: row.tech_stack_detected || '',
             company_size_indicator: row.company_size_indicator || 'unknown',
-            url: `https://wa.me/${formattedPhone}?text=${encodeURIComponent(
-              renderPreviewText(whatsappTemplate, row, fieldMappings, senderName)
-            )}`
+            url: `https://wa.me/${formattedPhone}?text=${encodeURIComponent(whatsappMessage)}`
           });
           if (!firstValid) firstValid = row;
         }
@@ -561,8 +640,70 @@ Would you be open to a quick chat?`);
   };
 
   // ============================================================================
-  // EMAIL SENDING FUNCTIONALITY
+  // BULK ACTIONS AND CONTACT MANAGEMENT
   // ============================================================================
+  const handleBulkWhatsApp = () => {
+    if (whatsappLinks.length === 0) {
+      alert('No contacts available for WhatsApp messaging');
+      return;
+    }
+    
+    const confirmed = window.confirm(
+      `Send WhatsApp messages to all ${whatsappLinks.length} contacts?\n\n` +
+      `This will open ${whatsappLinks.length} WhatsApp windows.\n` +
+      `Make sure you're ready to send the messages.`
+    );
+    
+    if (!confirmed) return;
+    
+    whatsappLinks.forEach((link, index) => {
+      setTimeout(() => {
+        if (link.url) {
+          window.open(link.url, '_blank', 'noopener,noreferrer');
+        }
+      }, index * 500); // Open each window 500ms apart
+    });
+  };
+  
+  const handleExportContacts = () => {
+    if (whatsappLinks.length === 0) {
+      alert('No contacts to export');
+      return;
+    }
+    
+    const csvContent = [
+      ['Business', 'Phone', 'Email', 'Website', 'WhatsApp Link'].join(','),
+      ...whatsappLinks.map(link => [
+        `"${link.business}"`,
+        link.phone,
+        link.email || '',
+        link.website || '',
+        link.url || ''
+      ].join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+  
+  const handleTestWhatsApp = () => {
+    if (whatsappLinks.length === 0) {
+      alert('No contacts available to test');
+      return;
+    }
+    
+    const firstContact = whatsappLinks[0];
+    if (firstContact.url) {
+      window.open(firstContact.url, '_blank', 'noopener,noreferrer');
+    } else {
+      alert('WhatsApp link not available for the first contact');
+    }
+  };
   const requestGmailToken = () => {
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined') return reject('Browser only');
@@ -718,17 +859,41 @@ Would you be open to a quick chat?`);
         {/* CSV Upload */}
         <div className="bg-gray-800 p-6 rounded-lg mb-8">
           <h2 className="text-xl font-semibold mb-4">Upload CSV</h2>
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleCsvUpload}
-            className="w-full p-3 bg-gray-700 border border-gray-600 rounded text-white"
-          />
-          {csvContent && (
-            <div className="mt-4 text-green-400">
-              ✅ CSV loaded with {validEmails} valid emails and {validWhatsApp} phone numbers
+          <div className="space-y-4">
+            <div>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleCsvUpload}
+                className="w-full p-3 bg-gray-700 border border-gray-600 rounded text-white"
+              />
             </div>
-          )}
+            
+            {/* Lead Quality Filter */}
+            {csvContent && (
+              <div className="flex items-center gap-4 p-3 bg-gray-700 rounded">
+                <label className="text-sm font-medium text-gray-300">Lead Quality Filter:</label>
+                <select
+                  value={leadQualityFilter}
+                  onChange={(e) => setLeadQualityFilter(e.target.value)}
+                  className="px-3 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm"
+                >
+                  <option value="all">All Leads</option>
+                  <option value="HOT">Hot Leads Only</option>
+                  <option value="WARM">Warm Leads Only</option>
+                </select>
+                <span className="text-xs text-gray-400">
+                  {validEmails} valid emails selected
+                </span>
+              </div>
+            )}
+            
+            {csvContent && (
+              <div className="text-green-400">
+                ✅ CSV loaded with {validEmails} valid emails and {validWhatsApp} phone numbers
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Email Templates */}
@@ -800,30 +965,176 @@ Would you be open to a quick chat?`);
           )}
         </div>
 
+        {/* Status and Actions */}
+        {csvContent && (
+          <div className="bg-gray-800 p-6 rounded-lg mb-8">
+            <h2 className="text-xl font-semibold mb-4">Status & Actions</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Upload Status */}
+              <div>
+                <h3 className="text-lg font-medium mb-3 text-green-400">📊 Upload Status</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Total Rows:</span>
+                    <span className="text-white">{csvContent.split('\n').filter(line => line.trim()).length - 1}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Valid Emails:</span>
+                    <span className="text-green-400">{validEmails}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Valid Phones:</span>
+                    <span className="text-green-400">{validWhatsApp}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Lead Quality:</span>
+                    <span className="text-yellow-400">{leadQualityFilter}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Quick Actions */}
+              <div>
+                <h3 className="text-lg font-medium mb-3 text-blue-400">⚡ Quick Actions</h3>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => {
+                      setCsvContent('');
+                      setValidEmails(0);
+                      setValidWhatsApp(0);
+                      setWhatsappLinks([]);
+                      setCsvHeaders([]);
+                      setPreviewRecipient(null);
+                    }}
+                    className="w-full bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                  >
+                    🗑️ Clear Data
+                  </button>
+                  <button
+                    onClick={() => {
+                      const input = document.querySelector('input[type="file"]');
+                      if (input) input.click();
+                    }}
+                    className="w-full bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                  >
+                    📁 Upload New CSV
+                  </button>
+                  {whatsappLinks.length > 0 && (
+                    <button
+                      onClick={handleExportContacts}
+                      className="w-full bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                    >
+                      📥 Export Contacts
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* WhatsApp Links */}
         {whatsappLinks.length > 0 && (
           <div className="bg-gray-800 p-6 rounded-lg">
-            <h2 className="text-xl font-semibold mb-4">WhatsApp Links ({whatsappLinks.length})</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">WhatsApp Links ({whatsappLinks.length})</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleTestWhatsApp}
+                  className="bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded text-white text-sm font-medium transition"
+                  title="Test with first contact"
+                >
+                  🧪 Test
+                </button>
+                <button
+                  onClick={handleBulkWhatsApp}
+                  className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-white text-sm font-medium transition"
+                  title="Send to all contacts"
+                >
+                  📤 Send All
+                </button>
+                <button
+                  onClick={handleExportContacts}
+                  className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-white text-sm font-medium transition"
+                  title="Export contacts to CSV"
+                >
+                  📥 Export
+                </button>
+              </div>
+            </div>
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {whatsappLinks.map((link) => (
                 <div key={link.id} className="flex justify-between items-center p-3 bg-gray-700 rounded">
-                  <div>
-                    <div className="font-medium">{link.business}</div>
-                    <div className="text-sm text-gray-400">{link.phone}</div>
+                  <div className="flex-1">
+                    <div className="font-medium text-white">{link.business}</div>
+                    <div className="text-sm text-gray-400">📞 {link.phone}</div>
                     {link.email && (
-                      <div className="text-sm text-blue-400">{link.email}</div>
+                      <div className="text-sm text-blue-400">📧 {link.email}</div>
+                    )}
+                    {link.website && (
+                      <div className="text-sm text-purple-400">🌐 {link.website}</div>
                     )}
                   </div>
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white"
-                  >
-                    Open WhatsApp
-                  </a>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (!link.url) {
+                          alert('WhatsApp link not available for this contact');
+                          return;
+                        }
+                        window.open(link.url, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                      title="Open in WhatsApp"
+                    >
+                      💬 WhatsApp
+                    </button>
+                    {link.email && (
+                      <button
+                        onClick={() => {
+                          window.location.href = `mailto:${link.email}`;
+                        }}
+                        className="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                        title="Send Email"
+                      >
+                        📧 Email
+                      </button>
+                    )}
+                    {link.website && (
+                      <button
+                        onClick={() => {
+                          window.open(link.website, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="bg-purple-600 hover:bg-purple-700 px-3 py-2 rounded text-white text-sm font-medium transition"
+                        title="Visit Website"
+                      >
+                        🌐 Website
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
+            </div>
+            {whatsappLinks.length > 0 && (
+              <div className="mt-4 p-3 bg-gray-700 rounded">
+                <div className="text-sm text-gray-300">
+                  <strong>💡 Tips:</strong> Click WhatsApp to send messages, Email to compose emails, or Website to visit their site. 
+                  Use bulk actions to send to all contacts at once.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Debug Information */}
+        {process.env.NODE_ENV === 'development' && whatsappLinks.length > 0 && (
+          <div className="bg-gray-800 p-4 rounded-lg mt-4">
+            <h3 className="text-lg font-semibold mb-2 text-yellow-400">🔍 Debug Info</h3>
+            <div className="text-xs text-gray-400 space-y-1">
+              <div>Total Contacts: {whatsappLinks.length}</div>
+              <div>Valid Phones: {whatsappLinks.filter(l => l.phone).length}</div>
+              <div>With Email: {whatsappLinks.filter(l => l.email).length}</div>
+              <div>With Website: {whatsappLinks.filter(l => l.website).length}</div>
             </div>
           </div>
         )}
