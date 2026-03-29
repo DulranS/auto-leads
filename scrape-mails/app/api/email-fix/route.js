@@ -53,8 +53,8 @@ async function validateSetup() {
   // Check 1: Environment Variables
   const envChecks = {
     googleClientId: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-    googleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-    googleRedirectUri: !!process.env.GOOGLE_REDIRECT_URI,
+    googleClientSecret: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET,
+    googleRedirectUri: !!process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI,
     firebaseApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
     firebaseProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
     firebaseAuthDomain: !!process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
@@ -127,8 +127,8 @@ async function testGmailOAuth() {
   // Check OAuth configuration
   test.oauth = {
     clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? '✅ Set' : '❌ Missing',
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET ? '✅ Set' : '❌ Missing',
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || '❌ Missing',
+    clientSecret: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET ? '✅ Set' : '❌ Missing',
+    redirectUri: process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI || '❌ Missing',
     scopes: [
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/gmail.readonly'
@@ -139,11 +139,11 @@ async function testGmailOAuth() {
   try {
     const { google } = require('googleapis');
     
-    if (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    if (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET) {
       const oauth2Client = new google.auth.OAuth2(
         process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-        process.env.GOOGLE_CLIENT_SECRET,
-        process.env.GOOGLE_REDIRECT_URI
+        process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET,
+        process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI
       );
       
       test.oauth.clientCreation = '✅ Success';
@@ -326,7 +326,7 @@ export async function GET(request) {
         {
           issue: 'Gmail OAuth not working',
           cause: 'Missing Google credentials',
-          fix: 'Set NEXT_PUBLIC_GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET'
+          fix: 'Set NEXT_PUBLIC_GOOGLE_CLIENT_ID and NEXT_PUBLIC_GOOGLE_CLIENT_SECRET'
         },
         {
           issue: 'Template subject missing',

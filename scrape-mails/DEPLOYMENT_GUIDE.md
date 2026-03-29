@@ -12,7 +12,7 @@
 ```bash
 # Gmail API
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_client_id
-GOOGLE_CLIENT_SECRET=your_client_secret
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_client_secret
 NEXT_PUBLIC_GOOGLE_REDIRECT_URI=your_redirect_uri
 GMAIL_REFRESH_TOKEN=your_refresh_token
 GMAIL_SENDER_ADDRESS=your_email@gmail.com

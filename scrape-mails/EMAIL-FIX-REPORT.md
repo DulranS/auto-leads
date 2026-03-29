@@ -74,7 +74,7 @@ Look at the status panel below the send button:
 **Solution**:
 1. Run the debug tool to check environment variables
 2. Ensure `NEXT_PUBLIC_GOOGLE_CLIENT_ID` is set
-3. Ensure `GOOGLE_CLIENT_SECRET` is set
+3. Ensure `NEXT_PUBLIC_GOOGLE_CLIENT_SECRET` is set
 4. Check that Google OAuth script loads properly
 
 ### **Issue: No valid emails found**
@@ -89,8 +89,8 @@ Look at the status panel below the send button:
 ```env
 # Google OAuth (Required for email sending)
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=your_redirect_uri
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXT_PUBLIC_GOOGLE_REDIRECT_URI=your_redirect_uri
 
 # Firebase (Required for data storage)
 NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key

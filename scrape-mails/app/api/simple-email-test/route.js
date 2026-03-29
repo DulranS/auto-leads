@@ -8,7 +8,7 @@ export async function POST(request) {
       message: 'Email system test working',
       environment: {
         googleClientId: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-        googleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+        googleClientSecret: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET,
         firebaseApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
         firebaseProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
       },

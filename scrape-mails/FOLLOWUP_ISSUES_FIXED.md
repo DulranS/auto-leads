@@ -21,7 +21,7 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id_here
 
 # Google OAuth (get from Google Cloud Console)
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id_here
-GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_google_client_secret_here
 
 # Gmail Configuration
 GMAIL_SENDER_EMAIL=your_email@gmail.com
@@ -46,7 +46,7 @@ GMAIL_SENDER_EMAIL=your_email@gmail.com
 4. Create OAuth 2.0 Client ID (Web Application)
 5. Copy:
    - **Client ID** → `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
-   - **Client Secret** → `GOOGLE_CLIENT_SECRET`
+   - **Client Secret** → `NEXT_PUBLIC_GOOGLE_CLIENT_SECRET`
 6. Add authorized redirect URI: `http://localhost:3000`
 
 ### 3. Gmail Configuration

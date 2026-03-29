@@ -74,8 +74,8 @@ CALENDLY_LINK=your_calendly_link_here
 
 # Google OAuth (already required for email sending)
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=your_google_redirect_uri
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXT_PUBLIC_GOOGLE_REDIRECT_URI=your_google_redirect_uri
 
 # Gmail Webhook Security
 GMAIL_WEBHOOK_SECRET=your_webhook_secret_here

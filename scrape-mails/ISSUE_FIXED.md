@@ -29,7 +29,7 @@ NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_google_client_secret
 GMAIL_SENDER_EMAIL=your_email@gmail.com
 ```
 

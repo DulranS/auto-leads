@@ -150,8 +150,8 @@ OPENAI_API_KEY=your_openai_api_key
 GMAIL_SENDER_EMAIL=your-sender@gmail.com
 GMAIL_REFRESH_TOKEN=your_gmail_refresh_token
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=your_redirect_uri
+NEXT_PUBLIC_GOOGLE_CLIENT_SECRET=your_google_client_secret
+NEXT_PUBLIC_GOOGLE_REDIRECT_URI=your_redirect_uri
 
 # Supabase (already configured)
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url

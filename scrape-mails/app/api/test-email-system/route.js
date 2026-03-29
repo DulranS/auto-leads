@@ -15,7 +15,7 @@ export async function POST(request) {
     // Test 1: Environment Variables
     testResults.tests.environment = {
       googleClientId: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
-      googleClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+      googleClientSecret: !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET,
       firebaseApiKey: !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
       firebaseProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
     };
@@ -117,7 +117,7 @@ export async function GET(request) {
       },
       ready: !!(
         process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID &&
-        process.env.GOOGLE_CLIENT_SECRET &&
+        process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET &&
         process.env.NEXT_PUBLIC_FIREBASE_API_KEY
       )
     };
