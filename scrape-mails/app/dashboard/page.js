@@ -298,7 +298,7 @@ function formatPhoneForDisplay(phone) {
  */
 const extractTemplateVariables = (text) => {
   if (!text) return [];
-  const matches = text.match(/\{\{\s*([^]+?)\s*\}\}/g) || [];
+  const matches = text.match(/\{\{\s*([^}]+?)\s*\}\}/g) || [];
   return [...new Set(matches.map(m => m.replace(/\{\{\s*|\s*\}\}/g, '').trim()))];
 };
 
