@@ -1,4 +1,4 @@
-// app/dashboard/page.js
+﻿// app/dashboard/page.js
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
@@ -6060,4 +6060,5 @@ const handleMassEmailFollowUps = useCallback(async () => {
       )}
     </div>
   )}
-});
+);
+}
