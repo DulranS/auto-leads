@@ -48,7 +48,10 @@ const firebaseConfig = {
   measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-const auth = firebase?.auth;
+const auth = getAuth();
+
+// Initialize Firebase app
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // ============================================================================
 // CONFIGURATION CONSTANTS
@@ -314,6 +317,61 @@ export default function DashboardClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // ============================================================================// WALLET CONFLICT PREVENTION
+// ============================================================================
+useEffect(() => {
+  // Suppress wallet extension console warnings
+  const originalWarn = console.warn;
+  const originalError = console.error;
+
+  console.warn = (...args) => {
+    // Filter out wallet-related warnings
+    if (args[0] && (
+      args[0].includes('TronWeb') ||
+      args[0].includes('TronLink') ||
+      args[0].includes('bybit') ||
+      args[0].includes('ethereum') ||
+      args[0].includes('Cannot redefine property')
+    )) {
+      return; // Suppress these warnings
+    }
+    originalWarn.apply(console, args);
+  };
+
+  console.error = (...args) => {
+    // Filter out wallet-related errors that don't affect functionality
+    if (args[0] && (
+      args[0].includes('TronWeb') ||
+      args[0].includes('TronLink') ||
+      args[0].includes('bybit') ||
+      args[0].includes('Cannot redefine property: ethereum')
+    )) {
+      return; // Suppress these errors
+    }
+    originalError.apply(console, args);
+  };
+
+  return () => {
+    // Restore original console methods
+    console.warn = originalWarn;
+    console.error = originalError;
+  };
+}, []);
+
+// ============================================================================  // AUTHENTICATION EFFECT
+  // ============================================================================
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setUser(user);
+      setLoadingAuth(false);
+      if (!user) {
+        router.push('/');
+      }
+    });
+
+    return () => unsubscribe();
+  }, [router]);
+
   // ============================================================================
   // AUTO-SAVE FUNCTIONALITY
   // ============================================================================
@@ -323,7 +381,7 @@ export default function DashboardClient() {
     if (!user) return;
 
     try {
-      const db = getFirestore();
+      const db = getFirestore(app);
       await setDoc(doc(db, 'user_preferences', user.uid), {
         ...userPreferences,
         updatedAt: serverTimestamp()
@@ -335,6 +393,30 @@ export default function DashboardClient() {
       addNotification('Failed to save settings', 'error');
     }
   }, [user, userPreferences]);
+
+  const loadSettings = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const db = getFirestore(app);
+      const docRef = doc(db, 'user_preferences', user.uid);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setUserPreferences(prev => ({ ...prev, ...data }));
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  }, [user]);
+
+  // Load settings when user changes
+  useEffect(() => {
+    if (user) {
+      loadSettings();
+    }
+  }, [user, loadSettings]);
 
   // Auto-save effect
   useEffect(() => {
@@ -450,7 +532,22 @@ export default function DashboardClient() {
           </button>
         </div>
 
-        {loading ? (
+        {loadingAuth ? (
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p className="mt-4 text-gray-400">Authenticating...</p>
+          </div>
+        ) : !user ? (
+          <div className="text-center">
+            <p className="text-gray-400">Please sign in to access the dashboard.</p>
+            <button
+              onClick={() => router.push('/')}
+              className="mt-4 px-6 py-3 bg-blue-700 hover:bg-blue-600 text-white rounded-lg font-medium"
+            >
+              Go to Sign In
+            </button>
+          </div>
+        ) : loading ? (
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
             <p className="mt-4 text-gray-400">Loading dashboard...</p>
