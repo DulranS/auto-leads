@@ -3010,7 +3010,68 @@ const handleSendWhatsApp = async (contact) => {
       addNotification(`❌ Failed to open WhatsApp: ${error.message}`, 'error');
     }
   };
-  
+
+  // ============================================================================
+  // SMART AI RESEARCH + OUTREACH
+  // ============================================================================
+  const handleSmartResearchOutreach = useCallback(async (contact) => {
+    if (!contact?.business) {
+      addNotification('Contact business name is required', 'error');
+      return;
+    }
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    if (!contact?.email) {
+      addNotification('Target email is required to send outreach', 'error');
+      return;
+    }
+
+    setStatusType('info');
+    setStatus(`🤖 Running smart outreach on ${contact.business}...`);
+
+    try {
+      const response = await fetch('/api/ai-smart-outreach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: contact.business,
+          companyWebsite: contact.website || '',
+          contactEmail: contact.email,
+          contactName: contact.business,
+          userId: user.uid,
+          senderName,
+          senderEmail,
+          accessToken: (user?.accessToken || ''),
+          refreshToken: (user?.refreshToken || ''),
+          sendNow: true
+        })
+      });
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        const msg = data.error || 'Unknown error';
+        addNotification(`❌ Smart outreach failed: ${msg}`, 'error');
+        setStatusType('error');
+        setStatus(`Error: ${msg}`);
+        return;
+      }
+
+      addNotification('✅ Smart outreach launched and email sent', 'success', 5000);
+      setStatusType('success');
+      setStatus(`Outreach sent to ${contact.email}`);
+
+      await loadSentLeads();
+      await loadRepliedAndFollowUp();
+    } catch (err) {
+      console.error('Smart outreach error:', err);
+      addNotification(`❌ Smart outreach failed: ${err.message}`, 'error');
+      setStatusType('error');
+      setStatus('Smart outreach failed');
+    }
+  }, [user, senderName, senderEmail, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
+
   // ============================================================================
   // SMS SEND WITH TRACKING & DUPLICATE PREVENTION
   // ============================================================================
@@ -5385,6 +5446,13 @@ const handleSendWhatsApp = async (contact) => {
                                 title="WhatsApp"
                               >
                                 💬
+                              </button>
+                              <button
+                                onClick={() => handleSmartResearchOutreach(link)}
+                                className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded"
+                                title="Smart AI Outreach"
+                              >
+                                🤖
                               </button>
                               <button
                                 onClick={() => handleOpenNativeSMS(link)}
