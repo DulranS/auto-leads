@@ -97,5 +97,64 @@
 │  └─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
+## 📈 System Architecture Diagram (Mermaid)
+
+```mermaid
+flowchart LR
+  subgraph UI [User Interface]
+    A[Next.js Dashboard] -->|REST/JSON| B[API Gateway]
+    A -->|Websocket/Event| C[Real-time Metrics]
+  end
+
+  subgraph API [Backend Services]
+    B --> D[Email Service (/api/send-email)]
+    B --> E[Follow-up Service (/api/send-followup)]
+    B --> F[AI Research (/api/ai-smart-outreach)]
+    B --> G[Auto-reply (/api/auto-reply-processor)]
+    B --> H[Scheduler (/api/followup-scheduler)]
+    B --> I[SMS/Call Service (/api/send-sms /api/make-call)]
+  end
+
+  subgraph External [Third-Party Integrations]
+    D -->|Gmail OAuth2| J[Gmail API]
+    I -->|Twilio APIs| K[Twilio]
+    F -->|OpenAI| L[OpenAI GPT-4o]
+  end
+
+  subgraph Data [Persistence]
+    D --> M[Firestore: sent_emails, activity]
+    H --> N[Supabase/PostgreSQL: schedule, leads]
+    G --> M
+    F --> M
+  end
+
+  subgraph Cron [Background Processing]
+    H -->|every 6h| O[Cron Jobs]
+    O --> D
+    O --> E
+  end
+
+  subgraph Analytics [Dashboard & Reporting]
+    M --> P[Analytics / Reporting]
+    N --> P
+    P --> A
+  end
+
+  classDef external fill:#f0f0f0,stroke:#333,stroke-width:1px;
+  class J,K,L external;
+```
+
+### 📌 Presentation Notes
+
+- User interacts through `Next.js` app and uploads leads/sets campaign rules.
+- API routes process input, validate, enforce quotas, and call communication engines.
+- `send-email`, `send-followup`, `send-new-leads` all share duplicate-prevention logic.
+- `followup-scheduler` handles timed follow-ups and prevents over-engagement (max 3, 2 days min).
+- `auto-reply-processor` handles incoming replies, marks processed, triggers AI suggestions.
+- All events are stored in Firestore/Supabase and exposed in dashboard analytics.
+- Monitoring includes quotas (500 daily email, 50 SMS, 30 calls), logging, and failure/retry.
+
+---
+
 Key Technologies: Next.js 16 • React 19 • Node.js • Supabase • PostgreSQL • GPT-4 • Gmail API • Twilio • Redis • Vercel
 System Scale: 1000+ Companies/Day • Zero Manual Intervention • Enterprise-Grade • Fully Automated
