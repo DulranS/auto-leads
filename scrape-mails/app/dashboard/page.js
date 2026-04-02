@@ -400,6 +400,9 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
     } else if (recipient && col && recipient[col] !== undefined) {
       const value = recipient[col];
       result = result.replace(regex, value !== null && value !== undefined ? String(value) : `[${varName}]`);
+    } else if (recipient && recipient[varName] !== undefined) {
+      const value = recipient[varName];
+      result = result.replace(regex, value !== null && value !== undefined ? String(value) : `[${varName}]`);
     } else {
       result = result.replace(regex, `[${varName}]`);
     }
@@ -966,6 +969,7 @@ export default function Dashboard() {
   // ============================================================================
   const [csvContent, setCsvContent] = useState('');
   const [csvHeaders, setCsvHeaders] = useState([]);
+  const [availableCsvVariables, setAvailableCsvVariables] = useState([]);
   const [whatsappLinks, setWhatsappLinks] = useState([]);
   const [validEmails, setValidEmails] = useState(0);
   const [validWhatsApp, setValidWhatsApp] = useState(0);
@@ -1005,6 +1009,13 @@ export default function Dashboard() {
     ...extractTemplateVariables(instagramTemplate),
     ...extractTemplateVariables(twitterTemplate),
     ...extractTemplateVariables(linkedinTemplate)
+  ])];
+
+  const allTemplateVars = [...new Set([
+    ...uiVars,
+    ...csvHeaders,
+    ...availableCsvVariables,
+    'sender_name'
   ])];
   
   // ============================================================================
@@ -1833,7 +1844,6 @@ export default function Dashboard() {
 
   const getNewLeadsDisabledReason = useCallback(() => {
     if (!csvContent) return 'Upload a CSV to start outreach.';
-    if (!senderName.trim()) return 'Set your sender name before emailing.';
     if (dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS) {
       return `Daily email limit reached (${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}).`;
     }
@@ -1843,7 +1853,7 @@ export default function Dashboard() {
     }
     if (isSending) return 'Email send in progress. Wait for completion.';
     return '';
-  }, [csvContent, senderName, dailyEmailCount, getNewLeads, isSending]);
+  }, [csvContent, dailyEmailCount, getNewLeads, isSending]);
 
   const getSafeFollowUpDisabledReason = useCallback(() => {
     if (isSending) return 'Send in progress. Please wait.';
@@ -1856,12 +1866,11 @@ export default function Dashboard() {
 
   const getSendEmailsDisabledReason = useCallback(() => {
     if (!csvContent) return 'Upload a CSV before sending emails.';
-    if (!senderName.trim()) return 'Enter sender name before sending.';
     if (validEmails === 0) return 'No valid email recipients. Already sent or invalid email list.';
     if (dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS) return `Daily email limit reached (${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}).`;
     if (isSending) return 'Email sending in progress.';
     return '';
-  }, [csvContent, senderName, validEmails, dailyEmailCount, isSending]);
+  }, [csvContent, validEmails, dailyEmailCount, isSending]);
 
   const newLeads = useMemo(() => getNewLeads(), [getNewLeads]);
   const newLeadsDisabledReason = useMemo(() => getNewLeadsDisabledReason(), [getNewLeadsDisabledReason]);
@@ -1909,6 +1918,9 @@ export default function Dashboard() {
       if (user) {
         setUser(user);
         setSenderEmail(user.email || '');
+        if (!senderName.trim()) {
+          setSenderName(user.displayName || '');
+        }
         loadSettings(user.uid);
         loadClickStats();
         loadDeals();
@@ -3592,6 +3604,7 @@ const handleSendWhatsApp = async (contact) => {
         
         const headers = parseCsvRow(lines[0]).map(h => h.trim());
         setCsvHeaders(headers);
+        setAvailableCsvVariables(headers);
         setPreviewRecipient(null);
         
         // Extract all template variables
@@ -3940,8 +3953,8 @@ const handleSendWhatsApp = async (contact) => {
       return;
     }
     
-    if (!senderName.trim() || validEmails === 0) {
-      addNotification('Check sender name and valid emails', 'error');
+    if (validEmails === 0) {
+      addNotification('No valid recipients available', 'error');
       return;
     }
     
@@ -4759,7 +4772,7 @@ const handleSendWhatsApp = async (contact) => {
                 <h2 className="text-lg sm:text-xl font-bold mb-4 text-white sticky top-0 bg-gray-800 pb-2">
                   2. Field Mappings
                 </h2>
-                {uiVars.map(varName => (
+                {allTemplateVars.map(varName => (
                   <div key={varName} className="flex items-center mb-2">
                     <span className="bg-gray-700 px-2 py-1 rounded text-xs font-mono mr-2 text-gray-200 min-w-max">
                       {`{{${varName}}}`}
@@ -4794,7 +4807,7 @@ const handleSendWhatsApp = async (contact) => {
                   value={senderName}
                   onChange={(e) => setSenderName(e.target.value)}
                   className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg"
-                  placeholder="Your Name"
+                  placeholder="Your Name (optional, defaults to Team)"
                 />
                 <input
                   type="email"
