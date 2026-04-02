@@ -94,6 +94,23 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // Prevent duplicate outreach emails
+    if (contactEmail) {
+      const normalizedEmail = contactEmail.trim().toLowerCase();
+      const existingEmailQuery = query(
+        collection(db, 'sent_emails'),
+        where('userId', '==', userId),
+        where('to', '==', normalizedEmail)
+      );
+      const existingEmailSnapshot = await getDocs(existingEmailQuery);
+      if (!existingEmailSnapshot.empty) {
+        return NextResponse.json(
+          { success: false, message: 'Duplicate email prevented. Email already sent to this contact.' },
+          { status: 409 }
+        );
+      }
+    }
+
     const aiPrompt = `You are a smart B2B research assistant. Analyze this company to:
 1) identify a relevant "opening" (e.g. recent funding, growth, product launch, hiring signal) that indicates likely urgency for software development support,
 2) find the likely decision maker (title and role) and provide pragmatic contact details/approach,
@@ -182,6 +199,30 @@ Return a JSON object with: opening, decisionMaker, reasons, emailDraft {subject,
 
       sendResult = gmailRes;
       sentAt = new Date().toISOString();
+
+      // Record sent email for duplicate protection and history tracking
+      if (contactEmail) {
+        await addDoc(collection(db, 'sent_emails'), {
+          userId,
+          to: contactEmail.trim().toLowerCase(),
+          businessName: companyName || 'Unknown',
+          subject,
+          body,
+          template: 'ai-smart-outreach',
+          sentAt,
+          opened: false,
+          openedCount: 0,
+          clicked: false,
+          clickCount: 0,
+          replied: false,
+          followUpCount: 0,
+          followUpAt: null,
+          lastFollowUpAt: null,
+          followUpDates: [],
+          messageId: gmailRes.id,
+          threadId: gmailRes.threadId || null
+        });
+      }
 
       await updateDoc(doc(db, 'ai_smart_outreach', docRef.id), {
         status: 'sent',

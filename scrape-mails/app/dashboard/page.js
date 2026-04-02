@@ -2888,6 +2888,14 @@ const handleMassEmailFollowUps = useCallback(async () => {
           console.log(`📬 Response for ${contact.email}:`, data);
             
           if (res.ok) {
+            // Check if email was skipped due to duplicate
+            if (data.skipped && data.skipped > 0) {
+              console.log(`⏭️ Duplicate detected and skipped for ${contact.email}`);
+              skipCount++;
+              results.push({ email: contact.email, status: 'skipped', reason: 'Already sent' });
+              continue;
+            }
+
             successCount++;
             results.push({ 
               email: contact.email, 
@@ -4057,7 +4065,7 @@ const handleSendWhatsApp = async (contact) => {
           continue;
         }
         
-        const normalizedRow = { ...row, email: emailValue.toLowerCase().trim() };
+        const normalizedRow = { ...row, email: normalizedEmail };
         validRecipients.push(normalizedRow);
       }
       
