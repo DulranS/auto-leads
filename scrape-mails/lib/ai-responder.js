@@ -97,7 +97,8 @@ async function generateReplyForIntent(intent, replyBody, lead, originalSubject) 
     (lead?.email ? lead.email.split('@')[0] : '') ||
     'there';
 
-  let prompt;
+  const humanTone = 'Write in a natural, human and authentic tone that feels like a real person, not generic marketing copy. Keep it concise, thoughtful, and conversational.';
+  let prompt = '';
 
   if (intent === 'interested') {
     prompt = `
@@ -108,6 +109,8 @@ Lead reply:
 """
 ${replyBody}
 """
+
+${humanTone}
 
 Write a warm, concise reply that:
 - acknowledges their interest
@@ -126,6 +129,8 @@ Lead reply:
 ${replyBody}
 """
 
+${humanTone}
+
 Write a clear, specific reply that:
 - directly answers their questions based on what a dev/automation agency can reasonably offer
 - suggests a simple next step (reply, share details, or quick call)
@@ -140,6 +145,8 @@ OOO message:
 """
 ${replyBody}
 """
+
+${humanTone}
 
 1. Extract their return date if present.
 2. Write a very short acknowledgement saying you'll follow up after they're back.
