@@ -1830,6 +1830,43 @@ export default function Dashboard() {
       return scoreB - scoreA;
     });
   }, [whatsappLinks, sentLeads, leadScores]);
+
+  const getNewLeadsDisabledReason = useCallback(() => {
+    if (!csvContent) return 'Upload a CSV to start outreach.';
+    if (!senderName.trim()) return 'Set your sender name before emailing.';
+    if (dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS) {
+      return `Daily email limit reached (${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}).`;
+    }
+    const newLeads = getNewLeads();
+    if (newLeads.length === 0) {
+      return 'No new leads to email. All contacts were already emailed or are excluded by filters.';
+    }
+    if (isSending) return 'Email send in progress. Wait for completion.';
+    return '';
+  }, [csvContent, senderName, dailyEmailCount, getNewLeads, isSending]);
+
+  const getSafeFollowUpDisabledReason = useCallback(() => {
+    if (isSending) return 'Send in progress. Please wait.';
+    const candidates = getSafeFollowUpCandidates();
+    if (!candidates || candidates.length === 0) {
+      return 'No safe follow-up candidates available (replied or maximum follow-ups reached).';
+    }
+    return '';
+  }, [getSafeFollowUpCandidates, isSending]);
+
+  const getSendEmailsDisabledReason = useCallback(() => {
+    if (!csvContent) return 'Upload a CSV before sending emails.';
+    if (!senderName.trim()) return 'Enter sender name before sending.';
+    if (validEmails === 0) return 'No valid email recipients. Already sent or invalid email list.';
+    if (dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS) return `Daily email limit reached (${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}).`;
+    if (isSending) return 'Email sending in progress.';
+    return '';
+  }, [csvContent, senderName, validEmails, dailyEmailCount, isSending]);
+
+  const newLeads = useMemo(() => getNewLeads(), [getNewLeads]);
+  const newLeadsDisabledReason = useMemo(() => getNewLeadsDisabledReason(), [getNewLeadsDisabledReason]);
+  const sendEmailsDisabledReason = useMemo(() => getSendEmailsDisabledReason(), [getSendEmailsDisabledReason]);
+  const safeFollowUpDisabledReason = useMemo(() => getSafeFollowUpDisabledReason(), [getSafeFollowUpDisabledReason]);
   
   // ============================================================================
   // GOOGLE OAUTH SCRIPT LOADER
@@ -4845,40 +4882,50 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="space-y-2 mt-4">
                   <button
                     onClick={() => handleSendEmails('A')}
-                    disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
+                    disabled={Boolean(sendEmailsDisabledReason)}
                     className={`w-full py-3 rounded-lg font-bold transition ${
-                      isSending || !csvContent || !senderName.trim() || validEmails === 0
+                      Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
                     }`}
+                    title={sendEmailsDisabledReason || `Send template A to ${Math.ceil(validEmails / 2)} leads`}
                   >
                     📧 Send Template A (First {Math.ceil(validEmails / 2)} leads)
                   </button>
                   <button
                     onClick={() => handleSendEmails('B')}
-                    disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
+                    disabled={Boolean(sendEmailsDisabledReason)}
                     className={`w-full py-3 rounded-lg font-bold transition ${
-                      isSending || !csvContent || !senderName.trim() || validEmails === 0
+                      Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-blue-700 hover:bg-blue-600 text-white'
                     }`}
+                    title={sendEmailsDisabledReason || `Send template B to ${Math.floor(validEmails / 2)} leads`}
                   >
                     📧 Send Template B (Last {Math.floor(validEmails / 2)} leads)
                   </button>
+                  {sendEmailsDisabledReason && (
+                    <div className="mt-2 text-xs text-yellow-300">⚠️ {sendEmailsDisabledReason}</div>
+                  )}
                 </div>
               ) : (
                 <>
                   <button
                     onClick={() => handleSendEmails()}
-                    disabled={isSending || !csvContent || !senderName.trim() || validEmails === 0}
+                    disabled={Boolean(sendEmailsDisabledReason)}
                     className={`w-full py-3 rounded-lg font-bold mt-4 transition ${
-                      isSending || !csvContent || !senderName.trim() || validEmails === 0
+                      Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
                     }`}
+                    title={sendEmailsDisabledReason || `Send emails to ${validEmails} leads`}
                   >
                     📧 Send Emails ({validEmails})
                   </button>
+                  {sendEmailsDisabledReason && (
+                    <div className="mt-2 text-xs text-yellow-300">⚠️ {sendEmailsDisabledReason}</div>
+                  )}
+
                   
                   {/* Debug Button */}
                   <button
@@ -4920,19 +4967,26 @@ const handleSendWhatsApp = async (contact) => {
                   
                   <button
                     onClick={handleSendToNewLeads}
-                    disabled={isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS}
+                    disabled={Boolean(newLeadsDisabledReason)}
                     className={`w-full py-3 rounded-lg font-bold mt-3 transition ${
-                      isSending || !csvContent || !senderName.trim() || getNewLeads().length === 0 || dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS
+                      Boolean(newLeadsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed text-gray-400'
                         : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-lg'
                     }`}
-                    title={dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS ? 'Daily limit reached' : `Send to ${getNewLeads().length} new leads`}
+                    title={newLeadsDisabledReason || `Send to ${newLeads.length} new leads`}
                   >
-                    🚀 Smart New Lead Outreach ({getNewLeads().length} new leads)
+                    🚀 Smart New Lead Outreach ({newLeads.length} new leads)
                     <div className="text-xs font-normal mt-1 opacity-90">
-                      {dailyEmailCount >= CONFIG.MAX_DAILY_EMAILS ? '⚠️ Daily limit reached' : `${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} sent today • Prevents duplicates`}
+                      {newLeadsDisabledReason
+                        ? `⚠️ ${newLeadsDisabledReason}`
+                        : `${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} sent today • Prevents duplicates`}
                     </div>
                   </button>
+                  {newLeadsDisabledReason && (
+                    <div className="mt-2 text-xs text-yellow-300 font-semibold">
+                      ⚠️ {newLeadsDisabledReason}
+                    </div>
+                  )}
                 </>
               )}
             </div>
