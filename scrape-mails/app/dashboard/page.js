@@ -2921,8 +2921,23 @@ const handleMassEmailFollowUps = useCallback(async () => {
     setSendProgress(null);
     setStatus('');
   }
-  
-  const handleSendWhatsApp = async (contact) => {
+}, [
+  user,
+  addNotification,
+  getSafeFollowUpCandidates,
+  canUse,
+  requestGmailToken,
+  loadSentLeads,
+  loadRepliedAndFollowUp,
+  loadDeals,
+  repliedLeads,
+  followUpHistory
+]);
+
+// ============================================================================
+// WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+// ============================================================================
+const handleSendWhatsApp = async (contact) => {
     if (!contact?.phone) {
       addNotification('No phone number for this contact', 'error');
       return;
@@ -3086,9 +3101,7 @@ const handleMassEmailFollowUps = useCallback(async () => {
       addNotification(`❌ Failed to send SMS: ${error.message}`, 'error');
     }
   };
-  
-  }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, updateContact, dealStage, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals, repliedLeads, followUpHistory, incrementQuota, setDailySMSCount, setDailyCallCount, lastSMSSent, lastCallMade, contactedChannels, getContactHistory, leadScores, isContactedOnAnyChannel, isPriorityPhone, setIsSending, setSendProgress, setLoadingCallHistory, setCallHistory, db, getDoc, doc, collection, query, where, getDocs, increment, renderPreviewText, formatForDialing, formatPhoneForDisplay, requestGmailToken, getSafeFollowUpCandidates, setIsBackingUp, setLastBackup, localStorageHelper]);
-  
+
   // ============================================================================
   // OPEN NATIVE SMS APP
   // ============================================================================
