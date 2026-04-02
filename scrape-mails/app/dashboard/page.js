@@ -2934,6 +2934,8 @@ const handleMassEmailFollowUps = useCallback(async () => {
   followUpHistory
 ]);
 
+console.log('✅ Mass email follow-up handler defined');
+
 // ============================================================================
 // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
 // ============================================================================
