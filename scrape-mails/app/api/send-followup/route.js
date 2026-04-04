@@ -70,19 +70,12 @@ const FOLLOW_UP_TEMPLATES = [
 ];
 
 // ============================================================================
-// CREATE MIME MESSAGE
+// EXTRACT DOMAIN FROM EMAIL
 // ============================================================================
-const createMimeMessage = ({ from, to, subject, body }) => {
-  let mimeMessage = `From: ${from}\r\n`;
-  mimeMessage += `To: ${to}\r\n`;
-  mimeMessage += `Subject: ${subject}\r\n`;
-  mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
-  mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
-  
-  const htmlBody = body.replace(/\n/g, '<br>');
-  mimeMessage += htmlBody + '\r\n';
-  
-  return Buffer.from(mimeMessage).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const extractDomainFromEmail = (email) => {
+  if (!email || typeof email !== 'string') return null;
+  const parts = email.trim().toLowerCase().split('@');
+  return parts.length === 2 ? parts[1] : null;
 };
 
 // ============================================================================
@@ -222,6 +215,27 @@ export async function POST(request) {
       followUpDates: [...(existingData.followUpDates || []), now],
       followUpAt: null
     });
+    
+    // Track company followup
+    try {
+      const domain = extractDomainFromEmail(email);
+      await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/track-company`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          companyName: existingData.businessName || 'Unknown Company',
+          domain,
+          email,
+          contactName: existingData.contactName || '',
+          csvSource: existingData.csvSource || 'unknown',
+          action: 'followup'
+        })
+      });
+    } catch (trackError) {
+      console.warn('Failed to track company followup:', trackError);
+      // Don't fail the followup send if company tracking fails
+    }
     
     const isFinalFollowUp = newFollowUpCount >= CONFIG.MAX_FOLLOW_UPS;
     

@@ -1146,6 +1146,20 @@ export default function Dashboard() {
   });
   
   // ============================================================================
+  // COMPANY TRACKING STATES
+  // ============================================================================
+  const [contactedCompanies, setContactedCompanies] = useState([]);
+  const [loadingContactedCompanies, setLoadingContactedCompanies] = useState(false);
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [companyStats, setCompanyStats] = useState({
+    totalCompanies: 0,
+    totalContacts: 0,
+    avgContactsPerCompany: 0,
+    companiesReplied: 0,
+    replyRate: 0
+  });
+  
+  // ============================================================================
   // CALL TRACKING STATES
   // ============================================================================
   const [callHistory, setCallHistory] = useState([]);
@@ -2407,6 +2421,63 @@ export default function Dashboard() {
   };
   
   // ============================================================================
+  // LOAD CONTACTED COMPANIES FROM API
+  // ============================================================================
+  const loadContactedCompanies = async () => {
+    if (!user?.uid) return;
+    
+    setLoadingContactedCompanies(true);
+    
+    try {
+      const res = await fetch(`/api/track-company?userId=${user.uid}`);
+      
+      if (res.status === 404) {
+        console.warn('Company tracking API not found, using empty state');
+        setContactedCompanies([]);
+        setCompanyStats({
+          totalCompanies: 0,
+          totalContacts: 0,
+          avgContactsPerCompany: 0,
+          companiesReplied: 0,
+          replyRate: 0
+        });
+        setLoadingContactedCompanies(false);
+        return;
+      }
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        setContactedCompanies(data.companies || []);
+        
+        // Calculate stats
+        const companies = data.companies || [];
+        const totalCompanies = companies.length;
+        const totalContacts = companies.reduce((sum, company) => sum + (company.totalContacts || 0), 0);
+        const avgContactsPerCompany = totalCompanies > 0 ? (totalContacts / totalCompanies).toFixed(1) : 0;
+        const companiesReplied = companies.filter(company => company.hasReplied).length;
+        const replyRate = totalCompanies > 0 ? ((companiesReplied / totalCompanies) * 100).toFixed(1) : 0;
+        
+        setCompanyStats({
+          totalCompanies,
+          totalContacts,
+          avgContactsPerCompany,
+          companiesReplied,
+          replyRate
+        });
+      } else {
+        addNotification('Failed to load contacted companies', 'error');
+      }
+    } catch (err) {
+      console.error('Load contacted companies error:', err);
+      setContactedCompanies([]);
+      addNotification('Error loading contacted companies', 'error');
+    } finally {
+      setLoadingContactedCompanies(false);
+    }
+  };
+  
+  // ============================================================================
   // REQUEST GMAIL OAUTH TOKEN
   // ============================================================================
   const requestGmailToken = () => {
@@ -2594,6 +2665,7 @@ const testFollowUpSend = useCallback(async () => {
       addNotification(`✅ Test follow-up sent to ${testCandidate.email}`, 'success');
       // Refresh data after successful test
       await loadSentLeads();
+      await loadContactedCompanies();
       await loadRepliedAndFollowUp();
     } else {
       addNotification(`❌ Test failed: ${data.error || 'Unknown error'}`, 'error');
@@ -4125,7 +4197,8 @@ const handleSendWhatsApp = async (contact) => {
           templateToSend,
           leadQualityFilter,
           emailImages: imagesWithBase64,
-          userId: user.uid
+          userId: user.uid,
+          csvSource: csvFileName || 'uploaded_csv'
         })
       });
       
@@ -5195,6 +5268,41 @@ const handleSendWhatsApp = async (contact) => {
                       <div className="text-xs text-orange-200 mt-1">
                         {Math.round((validEmails / Math.max(whatsappLinks.length, 1)) * 100)}% of pool
                       </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Company Tracking */}
+                <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 p-4 rounded-xl border border-indigo-700/50">
+                  <h3 className="text-sm font-bold text-indigo-300 mb-3">🏢 Company Tracking</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xs text-indigo-400">Companies Contacted</div>
+                      <div className="text-lg font-bold text-indigo-300">
+                        {loadingContactedCompanies ? '...' : companyStats.totalCompanies}
+                      </div>
+                      <div className="text-xs text-indigo-400 mt-1">Unique organizations</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-indigo-400">Total Contacts</div>
+                      <div className="text-lg font-bold text-indigo-300">
+                        {loadingContactedCompanies ? '...' : companyStats.totalContacts}
+                      </div>
+                      <div className="text-xs text-indigo-400 mt-1">Avg {companyStats.avgContactsPerCompany} per company</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-indigo-400">Reply Rate</div>
+                      <div className="text-lg font-bold text-green-400">
+                        {loadingContactedCompanies ? '...' : `${companyStats.replyRate}%`}
+                      </div>
+                      <div className="text-xs text-green-400 mt-1">{companyStats.companiesReplied} replied</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-indigo-400">CSV Sources</div>
+                      <div className="text-lg font-bold text-purple-400">
+                        {loadingContactedCompanies ? '...' : contactedCompanies.reduce((sum, company) => sum + (company.csvCount || 0), 0)}
+                      </div>
+                      <div className="text-xs text-purple-400 mt-1">Files processed</div>
                     </div>
                   </div>
                 </div>

@@ -60,14 +60,12 @@ const parseCsvRow = (str) => {
 };
 
 // ============================================================================
-// VALIDATE EMAIL
+// EXTRACT DOMAIN FROM EMAIL
 // ============================================================================
-const isValidEmail = (email) => {
-  if (!email || typeof email !== 'string') return false;
-  const cleaned = email.trim().toLowerCase();
-  if (cleaned.length < 5) return false;
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(cleaned);
+const extractDomainFromEmail = (email) => {
+  if (!email || typeof email !== 'string') return null;
+  const parts = email.trim().toLowerCase().split('@');
+  return parts.length === 2 ? parts[1] : null;
 };
 
 // ============================================================================
@@ -135,7 +133,8 @@ export async function POST(request) {
       templateToSend,
       leadQualityFilter,
       emailImages = [],
-      userId
+      userId,
+      csvSource
     } = await request.json();
     
     if (!userId || !accessToken || !csvContent) {
@@ -232,6 +231,59 @@ export async function POST(request) {
         continue;
       }
       
+      // Check if company already contacted (company-level duplicate prevention)
+      const normalizedCompanyName = businessName.trim().toLowerCase();
+      const domain = extractDomainFromEmail(email);
+      
+      let companyAlreadyContacted = false;
+      
+      // Check by company name
+      const companyNameQuery = query(
+        collection(db, 'contacted_companies'),
+        where('userId', '==', userId),
+        where('normalizedCompanyName', '==', normalizedCompanyName)
+      );
+      const companyNameSnapshot = await getDocs(companyNameQuery);
+      
+      if (!companyNameSnapshot.empty) {
+        // Check if we've sent too many emails to this company recently
+        const companyData = companyNameSnapshot.docs[0].data();
+        const daysSinceLastContact = companyData.lastContactedAt ?
+          (new Date() - new Date(companyData.lastContactedAt)) / (1000 * 60 * 60 * 24) : 999;
+        
+        // Skip if contacted within the last 2 days (configurable)
+        if (daysSinceLastContact < 2) {
+          console.log(`⏭️ Company "${businessName}" contacted too recently (${Math.floor(daysSinceLastContact)} days ago)`);
+          companyAlreadyContacted = true;
+        }
+      }
+      
+      // Also check by domain if available
+      if (!companyAlreadyContacted && domain) {
+        const domainQuery = query(
+          collection(db, 'contacted_companies'),
+          where('userId', '==', userId),
+          where('domain', '==', domain)
+        );
+        const domainSnapshot = await getDocs(domainQuery);
+        
+        if (!domainSnapshot.empty) {
+          const companyData = domainSnapshot.docs[0].data();
+          const daysSinceLastContact = companyData.lastContactedAt ?
+            (new Date() - new Date(companyData.lastContactedAt)) / (1000 * 60 * 60 * 24) : 999;
+          
+          if (daysSinceLastContact < 2) {
+            console.log(`⏭️ Domain "${domain}" contacted too recently (${Math.floor(daysSinceLastContact)} days ago)`);
+            companyAlreadyContacted = true;
+          }
+        }
+      }
+      
+      if (companyAlreadyContacted) {
+        skippedCount++;
+        continue;
+      }
+      
       // Select template
       const template = abTestMode && templateToSend 
         ? (templateToSend === 'A' ? templateA : templateB)
@@ -287,10 +339,34 @@ export async function POST(request) {
           lastFollowUpAt: null,
           followUpDates: [],
           messageId: response.data.id,
-          threadId: response.data.threadId
+          threadId: response.data.threadId,
+          csvSource: csvSource || 'unknown'
         };
         
         await addDoc(collection(db, 'sent_emails'), emailData);
+        
+        // Track company contact
+        try {
+          const contactName = recipient[contactColumnName] || '';
+          const domain = extractDomainFromEmail(email);
+          
+          await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/track-company`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId,
+              companyName: businessName,
+              domain,
+              email,
+              contactName,
+              csvSource: csvSource || 'unknown',
+              action: 'contact'
+            })
+          });
+        } catch (trackError) {
+          console.warn('Failed to track company:', trackError);
+          // Don't fail the email send if company tracking fails
+        }
         
         sentCount++;
         
