@@ -1386,10 +1386,28 @@ export default function Dashboard() {
   // HELPER: Mark contact as manually contacted/not contacted
   // ============================================================================
   const markContactManually = useCallback(async (contact, contacted, reason = '') => {
-    if (!contact) return false;
+    if (!contact) {
+      addNotification('❌ Invalid contact provided', 'error');
+      return false;
+    }
     
     const key = contact.email || contact.phone;
-    if (!key) return false;
+    if (!key) {
+      addNotification('❌ Contact must have email or phone', 'error');
+      return false;
+    }
+
+    // Validate Firebase initialization
+    if (!user?.uid) {
+      addNotification('❌ User not authenticated. Please log in again.', 'error');
+      return false;
+    }
+
+    if (!db) {
+      console.error('Firebase database not initialized');
+      addNotification('❌ Database connection error. Please refresh and try again.', 'error');
+      return false;
+    }
     
     try {
       const now = new Date().toISOString();
@@ -1407,18 +1425,26 @@ export default function Dashboard() {
       }));
       
       // Save to Firebase
-      if (user?.uid && db) {
+      try {
         const docRef = doc(db, 'manual_contact_status', `${user.uid}_${key}`);
         await setDoc(docRef, {
           userId: user.uid,
           contactKey: key,
           ...status
         }, { merge: true });
+      } catch (firebaseError) {
+        console.error('Firebase setDoc error in markContactManually:', firebaseError);
+        throw new Error(`Firebase save failed: ${firebaseError.message}`);
       }
       
-      // Also update contact history
+      // Also update contact history if marked as contacted
       if (contacted) {
-        await updateContact(key, 'manual', { manuallyMarked: true });
+        try {
+          await updateContact(key, 'manual', { manuallyMarked: true });
+        } catch (updateError) {
+          console.warn('Failed to update contact history:', updateError);
+          // Don't fail completely if history update fails - status was already saved
+        }
       }
       
       addNotification(
@@ -1429,10 +1455,16 @@ export default function Dashboard() {
       return true;
     } catch (error) {
       console.error('Mark contact manually error:', error);
-      addNotification('❌ Failed to update contact status', 'error');
+      console.error('Error details:', {
+        errorMessage: error?.message,
+        errorCode: error?.code,
+        contact: key,
+        user: user?.uid
+      });
+      addNotification(`❌ Failed to update contact status: ${error?.message || 'Unknown error'}`, 'error');
       return false;
     }
-  }, [user?.uid, updateContact, addNotification]);
+  }, [user?.uid, db, updateContact, addNotification]);
   
   // ============================================================================
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
@@ -2514,7 +2546,8 @@ export default function Dashboard() {
         },
         error_callback: (err) => {
           reject(err.message || 'OAuth error');
-        }
+        },
+        ...(senderEmail ? { login_hint: senderEmail } : {})
       });
       
       client.requestAccessToken();

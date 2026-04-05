@@ -276,10 +276,37 @@ export async function POST(request) {
     
   } catch (error) {
     console.error('Send new leads error:', error);
+
+    const message = error?.response?.data?.error?.message || error?.message || 'Unknown error';
+    const isAuthError = error?.code === 401 || /invalid_grant|Invalid Credentials/i.test(message);
+    const isPermissionsError = error?.code === 403 || /insufficient_permissions|Missing or insufficient permissions|not authorized to send from/i.test(message);
+
+    if (isAuthError) {
+      return NextResponse.json(
+        {
+          error: 'Gmail access token expired or invalid',
+          details: 'Please re-authenticate with Gmail',
+          code: 'GMAIL_AUTH_ERROR'
+        },
+        { status: 401, headers }
+      );
+    }
+
+    if (isPermissionsError) {
+      return NextResponse.json(
+        {
+          error: 'Insufficient Gmail permissions',
+          details: 'Please grant Gmail send permissions and ensure the Gmail account matches the sender email.',
+          code: 'GMAIL_PERMISSIONS_ERROR'
+        },
+        { status: 403, headers }
+      );
+    }
+
     return NextResponse.json(
-      { 
+      {
         error: 'Failed to send emails',
-        details: error.message,
+        details: message,
         sent: 0,
         failed: 0,
         skipped: 0
