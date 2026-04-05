@@ -1,7 +1,7 @@
 // app/api/send-email/route.js
 import { NextResponse } from 'next/server';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, setDoc, increment } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, setDoc, increment, query, where, getDocs } from 'firebase/firestore';
 import { google } from 'googleapis';
 
 // ============================================================================
@@ -68,6 +68,14 @@ const extractDomainFromEmail = (email) => {
   return parts.length === 2 ? parts[1] : null;
 };
 
+const isValidEmail = (email) => {
+  if (!email || typeof email !== 'string') return false;
+  const cleaned = email.trim().toLowerCase();
+  if (cleaned.length < 5) return false;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(cleaned);
+};
+
 // ============================================================================
 // CREATE MIME MESSAGE
 // ============================================================================
@@ -76,43 +84,59 @@ const createMimeMessage = async ({
   to,
   subject,
   body,
-  images = []
+  images = [],
+  attachments = []
 }) => {
-  const boundary = 'boundary_' + Date.now();
-  
+  const mixedBoundary = 'mixed_' + Date.now();
+  const relatedBoundary = 'related_' + Date.now();
+
   let mimeMessage = `From: ${from}\r\n`;
   mimeMessage += `To: ${to}\r\n`;
   mimeMessage += `Subject: ${subject}\r\n`;
   mimeMessage += `MIME-Version: 1.0\r\n`;
-  mimeMessage += `Content-Type: multipart/related; boundary="${boundary}"\r\n\r\n`;
-  
-  // HTML Body
-  mimeMessage += `--${boundary}\r\n`;
-  mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
-  mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
-  
+  mimeMessage += `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
+
   let htmlBody = body.replace(/\n/g, '<br>');
-  
-  // Add inline images
+
   images.forEach((img, index) => {
-    const cid = `img${index + 1}@massmailer`;
+    const cid = img.cid || `img${index + 1}@massmailer`;
     htmlBody = htmlBody.replace(`{{image${index + 1}}}`, `<img src="cid:${cid}" style="max-width: 100%; height: auto;" />`);
   });
-  
-  mimeMessage += htmlBody + '\r\n\r\n';
-  
-  // Add images
-  for (const img of images) {
-    mimeMessage += `--${boundary}\r\n`;
-    mimeMessage += `Content-Type: ${img.mimeType}\r\n`;
-    mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
-    mimeMessage += `Content-ID: <${img.cid}>\r\n`;
-    mimeMessage += `Content-Disposition: inline; filename="image${images.indexOf(img) + 1}"\r\n\r\n`;
-    mimeMessage += img.base64 + '\r\n\r\n';
+
+  mimeMessage += `--${mixedBoundary}\r\n`;
+  if (images.length > 0) {
+    mimeMessage += `Content-Type: multipart/related; boundary="${relatedBoundary}"\r\n\r\n`;
+    mimeMessage += `--${relatedBoundary}\r\n`;
+    mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
+    mimeMessage += htmlBody + '\r\n\r\n';
+
+    for (const img of images) {
+      mimeMessage += `--${relatedBoundary}\r\n`;
+      mimeMessage += `Content-Type: ${img.mimeType}\r\n`;
+      mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
+      mimeMessage += `Content-ID: <${img.cid}>\r\n`;
+      mimeMessage += `Content-Disposition: inline; filename="${img.filename || `image${images.indexOf(img) + 1}`}"\r\n\r\n`;
+      mimeMessage += img.base64 + '\r\n\r\n';
+    }
+
+    mimeMessage += `--${relatedBoundary}--\r\n`;
+  } else {
+    mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
+    mimeMessage += htmlBody + '\r\n\r\n';
   }
-  
-  mimeMessage += `--${boundary}--\r\n`;
-  
+
+  for (const attachment of attachments) {
+    mimeMessage += `--${mixedBoundary}\r\n`;
+    mimeMessage += `Content-Type: ${attachment.mimeType || 'application/octet-stream'}; name="${attachment.filename}"\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
+    mimeMessage += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n\r\n`;
+    mimeMessage += attachment.base64 + '\r\n\r\n';
+  }
+
+  mimeMessage += `--${mixedBoundary}--\r\n`;
+
   return Buffer.from(mimeMessage).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
 
@@ -133,18 +157,18 @@ export async function POST(request) {
       templateToSend,
       leadQualityFilter,
       emailImages = [],
+      emailAttachments = [],
       userId,
       csvSource
     } = await request.json();
-    
+
     if (!userId || !accessToken || !csvContent) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       );
     }
-    
-    // Check daily limit
+
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const emailQuery = query(
@@ -311,7 +335,8 @@ export async function POST(request) {
           to: email,
           subject,
           body,
-          images: emailImages
+          images: emailImages,
+          attachments: emailAttachments
         });
         
         // Send via Gmail API
@@ -347,6 +372,7 @@ export async function POST(request) {
         
         // Track company contact
         try {
+          const contactColumnName = fieldMappings?.contact_name || fieldMappings?.contact || 'contact_name';
           const contactName = recipient[contactColumnName] || '';
           const domain = extractDomainFromEmail(email);
           

@@ -49,37 +49,55 @@ const isValidEmail = (email) => {
 // ============================================================================
 // CREATE MIME MESSAGE
 // ============================================================================
-const createMimeMessage = ({ from, to, subject, body, images = [] }) => {
-  const boundary = 'boundary_' + Date.now();
+const createMimeMessage = ({ from, to, subject, body, images = [], attachments = [] }) => {
+  const mixedBoundary = 'mixed_' + Date.now();
+  const relatedBoundary = 'related_' + Date.now();
   
   let mimeMessage = `From: ${from}\r\n`;
   mimeMessage += `To: ${to}\r\n`;
   mimeMessage += `Subject: ${subject}\r\n`;
   mimeMessage += `MIME-Version: 1.0\r\n`;
-  mimeMessage += `Content-Type: multipart/related; boundary="${boundary}"\r\n\r\n`;
-  
-  mimeMessage += `--${boundary}\r\n`;
-  mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
-  mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
+  mimeMessage += `Content-Type: multipart/mixed; boundary="${mixedBoundary}"\r\n\r\n`;
   
   let htmlBody = body.replace(/\n/g, '<br>');
-  
   images.forEach((img, index) => {
-    const cid = `img${index + 1}@massmailer`;
+    const cid = img.cid || `img${index + 1}@massmailer`;
     htmlBody = htmlBody.replace(`{{image${index + 1}}}`, `<img src="cid:${cid}" style="max-width: 100%;" />`);
   });
   
-  mimeMessage += htmlBody + '\r\n\r\n';
-  
-  for (const img of images) {
-    mimeMessage += `--${boundary}\r\n`;
-    mimeMessage += `Content-Type: ${img.mimeType}\r\n`;
-    mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
-    mimeMessage += `Content-ID: <${img.cid}>\r\n\r\n`;
-    mimeMessage += img.base64 + '\r\n\r\n';
+  mimeMessage += `--${mixedBoundary}\r\n`;
+  if (images.length > 0) {
+    mimeMessage += `Content-Type: multipart/related; boundary="${relatedBoundary}"\r\n\r\n`;
+    mimeMessage += `--${relatedBoundary}\r\n`;
+    mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
+    mimeMessage += htmlBody + '\r\n\r\n';
+    
+    for (const img of images) {
+      mimeMessage += `--${relatedBoundary}\r\n`;
+      mimeMessage += `Content-Type: ${img.mimeType}\r\n`;
+      mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
+      mimeMessage += `Content-ID: <${img.cid}>\r\n`;
+      mimeMessage += `Content-Disposition: inline; filename="${img.filename || `image${images.indexOf(img) + 1}`}"\r\n\r\n`;
+      mimeMessage += img.base64 + '\r\n\r\n';
+    }
+    
+    mimeMessage += `--${relatedBoundary}--\r\n`;
+  } else {
+    mimeMessage += `Content-Type: text/html; charset=UTF-8\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: quoted-printable\r\n\r\n`;
+    mimeMessage += htmlBody + '\r\n\r\n';
   }
   
-  mimeMessage += `--${boundary}--\r\n`;
+  for (const attachment of attachments) {
+    mimeMessage += `--${mixedBoundary}\r\n`;
+    mimeMessage += `Content-Type: ${attachment.mimeType || 'application/octet-stream'}; name="${attachment.filename}"\r\n`;
+    mimeMessage += `Content-Transfer-Encoding: base64\r\n`;
+    mimeMessage += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n\r\n`;
+    mimeMessage += attachment.base64 + '\r\n\r\n';
+  }
+  
+  mimeMessage += `--${mixedBoundary}--\r\n`;
   
   return Buffer.from(mimeMessage).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
@@ -113,7 +131,8 @@ export async function POST(request) {
       accessToken,
       template,
       userId,
-      emailImages = []
+      emailImages = [],
+      emailAttachments = []
     } = await request.json();
     
     if (!userId || !accessToken || !recipients || !Array.isArray(recipients)) {
@@ -207,7 +226,8 @@ export async function POST(request) {
           to: email,
           subject,
           body,
-          images: emailImages
+          images: emailImages,
+          attachments: emailAttachments
         });
         
         const response = await gmail.users.messages.send({

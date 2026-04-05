@@ -99,6 +99,8 @@ const CONFIG = {
   SESSION_TIMEOUT_MS: 3600000,
   MAX_IMAGE_SIZE_MB: 5,
   MAX_IMAGES_PER_EMAIL: 3,
+  MAX_ATTACHMENT_SIZE_MB: 10,
+  MAX_ATTACHMENTS_PER_EMAIL: 5,
   RATE_LIMIT_DELAY_MS: 200,
   BATCH_SIZE: 50,
   RETRY_ATTEMPTS: 3,
@@ -993,6 +995,7 @@ export default function Dashboard() {
   const [twitterTemplate, setTwitterTemplate] = useState(DEFAULT_TWITTER_TEMPLATE);
   const [linkedinTemplate, setLinkedinTemplate] = useState(DEFAULT_LINKEDIN_TEMPLATE);
   const [emailImages, setEmailImages] = useState([]);
+  const [emailAttachments, setEmailAttachments] = useState([]);
   const [smsConsent, setSmsConsent] = useState(true);
   const [activeTemplateTab, setActiveTemplateTab] = useState('email');
   
@@ -3895,6 +3898,33 @@ const handleSendWhatsApp = async (contact) => {
     setEmailImages(newImages);
     addNotification(`✅ ${newImages.length} image(s) uploaded`, 'success');
   };
+
+  const handleAttachmentUpload = (e) => {
+    const files = Array.from(e.target.files || []).slice(0, CONFIG.MAX_ATTACHMENTS_PER_EMAIL);
+    if (files.length === 0) {
+      addNotification('No files selected', 'info');
+      return;
+    }
+
+    const validFiles = files.filter(file => file.size <= CONFIG.MAX_ATTACHMENT_SIZE_MB * 1024 * 1024);
+    if (validFiles.length < files.length) {
+      addNotification(`${files.length - validFiles.length} file(s) exceeded ${CONFIG.MAX_ATTACHMENT_SIZE_MB}MB limit`, 'warning');
+    }
+
+    const newAttachments = validFiles.map((file) => ({
+      file,
+      filename: file.name,
+      mimeType: file.type || 'application/octet-stream',
+      size: file.size
+    }));
+
+    setEmailAttachments(newAttachments);
+    addNotification(`✅ ${newAttachments.length} attachment(s) ready`, 'success');
+  };
+
+  const handleRemoveAttachment = (index) => {
+    setEmailAttachments((prev) => prev.filter((_, idx) => idx !== index));
+  };
   
   // ============================================================================
   // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
@@ -3964,6 +3994,22 @@ const handleSendWhatsApp = async (contact) => {
           };
         })
       );
+
+      const attachmentsWithBase64 = await Promise.all(
+        emailAttachments.map(async (att) => {
+          const base64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(att.file);
+          });
+          return {
+            filename: att.filename,
+            mimeType: att.mimeType,
+            size: att.size,
+            base64
+          };
+        })
+      );
       
       const res = await fetch('/api/send-new-leads', {
         method: 'POST',
@@ -3976,7 +4022,8 @@ const handleSendWhatsApp = async (contact) => {
           accessToken,
           template: templateA,
           userId: user.uid,
-          emailImages: imagesWithBase64
+          emailImages: imagesWithBase64,
+          emailAttachments: attachmentsWithBase64
         })
       });
       
@@ -4105,6 +4152,22 @@ const handleSendWhatsApp = async (contact) => {
           };
         })
       );
+
+      const attachmentsWithBase64 = await Promise.all(
+        emailAttachments.map(async (att) => {
+          const base64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(att.file);
+          });
+          return {
+            filename: att.filename,
+            mimeType: att.mimeType,
+            size: att.size,
+            base64
+          };
+        })
+      );
       
       const headers = parseCsvRow(lines[0]).map(h => h.trim());
       let validRecipients = [];
@@ -4125,8 +4188,9 @@ const handleSendWhatsApp = async (contact) => {
         });
         
         const emailValue = row[emailColumnName] || '';
+        const normalizedEmail = emailValue.trim().toLowerCase();
         
-        if (!isValidEmail(emailValue)) {
+        if (!isValidEmail(normalizedEmail)) {
           continue;
         }
         
@@ -4197,6 +4261,7 @@ const handleSendWhatsApp = async (contact) => {
           templateToSend,
           leadQualityFilter,
           emailImages: imagesWithBase64,
+          emailAttachments: attachmentsWithBase64,
           userId: user.uid,
           csvSource: csvFileName || 'uploaded_csv'
         })
@@ -4898,6 +4963,37 @@ const handleSendWhatsApp = async (contact) => {
                   placeholder="Your Email"
                   readOnly
                 />
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-200">Attachments</label>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleAttachmentUpload}
+                    className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                  />
+                  <p className="text-xs text-gray-400">
+                    Add up to {CONFIG.MAX_ATTACHMENTS_PER_EMAIL} files, each up to {CONFIG.MAX_ATTACHMENT_SIZE_MB}MB.
+                  </p>
+                  {emailAttachments.length > 0 && (
+                    <div className="space-y-2 bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm text-gray-200">
+                      {emailAttachments.map((attachment, index) => (
+                        <div key={attachment.filename + index} className="flex items-center justify-between gap-2">
+                          <div>
+                            <div className="font-semibold">{attachment.filename}</div>
+                            <div className="text-xs text-gray-400">{Math.round(attachment.size / 1024)} KB</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAttachment(index)}
+                            className="text-xs text-red-400 hover:text-red-200"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
