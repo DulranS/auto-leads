@@ -1259,14 +1259,15 @@ export default function Dashboard() {
     if (!contact) return false;
     const key = contact.email || contact.phone;
     if (!key) return false;
-    
-    // Check manual contact status first
-    if (manualContactStatus[key]?.contacted) return true;
-    
+
+    // Manual status override: true = contacted, false = explicitly not contacted
+    if (manualContactStatus[key]?.contacted === true) return true;
+    if (manualContactStatus[key]?.contacted === false) return false;
+
     // Check contact history from hook
     const summary = getContactSummary(key);
     if (summary.contacted) return true;
-    
+
     // Check legacy tracking (backward compatibility)
     return !!(
       lastSent[key] ||
@@ -6342,122 +6343,112 @@ const handleSendWhatsApp = async (contact) => {
             
             {/* Contact List - Mobile Responsive Grid */}
             <div className="flex-1 overflow-y-auto p-2 sm:p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
-                {/* ✅ UPDATED: Use sortedWhatsappLinks to show 077 numbers first, contacted at bottom */}
-                {sortedWhatsappLinks.map((link) => {
+              {(() => {
+                const notContactedLinks = sortedWhatsappLinks.filter(link => !isContactedOnAnyChannel(link));
+                const contactedLinks = sortedWhatsappLinks.filter(link => isContactedOnAnyChannel(link));
+                const formatTimestamp = (value) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : null;
+
+                const renderContactCard = (link, isContacted) => {
                   const contactKey = link.email || link.phone;
-                  const isContacted = isContactedOnAnyChannel(link);
                   const isReplied = repliedLeads[link.email];
                   const score = leadScores[link.email] || 0;
-                  const lastWA = lastWhatsAppSent[contactKey];
-                  
+                  const history = getContactHistory(link);
+                  const lastEmail = history.email ? formatTimestamp(history.email) : null;
+                  const lastWA = history.whatsapp ? formatTimestamp(history.whatsapp) : null;
+                  const lastSMS = history.sms ? formatTimestamp(history.sms) : null;
+                  const lastCall = history.call ? formatTimestamp(history.call) : null;
+                  const lastContacted = history.lastContacted ? formatTimestamp(history.lastContacted) : 'Never contacted';
+
                   return (
                     <div
                       key={link.id}
-                      className={`p-2 sm:p-3 rounded-lg border-2 transition-all ${
+                      className={`p-3 rounded-xl border-2 transition-all ${
                         isReplied
                           ? 'border-green-700 bg-green-900/15'
                           : isContacted
-                          ? 'border-gray-600 bg-gray-750 opacity-70'
-                          : 'border-gray-700 bg-gray-750'
+                          ? 'border-gray-600 bg-gray-750'
+                          : 'border-gray-700 bg-gray-800'
                       }`}
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-bold text-white text-sm sm:text-base truncate">
-                            {link.business}
+                      <div className="flex justify-between items-start gap-3 mb-3">
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-white text-sm sm:text-base truncate">
+                            {link.business || 'Unnamed'}
                           </h3>
-                          <p className="text-xs sm:text-sm text-gray-400 truncate">
-                            📞 +{link.phone}
-                          </p>
+                          <p className="text-xs sm:text-sm text-gray-400 truncate">📞 +{link.phone}</p>
                           {link.email && (
-                            <p className="text-[10px] sm:text-xs text-blue-400 truncate">
-                              📧 {link.email}
-                            </p>
+                            <p className="text-[10px] sm:text-xs text-blue-300 truncate">📧 {link.email}</p>
                           )}
                         </div>
-                        <div className="flex flex-col gap-1 flex-shrink-0 ml-2">
+                        <div className="flex flex-col gap-1 shrink-0">
                           {isReplied && (
-                            <span className="bg-green-900/40 text-green-300 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded font-medium whitespace-nowrap">
-                              ✅
+                            <span className="bg-green-900/40 text-green-300 text-[10px] sm:text-xs px-2 py-0.5 rounded font-semibold whitespace-nowrap">
+                              ✅ Replied
                             </span>
                           )}
                           {isContacted && !isReplied && (
-                            <span className="bg-gray-700/40 text-gray-400 text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded font-medium whitespace-nowrap">
-                              📞
+                            <span className="bg-indigo-900/30 text-indigo-200 text-[10px] sm:text-xs px-2 py-0.5 rounded font-semibold whitespace-nowrap">
+                              📌 Contacted
                             </span>
                           )}
                         </div>
                       </div>
-                      
-                      {/* Info Box */}
-                      <div className="mb-2 p-1.5 sm:p-2 bg-gray-800/50 rounded text-[10px] sm:text-xs space-y-1">
-                        {link.email ? (
-                          <div className="flex justify-between">
-                            <span className="text-gray-400">Score:</span>
-                            <span className={`font-bold ${
-                              score >= 70 ? 'text-green-400' : 
-                              score >= 50 ? 'text-yellow-400' : 
-                              'text-orange-400'
-                            }`}>
-                              {score}/100
-                            </span>
+
+                      <div className="mb-3 p-3 rounded-lg bg-gray-900/70 border border-gray-700 text-[11px] sm:text-xs text-gray-300 space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Last Contact</span>
+                          <span className="font-medium text-white">{lastContacted}</span>
+                        </div>
+                        {lastEmail && (
+                          <div className="flex justify-between text-blue-200">
+                            <span>📧 Email</span>
+                            <span>{lastEmail}</span>
                           </div>
-                        ) : (
-                          <div className="text-gray-500 italic">📵 Phone only</div>
                         )}
                         {lastWA && (
-                          <div className="flex justify-between text-gray-400">
-                            <span>WhatsApp:</span>
-                            <span className="text-green-400">
-                              {new Date(lastWA).toLocaleDateString()}
-                            </span>
+                          <div className="flex justify-between text-green-200">
+                            <span>💬 WhatsApp</span>
+                            <span>{lastWA}</span>
                           </div>
                         )}
-                        {/* Channel Badges */}
-                        <div className="flex gap-1 flex-wrap mt-1">
-                          {lastSent[contactKey] && (
-                            <span className="text-[10px] bg-blue-900/30 text-blue-300 px-1 py-0.5 rounded">
-                              📧
-                            </span>
-                          )}
-                          {lastWA && (
-                            <span className="text-[10px] bg-green-900/30 text-green-300 px-1 py-0.5 rounded">
-                              💬
-                            </span>
-                          )}
-                          {lastSMSSent[contactKey] && (
-                            <span className="text-[10px] bg-purple-900/30 text-purple-300 px-1 py-0.5 rounded">
-                              📱
-                            </span>
-                          )}
-                          {lastCallMade[contactKey] && (
-                            <span className="text-[10px] bg-orange-900/30 text-orange-300 px-1 py-0.5 rounded">
-                              📞
-                            </span>
-                          )}
+                        {lastSMS && (
+                          <div className="flex justify-between text-purple-200">
+                            <span>📱 SMS</span>
+                            <span>{lastSMS}</span>
+                          </div>
+                        )}
+                        {lastCall && (
+                          <div className="flex justify-between text-orange-200">
+                            <span>📞 Call</span>
+                            <span>{lastCall}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-gray-400">Lead score</span>
+                          <span className={`font-semibold ${
+                            score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-orange-400'
+                          }`}>{score}/100</span>
                         </div>
                       </div>
-                      
-                      {/* Action Buttons - Mobile Responsive */}
-                      <div className="space-y-1 sm:space-y-2">
-                        <div className="grid grid-cols-2 gap-1">
+
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <button
                             onClick={() => handleCall(link.phone)}
-                            className="text-[10px] sm:text-xs bg-green-700 hover:bg-green-600 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
+                            className="text-[10px] sm:text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-1 rounded"
                           >
                             📞 Call
                           </button>
                           <button
                             onClick={() => handleSendWhatsApp(link)}
-                            className="text-[10px] sm:text-xs bg-green-600 hover:bg-green-500 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
+                            className="text-[10px] sm:text-xs bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded"
                           >
                             💬 WA
                           </button>
                         </div>
                         <button
                           onClick={() => handleOpenNativeSMS(link)}
-                          className="w-full text-[10px] sm:text-xs bg-purple-700 hover:bg-purple-600 text-white px-1 sm:px-2 py-1 rounded font-medium transition"
+                          className="w-full text-[10px] sm:text-xs bg-purple-700 hover:bg-purple-600 text-white px-2 py-1 rounded"
                         >
                           📱 SMS
                         </button>
@@ -6465,7 +6456,7 @@ const handleSendWhatsApp = async (contact) => {
                           <select
                             value={dealStage[link.email] || 'new'}
                             onChange={(e) => updateDealStage(link.email, e.target.value)}
-                            className="w-full text-[10px] sm:text-xs bg-gray-700 text-white border border-gray-600 rounded px-1 py-0.5"
+                            className="w-full text-[10px] sm:text-xs bg-gray-800 text-white border border-gray-600 rounded px-2 py-1"
                           >
                             <option value="new">New</option>
                             <option value="contacted">Contacted</option>
@@ -6473,10 +6464,9 @@ const handleSendWhatsApp = async (contact) => {
                             <option value="won">Won</option>
                           </select>
                         )}
-                        {/* ✅ Manual Contact Mark Button */}
                         <button
                           onClick={() => markContactManually(link, !isContacted, 'Manual update from modal')}
-                          className={`w-full text-[10px] sm:text-xs px-1 sm:px-2 py-1 rounded font-medium transition ${
+                          className={`w-full text-[10px] sm:text-xs px-2 py-1 rounded font-medium ${
                             isContacted
                               ? 'bg-gray-600 hover:bg-gray-500 text-white'
                               : 'bg-green-600 hover:bg-green-500 text-white'
@@ -6487,8 +6477,42 @@ const handleSendWhatsApp = async (contact) => {
                       </div>
                     </div>
                   );
-                })}
-              </div>
+                };
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
+                        <div>
+                          <div className="text-sm font-semibold text-white">🆕 Not Contacted</div>
+                          <div className="text-[11px] text-gray-400">{notContactedLinks.length} leads not yet marked as contacted</div>
+                        </div>
+                        <span className="text-sm font-bold text-cyan-300">{notContactedLinks.length}</span>
+                      </div>
+                      {notContactedLinks.length > 0 ? notContactedLinks.map(link => renderContactCard(link, false)) : (
+                        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
+                          No not-contacted leads found. Use the button to return leads to the not-contacted side.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
+                        <div>
+                          <div className="text-sm font-semibold text-white">✅ Contacted</div>
+                          <div className="text-[11px] text-gray-400">{contactedLinks.length} contacts tracked with time stamps</div>
+                        </div>
+                        <span className="text-sm font-bold text-green-300">{contactedLinks.length}</span>
+                      </div>
+                      {contactedLinks.length > 0 ? contactedLinks.map(link => renderContactCard(link, true)) : (
+                        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
+                          No contacted leads yet. Mark contacts as contacted to move them here.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
             
             {/* Footer */}
