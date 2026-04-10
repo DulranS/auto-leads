@@ -296,6 +296,32 @@ function formatPhoneForDisplay(phone) {
 }
 
 /**
+ * Normalize contact key across emails and phone numbers so tracking persists across CSV uploads.
+ */
+function normalizeContactKey(contactOrKey) {
+  if (!contactOrKey) return null;
+  if (typeof contactOrKey === 'string') {
+    const raw = contactOrKey.trim();
+    if (!raw) return null;
+    if (isValidEmail(raw)) return raw.toLowerCase();
+    const digits = raw.replace(/\D/g, '');
+    return digits || raw.toLowerCase();
+  }
+
+  if (contactOrKey.email && isValidEmail(contactOrKey.email)) {
+    return contactOrKey.email.toLowerCase().trim();
+  }
+
+  const phoneValue = contactOrKey.phone || contactOrKey.phone_primary || contactOrKey.phone_number;
+  if (phoneValue) {
+    const digits = phoneValue.toString().replace(/\D/g, '');
+    return digits || null;
+  }
+
+  return null;
+}
+
+/**
  * Extract template variables from text (e.g., {{business_name}})
  */
 const extractTemplateVariables = (text) => {
@@ -594,7 +620,7 @@ const useContactTracking = (userId) => {
         const history = {};
         snapshot.forEach(doc => {
           const data = doc.data();
-          const key = data.contactKey || data.email || data.phone;
+          const key = normalizeContactKey(data.contactKey || data.email || data.phone || data.phone_primary || data.phone_number);
           if (key) {
             history[key] = {
               ...data,
@@ -624,10 +650,12 @@ const useContactTracking = (userId) => {
   // Update contact history
   const updateContact = useCallback(async (contactKey, channel, data = {}) => {
     if (!userId || !db || !contactKey) return false;
+    const normalizedKey = normalizeContactKey(contactKey);
+    if (!normalizedKey) return false;
     
     try {
       const now = new Date().toISOString();
-      const docRef = doc(db, 'contact_history', `${userId}_${contactKey}`);
+      const docRef = doc(db, 'contact_history', `${userId}_${normalizedKey}`);
       
       const updateData = {
         userId,
@@ -1176,6 +1204,7 @@ export default function Dashboard() {
   const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
   const [isMultiChannelFullscreen, setIsMultiChannelFullscreen] = useState(false);
   const [multiChannelView, setMultiChannelView] = useState('grid');
+  const [multiChannelPanel, setMultiChannelPanel] = useState('not-contacted');
   const [multiChannelFilter, setMultiChannelFilter] = useState('all');
   
   // ============================================================================
@@ -1257,7 +1286,7 @@ export default function Dashboard() {
   // ============================================================================
   const isContactedOnAnyChannel = useCallback((contact) => {
     if (!contact) return false;
-    const key = contact.email || contact.phone;
+    const key = normalizeContactKey(contact);
     if (!key) return false;
 
     // Manual status override: true = contacted, false = explicitly not contacted
@@ -1292,7 +1321,7 @@ export default function Dashboard() {
       lastContacted: null
     };
     
-    const key = contact.email || contact.phone;
+    const key = normalizeContactKey(contact);
     const summary = getContactSummary(key);
     const manual = manualContactStatus[key];
     
@@ -1392,7 +1421,7 @@ export default function Dashboard() {
       return false;
     }
     
-    const key = contact.email || contact.phone;
+    const key = normalizeContactKey(contact);
     if (!key) {
       addNotification('❌ Contact must have email or phone', 'error');
       return false;
@@ -2006,7 +2035,10 @@ export default function Dashboard() {
       const status = {};
       snapshot.forEach(doc => {
         const data = doc.data();
-        status[data.contactKey] = data;
+        const key = normalizeContactKey(data.contactKey || data.email || data.phone || data.phone_primary || data.phone_number);
+        if (key) {
+          status[key] = data;
+        }
       });
       
       setManualContactStatus(status);
@@ -3689,7 +3721,6 @@ const handleSendWhatsApp = async (contact) => {
     setValidWhatsApp(0);
     setWhatsappLinks([]);
     setLeadScores({});
-    setLastSent({});
     
     const file = e.target.files?.[0];
     
@@ -6349,7 +6380,7 @@ const handleSendWhatsApp = async (contact) => {
                 const formatTimestamp = (value) => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }) : null;
 
                 const renderContactCard = (link, isContacted) => {
-                  const contactKey = link.email || link.phone;
+                  const contactKey = normalizeContactKey(link);
                   const isReplied = repliedLeads[link.email];
                   const score = leadScores[link.email] || 0;
                   const history = getContactHistory(link);
@@ -6480,36 +6511,61 @@ const handleSendWhatsApp = async (contact) => {
                 };
 
                 return (
-                  <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
-                        <div>
-                          <div className="text-sm font-semibold text-white">🆕 Not Contacted</div>
-                          <div className="text-[11px] text-gray-400">{notContactedLinks.length} leads not yet marked as contacted</div>
-                        </div>
-                        <span className="text-sm font-bold text-cyan-300">{notContactedLinks.length}</span>
-                      </div>
-                      {notContactedLinks.length > 0 ? notContactedLinks.map(link => renderContactCard(link, false)) : (
-                        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
-                          No not-contacted leads found. Use the button to return leads to the not-contacted side.
-                        </div>
-                      )}
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setMultiChannelPanel('not-contacted')}
+                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${
+                          multiChannelPanel === 'not-contacted'
+                            ? 'bg-blue-600 text-white shadow-lg'
+                            : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
+                        }`}
+                      >
+                        🆕 Not Contacted ({notContactedLinks.length})
+                      </button>
+                      <button
+                        onClick={() => setMultiChannelPanel('contacted')}
+                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${
+                          multiChannelPanel === 'contacted'
+                            ? 'bg-green-600 text-white shadow-lg'
+                            : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
+                        }`}
+                      >
+                        ✅ Contacted ({contactedLinks.length})
+                      </button>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
-                        <div>
-                          <div className="text-sm font-semibold text-white">✅ Contacted</div>
-                          <div className="text-[11px] text-gray-400">{contactedLinks.length} contacts tracked with time stamps</div>
+                    {multiChannelPanel === 'not-contacted' ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
+                          <div>
+                            <div className="text-sm font-semibold text-white">🆕 Not Contacted</div>
+                            <div className="text-[11px] text-gray-400">{notContactedLinks.length} leads not yet marked as contacted</div>
+                          </div>
+                          <span className="text-sm font-bold text-cyan-300">{notContactedLinks.length}</span>
                         </div>
-                        <span className="text-sm font-bold text-green-300">{contactedLinks.length}</span>
+                        {notContactedLinks.length > 0 ? notContactedLinks.map(link => renderContactCard(link, false)) : (
+                          <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
+                            No not-contacted leads found. Use the button to switch to Contacted and move leads back.
+                          </div>
+                        )}
                       </div>
-                      {contactedLinks.length > 0 ? contactedLinks.map(link => renderContactCard(link, true)) : (
-                        <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
-                          No contacted leads yet. Mark contacts as contacted to move them here.
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-900 border border-slate-700">
+                          <div>
+                            <div className="text-sm font-semibold text-white">✅ Contacted</div>
+                            <div className="text-[11px] text-gray-400">{contactedLinks.length} contacts tracked with time stamps</div>
+                          </div>
+                          <span className="text-sm font-bold text-green-300">{contactedLinks.length}</span>
                         </div>
-                      )}
-                    </div>
+                        {contactedLinks.length > 0 ? contactedLinks.map(link => renderContactCard(link, true)) : (
+                          <div className="rounded-xl border border-dashed border-gray-700 bg-gray-900/60 p-4 text-sm text-gray-400">
+                            No contacted leads yet. Mark contacts as contacted to move them here.
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
