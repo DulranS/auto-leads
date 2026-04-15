@@ -78,7 +78,7 @@ const CONFIG = {
   MAX_DAILY_WHATSAPP: 100,
   MAX_DAILY_SMS: 50,
   MAX_DAILY_CALLS: 30,
-  MIN_DAYS_BETWEEN_CONTACT: 2,
+  MIN_DAYS_BETWEEN_CONTACT: 1,  // Reduced from 2 for better follow-up flexibility
   MAX_FOLLOW_UPS: 3,
   CAMPAIGN_WINDOW_DAYS: 30,
   LEAD_SCORE_HOT: 75,
@@ -208,10 +208,10 @@ Book a call: https://cal.com/syndicate-solutions/15min`,
   },
   {
     id: 'followup_3',
-    name: 'Breakup Email (Day 7)',
+    name: 'Breakup Email (Day 10)',
     channel: 'email',
     enabled: true,
-    delayDays: 7,
+    delayDays: 10,
     subject: 'Closing the loop',
     body: `Hi {{business_name}},
 I'll stop emailing after this one! 😅
