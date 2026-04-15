@@ -1199,6 +1199,22 @@ export default function Dashboard() {
   const [activeCallStatus, setActiveCallStatus] = useState(null);
   
   // ============================================================================
+  // BUSINESS INTELLIGENCE & ANALYTICS STATES
+  // ============================================================================
+  const [analyticsTab, setAnalyticsTab] = useState('overview');
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  
+  const [pipelineData, setPipelineData] = useState(null);
+  const [loadingPipeline, setLoadingPipeline] = useState(false);
+  
+  const [assignmentData, setAssignmentData] = useState(null);
+  const [loadingAssignment, setLoadingAssignment] = useState(false);
+  
+  const [predictiveData, setPredictiveData] = useState(null);
+  const [loadingPredictive, setLoadingPredictive] = useState(false);
+  
+  // ============================================================================
   // MULTI-CHANNEL MODAL STATES
   // ============================================================================
   const [showMultiChannelModal, setShowMultiChannelModal] = useState(false);
@@ -4582,6 +4598,105 @@ const handleSendWhatsApp = async (contact) => {
   // ============================================================================
   // LOADING STATE
   // ============================================================================
+  // BUSINESS INTELLIGENCE HANDLERS
+  // ============================================================================
+  const loadAnalytics = useCallback(async (action = 'comprehensive', timeframe = '30d') => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    
+    try {
+      setLoadingAnalytics(true);
+      const res = await fetch('/api/analytics-engine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          action,
+          timeframe,
+          data: { avg_deal_value: 5000 }
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setAnalyticsData(data.analytics);
+        addNotification('✅ Analytics loaded', 'success', 2000);
+      }
+    } catch (error) {
+      console.error('Load analytics error:', error);
+      addNotification(`❌ Failed to load analytics: ${error.message}`, 'error');
+    } finally {
+      setLoadingAnalytics(false);
+    }
+  }, [user, addNotification]);
+  
+  const loadPipeline = useCallback(async (action = 'comprehensive') => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    
+    try {
+      setLoadingPipeline(true);
+      const res = await fetch('/api/deal-pipeline', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          action,
+          data: { targetDays: 90 }
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setPipelineData(data.pipeline);
+        addNotification('✅ Pipeline loaded', 'success', 2000);
+      }
+    } catch (error) {
+      console.error('Load pipeline error:', error);
+      addNotification(`❌ Failed to load pipeline: ${error.message}`, 'error');
+    } finally {
+      setLoadingPipeline(false);
+    }
+  }, [user, addNotification]);
+  
+  const loadPredictiveAnalysis = useCallback(async (action = 'comprehensive', leadId = null) => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+    
+    try {
+      setLoadingPredictive(true);
+      const res = await fetch('/api/predictive-scoring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          leadId,
+          action
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        setPredictiveData(data.predictions);
+        addNotification('✅ Predictions generated', 'success', 2000);
+      }
+    } catch (error) {
+      console.error('Load predictive error:', error);
+      addNotification(`❌ Failed to generate predictions: ${error.message}`, 'error');
+    } finally {
+      setLoadingPredictive(false);
+    }
+  }, [user, addNotification]);
+
+  // ============================================================================
+  // LOADING STATE
+  // ============================================================================
   if (loadingAuth) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
@@ -6671,6 +6786,162 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       )}
+      
+      {/* BUSINESS INTELLIGENCE DASHBOARD */}
+      <div className="fixed bottom-4 right-4 z-40">
+        <button
+          onClick={() => setAnalyticsTab(analyticsTab === 'hidden' ? 'overview' : 'hidden')}
+          className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg font-bold text-lg transition-all"
+          title="Business Intelligence"
+        >
+          📊
+        </button>
+      </div>
+      
+      {analyticsTab !== 'hidden' && (
+        <div className="fixed bottom-24 right-4 z-40 bg-gray-900 border-2 border-cyan-500/50 rounded-2xl shadow-2xl w-96 max-h-96 overflow-hidden">
+          <div className="bg-gradient-to-r from-cyan-900 to-blue-900 p-4 border-b border-cyan-500/30 flex justify-between items-center">
+            <h3 className="text-lg font-bold text-cyan-200">📊 Business Intelligence</h3>
+            <button
+              onClick={() => setAnalyticsTab('hidden')}
+              className="text-gray-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          
+          <div className="p-4 space-y-3 overflow-y-auto max-h-80">
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setAnalyticsTab('overview'); loadAnalytics('comprehensive'); }}
+                className={`flex-1 py-2 px-3 rounded text-sm font-bold transition ${analyticsTab === 'overview' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                📈 ROI & Analytics
+              </button>
+              <button
+                onClick={() => { setAnalyticsTab('pipeline'); loadPipeline('comprehensive'); }}
+                className={`flex-1 py-2 px-3 rounded text-sm font-bold transition ${analyticsTab === 'pipeline' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                🎯 Pipeline
+              </button>
+              <button
+                onClick={() => { setAnalyticsTab('predict'); loadPredictiveAnalysis('comprehensive'); }}
+                className={`flex-1 py-2 px-3 rounded text-sm font-bold transition ${analyticsTab === 'predict' ? 'bg-cyan-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}
+              >
+                🔮 AI Predict
+              </button>
+            </div>
+            
+            {analyticsTab === 'overview' && analyticsData && (
+              <div className="space-y-3">
+                {analyticsData.roi && (
+                  <div className="bg-green-900/30 border border-green-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-green-400 mb-2">💹 ROI Analysis</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-gray-400">ROI:</span> <span className="font-bold text-green-400">{analyticsData.roi.roi}%</span></div>
+                      <div><span className="text-gray-400">Revenue:</span> <span className="font-bold text-green-400">${analyticsData.roi.revenue}</span></div>
+                      <div><span className="text-gray-400">Cost:</span> <span className="font-bold text-red-400">${analyticsData.roi.totalCost}</span></div>
+                      <div><span className="text-gray-400">Margin:</span> <span className="font-bold text-blue-400">{(analyticsData.roi.profitMargin || 0).toFixed(1)}%</span></div>
+                    </div>
+                  </div>
+                )}
+                
+                {analyticsData.funnel && analyticsData.funnel.conversionRates && (
+                  <div className="bg-purple-900/30 border border-purple-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-purple-400 mb-2">📊 Conversion Funnel</div>
+                    <div className="space-y-1 text-xs">
+                      <div><span className="text-gray-400">Overall:</span> <span className="font-bold text-purple-400">{(analyticsData.funnel.conversionRates.overall * 100).toFixed(1)}%</span></div>
+                      <div><span className="text-gray-400">Open Rate:</span> <span className="font-bold text-purple-400">{(analyticsData.funnel.conversionRates.sent_to_open * 100).toFixed(1)}%</span></div>
+                      <div><span className="text-gray-400">Click Rate:</span> <span className="font-bold text-purple-400">{(analyticsData.funnel.conversionRates.open_to_click * 100).toFixed(1)}%</span></div>
+                    </div>
+                  </div>
+                )}
+                
+                {analyticsData.channelPerformance && (
+                  <div className="bg-orange-900/30 border border-orange-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-orange-400 mb-2">📱 Best Channel</div>
+                    {Object.entries(analyticsData.channelPerformance).map(([channel, data]) => (
+                      data.conversionRate > 0 && (
+                        <div key={channel} className="text-xs">
+                          <span className="text-gray-400 capitalize">{channel}:</span> <span className="font-bold text-orange-400">{(data.conversionRate * 100).toFixed(1)}%</span>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                )}
+                
+                {loadingAnalytics && <div className="text-center text-sm text-gray-400">Loading analytics...</div>}
+              </div>
+            )}
+            
+            {analyticsTab === 'pipeline' && pipelineData && (
+              <div className="space-y-3">
+                {pipelineData.expectedRevenue && (
+                  <div className="bg-cyan-900/30 border border-cyan-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-cyan-400 mb-2">💰 Pipeline Value</div>
+                    <div className="text-lg font-bold text-cyan-300">${(pipelineData.expectedRevenue.totalExpected / 1000).toFixed(0)}k</div>
+                    <div className="text-xs text-cyan-400 mt-1">Expected Revenue</div>
+                  </div>
+                )}
+                
+                {pipelineData.forecast && (
+                  <div className="bg-blue-900/30 border border-blue-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-blue-400 mb-2">📈 Forecast (90d)</div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div><span className="text-gray-400">Forecasted:</span> <span className="font-bold text-blue-400">${(pipelineData.forecast.forecastedRevenue / 1000).toFixed(0)}k</span></div>
+                      <div><span className="text-gray-400">Cycle:</span> <span className="font-bold text-blue-400">{pipelineData.forecast.avgSalesCycleDays}d</span></div>
+                    </div>
+                  </div>
+                )}
+                
+                {pipelineData.suggestions && pipelineData.suggestions.length > 0 && (
+                  <div className="bg-yellow-900/30 border border-yellow-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-yellow-400 mb-2">💡 Next Steps</div>
+                    {pipelineData.suggestions.slice(0, 2).map((suggestion, idx) => (
+                      <div key={idx} className="text-xs text-yellow-300 mb-1">
+                        🎯 {suggestion.action}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {loadingPipeline && <div className="text-center text-sm text-gray-400">Loading pipeline...</div>}
+              </div>
+            )}
+            
+            {analyticsTab === 'predict' && predictiveData && (
+              <div className="space-y-3">
+                {predictiveData.closureProbability && (
+                  <div className="bg-teal-900/30 border border-teal-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-teal-400 mb-2">🎯 Close Probability</div>
+                    <div className="text-lg font-bold text-teal-300">{(predictiveData.closureProbability * 100).toFixed(0)}%</div>
+                    <div className="text-xs text-teal-400 mt-1">Likelihood to win</div>
+                  </div>
+                )}
+                
+                {predictiveData.bestContactTime && (
+                  <div className="bg-pink-900/30 border border-pink-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-pink-400 mb-2">⏰ Best Contact Time</div>
+                    <div className="text-sm text-pink-300 capitalize">{predictiveData.bestContactTime.recommendedDay}</div>
+                    <div className="text-xs text-pink-400 mt-1 capitalize">{predictiveData.bestContactTime.recommendedTime}</div>
+                  </div>
+                )}
+                
+                {predictiveData.priceSensitivity && (
+                  <div className="bg-indigo-900/30 border border-indigo-700/50 p-3 rounded">
+                    <div className="text-xs font-bold text-indigo-400 mb-2">💵 Price Sensitivity</div>
+                    <div className="text-sm text-indigo-300">{predictiveData.priceSensitivity.sensitivityTier}</div>
+                    <div className="text-xs text-indigo-400 mt-1">{predictiveData.priceSensitivity.recommendedStrategy.substring(0, 40)}...</div>
+                  </div>
+                )}
+                
+                {loadingPredictive && <div className="text-center text-sm text-gray-400">Loading predictions...</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
