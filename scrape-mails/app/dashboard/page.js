@@ -3825,6 +3825,7 @@ const handleSendWhatsApp = async (contact) => {
         let hotEmails = 0;
         let warmEmails = 0;
         const validPhoneContacts = [];
+        const contactMap = new Map(); // For deduplication
         const newLeadScores = {};
         const hasLeadQualityCol = headers.includes('lead_quality');
         
@@ -3875,7 +3876,15 @@ const handleSendWhatsApp = async (contact) => {
             const businessCol = initialMappings.business_name || 'business_name';
             const contactId = generateId();
             
-            validPhoneContacts.push({
+            // Create normalized key for deduplication
+            const normalizedKey = hasValidEmail ? row[emailCol].toLowerCase().trim() : formattedPhone;
+            
+            // Skip if we already have this contact
+            if (contactMap.has(normalizedKey)) {
+              continue;
+            }
+            
+            const contact = {
               id: contactId,
               business: row[businessCol] || 'Business',
               address: row.address || '',
@@ -3905,7 +3914,10 @@ const handleSendWhatsApp = async (contact) => {
               rating: row.rating || '0',
               review_count: row.review_count || '0',
               createdAt: new Date().toISOString()
-            });
+            };
+            
+            validPhoneContacts.push(contact);
+            contactMap.set(normalizedKey, contact);
           }
         }
         
