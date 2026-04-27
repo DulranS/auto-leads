@@ -145,6 +145,18 @@ const createMimeMessage = async ({
 // ============================================================================
 export async function POST(request) {
   try {
+    // Parse request body with error handling
+    let requestData;
+    try {
+      requestData = await request.json();
+    } catch (parseError) {
+      console.error('Failed to parse request body:', parseError);
+      return NextResponse.json(
+        { error: 'Invalid request body', details: 'Request body must be valid JSON' },
+        { status: 400 }
+      );
+    }
+
     const {
       csvContent,
       senderName,
@@ -161,7 +173,7 @@ export async function POST(request) {
       emailAttachments = [],
       userId,
       csvSource
-    } = await request.json();
+    } = requestData;
 
     if (!userId || !accessToken || !csvContent) {
       return NextResponse.json(
@@ -177,7 +189,21 @@ export async function POST(request) {
       where('userId', '==', userId),
       where('sentAt', '>=', startOfDay)
     );
-    const emailSnapshot = await getDocs(emailQuery);
+    
+    let emailSnapshot;
+    try {
+      emailSnapshot = await getDocs(emailQuery);
+    } catch (firebaseError) {
+      console.error('Failed to query sent emails:', firebaseError);
+      return NextResponse.json(
+        {
+          error: 'Database query failed',
+          details: 'Unable to check daily email limits. Please try again.',
+          code: 'FIREBASE_QUERY_ERROR'
+        },
+        { status: 500 }
+      );
+    }
     
     if (emailSnapshot.size >= CONFIG.MAX_DAILY_EMAILS) {
       return NextResponse.json(
@@ -303,7 +329,15 @@ export async function POST(request) {
         where('userId', '==', userId),
         where('to', '==', email)
       );
-      const existingSnapshot = await getDocs(existingQuery);
+      
+      let existingSnapshot;
+      try {
+        existingSnapshot = await getDocs(existingQuery);
+      } catch (firebaseError) {
+        console.error(`Failed to check if email already sent to ${email}:`, firebaseError);
+        failedCount++;
+        continue; // Skip this email and continue with others
+      }
       
       if (!existingSnapshot.empty) {
         skippedCount++;
@@ -322,7 +356,15 @@ export async function POST(request) {
         where('userId', '==', userId),
         where('normalizedCompanyName', '==', normalizedCompanyName)
       );
-      const companyNameSnapshot = await getDocs(companyNameQuery);
+      
+      let companyNameSnapshot;
+      try {
+        companyNameSnapshot = await getDocs(companyNameQuery);
+      } catch (firebaseError) {
+        console.error(`Failed to check company contact history for ${businessName}:`, firebaseError);
+        // Continue without duplicate prevention if database query fails
+        companyNameSnapshot = { empty: true, docs: [] };
+      }
       
       if (!companyNameSnapshot.empty) {
         // Check if we've sent too many emails to this company recently
@@ -344,7 +386,15 @@ export async function POST(request) {
           where('userId', '==', userId),
           where('domain', '==', domain)
         );
-        const domainSnapshot = await getDocs(domainQuery);
+        
+        let domainSnapshot;
+        try {
+          domainSnapshot = await getDocs(domainQuery);
+        } catch (firebaseError) {
+          console.error(`Failed to check domain contact history for ${domain}:`, firebaseError);
+          // Continue without duplicate prevention if database query fails
+          domainSnapshot = { empty: true, docs: [] };
+        }
         
         if (!domainSnapshot.empty) {
           const companyData = domainSnapshot.docs[0].data();
@@ -417,6 +467,28 @@ export async function POST(request) {
         }
         
         // Save to Firebase
+        const emailData = {
+          userId,
+          to: email,
+          businessName,
+          subject,
+          body,
+          template: abTestMode ? templateToSend : 'A',
+          sentAt: new Date().toISOString(),
+          opened: false,
+          openedCount: 0,
+          clicked: false,
+          clickCount: 0,
+          replied: false,
+          followUpCount: 0,
+          followUpAt: null,
+          lastFollowUpAt: null,
+          followUpDates: [],
+          messageId: response.data.id,
+          threadId: response.data.threadId,
+          csvSource: csvSource || 'unknown'
+        };
+        
         try {
           await addDoc(collection(db, 'sent_emails'), emailData);
         } catch (firebaseError) {
@@ -488,15 +560,16 @@ export async function POST(request) {
     }
 
     if (isPermissionsError) {
+      const senderEmailInfo = (typeof senderEmail === 'string') ? ` (${senderEmail})` : '';
       return NextResponse.json(
         {
           error: 'Insufficient Gmail permissions',
-          details: `Please ensure you're signed into Gmail with the same account as your sender email (${senderEmail}). You may need to revoke and re-grant Gmail permissions.`,
+          details: `Please ensure you're signed into Gmail with the same account as your sender email${senderEmailInfo}. You may need to revoke and re-grant Gmail permissions.`,
           code: 'GMAIL_PERMISSIONS_ERROR',
           troubleshooting: {
             steps: [
               'Sign out of all Gmail accounts',
-              `Sign back in with ${senderEmail}`,
+              senderEmail ? `Sign back in with ${senderEmail}` : 'Sign back in with your Gmail account',
               'Re-authorize Gmail permissions when prompted',
               'Try sending emails again'
             ]
