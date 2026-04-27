@@ -226,9 +226,9 @@ export async function POST(request) {
     
     // Send emails
 const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
+  process.env.GMAIL_CLIENT_ID,
+  process.env.GMAIL_CLIENT_SECRET,
+  process.env.NEXTAUTH_URL
 );
     
     oauth2Client.setCredentials({
