@@ -2596,7 +2596,8 @@ export default function Dashboard() {
         error_callback: (err) => {
           reject(err.message || 'OAuth error');
         },
-        ...(senderEmail ? { login_hint: senderEmail } : {})
+        ...(senderEmail ? { login_hint: senderEmail, prompt: 'consent' } : {}),
+        prompt: 'consent' // Force consent screen to ensure proper permissions
       });
       
       client.requestAccessToken();
@@ -4348,6 +4349,7 @@ const handleSendWhatsApp = async (contact) => {
           senderEmail,
           fieldMappings,
           accessToken,
+          refreshToken: user?.refreshToken || '',
           abTestMode,
           templateA,
           templateB,
@@ -4400,6 +4402,17 @@ const handleSendWhatsApp = async (contact) => {
         if (res.status === 429) {
           addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
           setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
+        } else if (res.status === 403 && data.code === 'GMAIL_PERMISSIONS_ERROR') {
+          addNotification(`❌ Gmail permissions issue: ${data.details}`, 'error');
+          if (data.troubleshooting) {
+            setTimeout(() => {
+              alert(`🔧 Gmail Permission Fix:\n\n${data.troubleshooting.steps.join('\n')}`);
+            }, 1000);
+          }
+        } else if (res.status === 403 && data.code === 'GMAIL_ACCOUNT_MISMATCH') {
+          addNotification(`❌ Account mismatch: ${data.details}`, 'error');
+        } else if (res.status === 401 && data.code === 'GMAIL_AUTH_ERROR') {
+          addNotification(`❌ Gmail authentication expired. Please re-authenticate.`, 'error');
         } else {
           addNotification(`❌ Error: ${data.error || 'Failed to send emails'}`, 'error');
         }

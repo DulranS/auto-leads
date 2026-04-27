@@ -151,6 +151,7 @@ export async function POST(request) {
       senderEmail,
       fieldMappings,
       accessToken,
+      refreshToken,
       abTestMode,
       templateA,
       templateB,
@@ -225,16 +226,41 @@ export async function POST(request) {
     }
     
     // Send emails
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GMAIL_CLIENT_ID,
-  process.env.GMAIL_CLIENT_SECRET,
-  process.env.NEXTAUTH_URL
-);
-    
-    oauth2Client.setCredentials({
-  access_token: accessToken,
-  refresh_token: refreshToken,
-});
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GMAIL_CLIENT_ID,
+      process.env.GMAIL_CLIENT_SECRET,
+      process.env.NEXTAUTH_URL
+    );
+
+    const credentials = { access_token: accessToken };
+    if (refreshToken) {
+      credentials.refresh_token = refreshToken;
+    }
+    oauth2Client.setCredentials(credentials);
+
+    // Verify the authenticated Gmail account matches sender email
+    try {
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      const profile = await gmail.users.getProfile({ userId: 'me' });
+      const authenticatedEmail = profile.data.emailAddress;
+
+      if (authenticatedEmail.toLowerCase() !== senderEmail.toLowerCase()) {
+        return NextResponse.json(
+          {
+            error: 'Gmail account mismatch',
+            details: `You are authenticated with ${authenticatedEmail} but trying to send from ${senderEmail}. Please use the same Gmail account for both authentication and sending.`,
+            code: 'GMAIL_ACCOUNT_MISMATCH',
+            authenticatedEmail,
+            senderEmail
+          },
+          { status: 403 }
+        );
+      }
+    } catch (profileError) {
+      console.warn('Could not verify Gmail profile:', profileError);
+      // Continue anyway - the main send operation will catch permission issues
+    }
+
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     
     let sentCount = 0;
@@ -440,8 +466,16 @@ const oauth2Client = new google.auth.OAuth2(
       return NextResponse.json(
         {
           error: 'Insufficient Gmail permissions',
-          details: 'Please grant Gmail send permissions and ensure the Gmail account matches the sender email.',
-          code: 'GMAIL_PERMISSIONS_ERROR'
+          details: `Please ensure you're signed into Gmail with the same account as your sender email (${senderEmail}). You may need to revoke and re-grant Gmail permissions.`,
+          code: 'GMAIL_PERMISSIONS_ERROR',
+          troubleshooting: {
+            steps: [
+              'Sign out of all Gmail accounts',
+              `Sign back in with ${senderEmail}`,
+              'Re-authorize Gmail permissions when prompted',
+              'Try sending emails again'
+            ]
+          }
         },
         { status: 403 }
       );
