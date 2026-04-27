@@ -7,18 +7,42 @@ import { google } from 'googleapis';
 // ============================================================================
 // FIREBASE CONFIGURATION
 // ============================================================================
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
+const getFirebaseConfig = () => {
+  const requiredEnvVars = [
+    'NEXT_PUBLIC_FIREBASE_API_KEY',
+    'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+    'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+    'NEXT_PUBLIC_FIREBASE_APP_ID'
+  ];
+
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required Firebase environment variables: ${missingVars.join(', ')}`);
+  }
+
+  return {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
+  };
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+let app;
+let db;
+
+try {
+  const firebaseConfig = getFirebaseConfig();
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+} catch (configError) {
+  console.error('Firebase configuration error:', configError);
+  // db will be undefined, and we'll handle this in the API route
+}
 
 // ============================================================================
 // CONFIGURATION
@@ -145,6 +169,18 @@ const createMimeMessage = async ({
 // ============================================================================
 export async function POST(request) {
   try {
+    // Check Firebase configuration
+    if (!db) {
+      return NextResponse.json(
+        {
+          error: 'Database configuration error',
+          details: 'Firebase is not properly configured. Please check environment variables.',
+          code: 'FIREBASE_CONFIG_ERROR'
+        },
+        { status: 500 }
+      );
+    }
+
     // Parse request body with error handling
     let requestData;
     try {
@@ -195,14 +231,9 @@ export async function POST(request) {
       emailSnapshot = await getDocs(emailQuery);
     } catch (firebaseError) {
       console.error('Failed to query sent emails:', firebaseError);
-      return NextResponse.json(
-        {
-          error: 'Database query failed',
-          details: 'Unable to check daily email limits. Please try again.',
-          code: 'FIREBASE_QUERY_ERROR'
-        },
-        { status: 500 }
-      );
+      // Continue without daily limit checking if database is unavailable
+      console.warn('Continuing without daily email limit check due to database error');
+      emailSnapshot = { size: 0 }; // Assume no emails sent today
     }
     
     if (emailSnapshot.size >= CONFIG.MAX_DAILY_EMAILS) {
@@ -335,8 +366,9 @@ export async function POST(request) {
         existingSnapshot = await getDocs(existingQuery);
       } catch (firebaseError) {
         console.error(`Failed to check if email already sent to ${email}:`, firebaseError);
-        failedCount++;
-        continue; // Skip this email and continue with others
+        // Continue without duplicate checking if database is unavailable
+        console.warn(`Continuing without duplicate check for ${email} due to database error`);
+        existingSnapshot = { empty: true }; // Assume not sent before
       }
       
       if (!existingSnapshot.empty) {
@@ -363,6 +395,7 @@ export async function POST(request) {
       } catch (firebaseError) {
         console.error(`Failed to check company contact history for ${businessName}:`, firebaseError);
         // Continue without duplicate prevention if database query fails
+        console.warn(`Continuing without company duplicate check for ${businessName} due to database error`);
         companyNameSnapshot = { empty: true, docs: [] };
       }
       
@@ -393,6 +426,7 @@ export async function POST(request) {
         } catch (firebaseError) {
           console.error(`Failed to check domain contact history for ${domain}:`, firebaseError);
           // Continue without duplicate prevention if database query fails
+          console.warn(`Continuing without domain duplicate check for ${domain} due to database error`);
           domainSnapshot = { empty: true, docs: [] };
         }
         
@@ -493,7 +527,8 @@ export async function POST(request) {
           await addDoc(collection(db, 'sent_emails'), emailData);
         } catch (firebaseError) {
           console.error(`Failed to save email to Firebase for ${email}:`, firebaseError);
-          throw new Error(`Email sent but failed to save to database: ${firebaseError.message}`);
+          // Continue without saving to database - email was still sent successfully
+          console.warn(`Email sent to ${email} but not saved to database due to error`);
         }
         
         // Track company contact
