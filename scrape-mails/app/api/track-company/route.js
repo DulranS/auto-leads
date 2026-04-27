@@ -6,18 +6,42 @@ import { getFirestore, collection, query, where, getDocs, addDoc, updateDoc, doc
 // ============================================================================
 // FIREBASE CONFIGURATION
 // ============================================================================
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.FIREBASE_MEASUREMENT_ID
+const getFirebaseConfig = () => {
+  const requiredEnvVars = [
+    'NEXT_PUBLIC_FIREBASE_API_KEY',
+    'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+    'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+    'NEXT_PUBLIC_FIREBASE_APP_ID'
+  ];
+
+  const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required Firebase environment variables: ${missingVars.join(', ')}`);
+  }
+
+  return {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
+  };
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
+let app;
+let db;
+
+try {
+  const firebaseConfig = getFirebaseConfig();
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+} catch (configError) {
+  console.error('Firebase configuration error:', configError);
+  // db will be undefined, and we'll handle this in the API route
+}
 
 // ============================================================================
 // POST HANDLER - Track or update company contact
@@ -29,6 +53,19 @@ export async function POST(request) {
   };
 
   try {
+    // Check Firebase configuration
+    if (!db) {
+      console.warn('Firebase not configured, skipping company tracking');
+      return NextResponse.json(
+        { 
+          success: false, 
+          message: 'Company tracking skipped - database not configured',
+          code: 'FIREBASE_NOT_CONFIGURED'
+        },
+        { status: 200, headers } // Return 200 to not break email sending
+      );
+    }
+
     const {
       userId,
       companyName,
@@ -55,32 +92,37 @@ export async function POST(request) {
     let existingCompany = null;
     let companyDocId = null;
 
-    // Try to find by normalized company name
-    const nameQuery = query(
-      collection(db, 'contacted_companies'),
-      where('userId', '==', userId),
-      where('normalizedCompanyName', '==', normalizedCompanyName)
-    );
-
-    const nameSnapshot = await getDocs(nameQuery);
-    if (!nameSnapshot.empty) {
-      existingCompany = nameSnapshot.docs[0].data();
-      companyDocId = nameSnapshot.docs[0].id;
-    }
-
-    // If not found by name, try by domain
-    if (!existingCompany && normalizedDomain) {
-      const domainQuery = query(
+    try {
+      // Try to find by normalized company name
+      const nameQuery = query(
         collection(db, 'contacted_companies'),
         where('userId', '==', userId),
-        where('domain', '==', normalizedDomain)
+        where('normalizedCompanyName', '==', normalizedCompanyName)
       );
 
-      const domainSnapshot = await getDocs(domainQuery);
-      if (!domainSnapshot.empty) {
-        existingCompany = domainSnapshot.docs[0].data();
-        companyDocId = domainSnapshot.docs[0].id;
+      const nameSnapshot = await getDocs(nameQuery);
+      if (!nameSnapshot.empty) {
+        existingCompany = nameSnapshot.docs[0].data();
+        companyDocId = nameSnapshot.docs[0].id;
       }
+
+      // If not found by name, try by domain
+      if (!existingCompany && normalizedDomain) {
+        const domainQuery = query(
+          collection(db, 'contacted_companies'),
+          where('userId', '==', userId),
+          where('domain', '==', normalizedDomain)
+        );
+
+        const domainSnapshot = await getDocs(domainQuery);
+        if (!domainSnapshot.empty) {
+          existingCompany = domainSnapshot.docs[0].data();
+          companyDocId = domainSnapshot.docs[0].id;
+        }
+      }
+    } catch (queryError) {
+      console.error('Failed to query existing companies:', queryError);
+      // Continue with creating new company record
     }
 
     const now = new Date();
@@ -124,14 +166,23 @@ export async function POST(request) {
         updateData.hasReplied = true;
       }
 
-      await updateDoc(doc(db, 'contacted_companies', companyDocId), updateData);
+      try {
+        await updateDoc(doc(db, 'contacted_companies', companyDocId), updateData);
 
-      return NextResponse.json({
-        success: true,
-        action: 'updated',
-        companyId: companyDocId,
-        message: `Updated existing company: ${companyName}`
-      }, { headers });
+        return NextResponse.json({
+          success: true,
+          action: 'updated',
+          companyId: companyDocId,
+          message: `Updated existing company: ${companyName}`
+        }, { headers });
+      } catch (updateError) {
+        console.error('Failed to update company record:', updateError);
+        return NextResponse.json({
+          success: false,
+          message: 'Failed to update company tracking data',
+          code: 'UPDATE_FAILED'
+        }, { status: 500, headers });
+      }
 
     } else {
       // Create new company record
@@ -160,14 +211,23 @@ export async function POST(request) {
         updatedAt: now.toISOString()
       };
 
-      const docRef = await addDoc(collection(db, 'contacted_companies'), companyData);
+      try {
+        const docRef = await addDoc(collection(db, 'contacted_companies'), companyData);
 
-      return NextResponse.json({
-        success: true,
-        action: 'created',
-        companyId: docRef.id,
-        message: `Created new company record: ${companyName}`
-      }, { headers });
+        return NextResponse.json({
+          success: true,
+          action: 'created',
+          companyId: docRef.id,
+          message: `Created new company record: ${companyName}`
+        }, { headers });
+      } catch (createError) {
+        console.error('Failed to create company record:', createError);
+        return NextResponse.json({
+          success: false,
+          message: 'Failed to create company tracking data',
+          code: 'CREATE_FAILED'
+        }, { status: 500, headers });
+      }
     }
 
   } catch (error) {
