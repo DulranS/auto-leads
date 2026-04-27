@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardContent } from './Card';
-import { Button } from './Button';
+import { Card, CardHeader, CardContent } from './ui/Card';
+import { Button } from './ui/Button';
 
 export const AnalyticsDashboard = ({
   leads = [],
