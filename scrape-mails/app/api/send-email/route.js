@@ -395,8 +395,9 @@ export async function POST(request) {
         });
         
         // Send via Gmail API
+        let response;
         try {
-          const response = await gmail.users.messages.send({
+          response = await gmail.users.messages.send({
             userId: 'me',
             requestBody: { raw: rawMessage }
           });
@@ -416,29 +417,12 @@ export async function POST(request) {
         }
         
         // Save to Firebase
-        const emailData = {
-          userId,
-          to: email,
-          businessName,
-          subject,
-          body,
-          template: abTestMode ? templateToSend : 'A',
-          sentAt: new Date().toISOString(),
-          opened: false,
-          openedCount: 0,
-          clicked: false,
-          clickCount: 0,
-          replied: false,
-          followUpCount: 0,
-          followUpAt: null,
-          lastFollowUpAt: null,
-          followUpDates: [],
-          messageId: response.data.id,
-          threadId: response.data.threadId,
-          csvSource: csvSource || 'unknown'
-        };
-        
-        await addDoc(collection(db, 'sent_emails'), emailData);
+        try {
+          await addDoc(collection(db, 'sent_emails'), emailData);
+        } catch (firebaseError) {
+          console.error(`Failed to save email to Firebase for ${email}:`, firebaseError);
+          throw new Error(`Email sent but failed to save to database: ${firebaseError.message}`);
+        }
         
         // Track company contact
         try {
