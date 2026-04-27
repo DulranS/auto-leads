@@ -226,10 +226,21 @@ export async function POST(request) {
     }
     
     // Send emails
+    if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET) {
+      return NextResponse.json(
+        {
+          error: 'Gmail configuration missing',
+          details: 'Server configuration error: Gmail credentials not found',
+          code: 'GMAIL_CONFIG_ERROR'
+        },
+        { status: 500 }
+      );
+    }
+
     const oauth2Client = new google.auth.OAuth2(
       process.env.GMAIL_CLIENT_ID,
       process.env.GMAIL_CLIENT_SECRET,
-      process.env.NEXTAUTH_URL
+      process.env.NEXTAUTH_URL || 'http://localhost:3000'
     );
 
     const credentials = { access_token: accessToken };
@@ -258,7 +269,21 @@ export async function POST(request) {
       }
     } catch (profileError) {
       console.warn('Could not verify Gmail profile:', profileError);
-      // Continue anyway - the main send operation will catch permission issues
+
+      // If it's an auth error, return proper response
+      if (profileError?.code === 401 || profileError?.response?.status === 401) {
+        return NextResponse.json(
+          {
+            error: 'Gmail authentication failed',
+            details: 'Your Gmail access token is invalid or expired. Please re-authenticate.',
+            code: 'GMAIL_AUTH_ERROR'
+          },
+          { status: 401 }
+        );
+      }
+
+      // For other errors, continue anyway - the main send operation will catch permission issues
+      console.warn('Profile verification failed, continuing with email send...');
     }
 
     // Create Gmail client for sending emails
@@ -370,10 +395,25 @@ export async function POST(request) {
         });
         
         // Send via Gmail API
-        const response = await gmail.users.messages.send({
-          userId: 'me',
-          requestBody: { raw: rawMessage }
-        });
+        try {
+          const response = await gmail.users.messages.send({
+            userId: 'me',
+            requestBody: { raw: rawMessage }
+          });
+        } catch (sendError) {
+          console.error(`Gmail API error for ${email}:`, sendError);
+
+          // Handle specific Gmail API errors
+          if (sendError?.response?.status === 403) {
+            throw new Error(`Gmail permission denied for ${email}: ${sendError.response.data?.error?.message || 'Insufficient permissions'}`);
+          }
+
+          if (sendError?.response?.status === 400) {
+            throw new Error(`Invalid email format for ${email}: ${sendError.response.data?.error?.message || 'Bad request'}`);
+          }
+
+          throw new Error(`Failed to send to ${email}: ${sendError.message || 'Unknown Gmail API error'}`);
+        }
         
         // Save to Firebase
         const emailData = {
