@@ -261,6 +261,7 @@ export async function POST(request) {
       // Continue anyway - the main send operation will catch permission issues
     }
 
+    // Create Gmail client for sending emails
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     
     let sentCount = 0;
