@@ -249,6 +249,11 @@ export async function POST(request) {
           clickCount: 0,
           replied: false,
           followUpCount: 0,
+          followUpSentCount: 0,
+          followUpAt: null,
+          lastFollowUpAt: null,
+          lastFollowUpSentAt: null,
+          followUpDates: [],
           messageId: response.data.id,
           threadId: response.data.threadId
         });

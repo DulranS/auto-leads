@@ -78,6 +78,15 @@ const extractDomainFromEmail = (email) => {
   return parts.length === 2 ? parts[1] : null;
 };
 
+const createMimeMessage = ({ from, to, subject, body }) => {
+  const message = `From: ${from}\r\nTo: ${to}\r\nSubject: ${subject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`;
+  return Buffer.from(message)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+};
+
 // ============================================================================
 // POST HANDLER
 // ============================================================================
@@ -143,7 +152,7 @@ export async function POST(request) {
       );
     }
     
-    const followUpCount = existingData.followUpCount || 0;
+    const followUpCount = existingData.followUpCount ?? existingData.followUpSentCount ?? 0;
     if (followUpCount >= CONFIG.MAX_FOLLOW_UPS) {
       return NextResponse.json(
         { error: `Maximum follow-ups (${CONFIG.MAX_FOLLOW_UPS}) reached. Loop closed.`, code: 'MAX_FOLLOWUPS_REACHED' },
@@ -167,6 +176,7 @@ export async function POST(request) {
     
     const lastFollowUpAt = existingData.lastFollowUpAt ? 
       safeToDate(existingData.lastFollowUpAt) :
+      existingData.lastFollowUpSentAt ? safeToDate(existingData.lastFollowUpSentAt) :
       safeToDate(existingData.sentAt);
     
     const daysSinceLastContact = (new Date() - lastFollowUpAt) / (1000 * 60 * 60 * 24);
@@ -211,7 +221,9 @@ export async function POST(request) {
     
     await updateDoc(doc(db, 'sent_emails', existingDoc.id), {
       followUpCount: newFollowUpCount,
+      followUpSentCount: newFollowUpCount,
       lastFollowUpAt: now,
+      lastFollowUpSentAt: now,
       followUpDates: [...(existingData.followUpDates || []), now],
       followUpAt: null
     });

@@ -1543,7 +1543,7 @@ export default function Dashboard() {
           return false;
         }
         
-        const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
+        const followUpCount = followUpHistory[lead.email]?.count ?? lead.followUpCount ?? lead.followUpSentCount ?? 0;
         if (followUpCount >= 3) {
           console.log(`⏭️ Skipping ${lead.email} - max follow-ups reached (${followUpCount})`);
           return false;
@@ -1553,7 +1553,7 @@ export default function Dashboard() {
         return true;
       })
       .map(lead => {
-        const followUpCount = followUpHistory[lead.email]?.count || lead.followUpCount || 0;
+        const followUpCount = followUpHistory[lead.email]?.count ?? lead.followUpCount ?? lead.followUpSentCount ?? 0;
         const daysSinceSent = lead.sentAt ?
           (now - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24) : 999;
         return {
@@ -2303,9 +2303,12 @@ export default function Dashboard() {
           followUpMap[data.to] = true;
         }
         
+        const followUpCount = data.followUpCount ?? data.followUpSentCount ?? 0;
+        const lastFollowUpAt = data.lastFollowUpAt ?? data.lastFollowUpSentAt ?? null;
+
         history[data.to] = {
-          count: data.followUpCount || 0,
-          lastFollowUpAt: data.lastFollowUpAt || null,
+          count: followUpCount,
+          lastFollowUpAt,
           dates: data.followUpDates || []
         };
       });
@@ -2457,14 +2460,14 @@ export default function Dashboard() {
             replied++;
           }
           
-          const followUpCount = lead.followUpCount || 0;
+          const followUpCount = lead.followUpCount ?? lead.followUpSentCount ?? 0;
           if (followUpCount > 0) {
             followedUp++;
           }
           
           history[lead.email] = {
             count: followUpCount,
-            lastFollowUpAt: lead.lastFollowUpAt || null,
+            lastFollowUpAt: lead.lastFollowUpAt ?? lead.lastFollowUpSentAt ?? null,
             dates: lead.followUpDates || []
           };
           

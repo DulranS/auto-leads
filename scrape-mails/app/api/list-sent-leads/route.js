@@ -105,6 +105,14 @@ export async function POST(request) {
         return new Date();
       }
     };
+
+    const getFollowUpCount = (data) => {
+      return data.followUpCount ?? data.followUpSentCount ?? 0;
+    };
+
+    const getLastFollowUpAt = (data) => {
+      return data.lastFollowUpAt ?? data.lastFollowUpSentAt ?? null;
+    };
     
     const now = new Date();
     
@@ -129,12 +137,12 @@ export async function POST(request) {
           openedCount: data.openedCount || 0,
           clicked: data.clicked || false,
           clickCount: data.clickCount || 0,
-          followUpCount: data.followUpCount || 0,
+          followUpCount: getFollowUpCount(data),
           followUpAt: data.followUpAt ? 
             safeToDate(data.followUpAt).toISOString() : 
             null,
-          lastFollowUpAt: data.lastFollowUpAt ?
-            safeToDate(data.lastFollowUpAt).toISOString() :
+          lastFollowUpAt: getLastFollowUpAt(data) ?
+            safeToDate(getLastFollowUpAt(data)).toISOString() :
             null,
           followUpDates: data.followUpDates || [],
           seemsInterested: (data.openedCount || 0) > 0 || (data.clickCount || 0) > 0,
