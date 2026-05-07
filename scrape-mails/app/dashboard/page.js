@@ -1010,6 +1010,7 @@ export default function Dashboard() {
   const [csvUploadDate, setCsvUploadDate] = useState(null);
   const [isEnrichingCsv, setIsEnrichingCsv] = useState(false);
   const [enrichMode, setEnrichMode] = useState('download');
+  const [enrichStatusMessage, setEnrichStatusMessage] = useState('');
   
   // ============================================================================
   // SENDER & TEMPLATE STATES
@@ -3960,14 +3961,16 @@ const handleSendWhatsApp = async (contact) => {
     if (!file) return;
     if (!file.name.toLowerCase().endsWith('.csv')) {
       addNotification('Please choose a CSV file', 'error');
+      setEnrichStatusMessage('Please choose a valid CSV file.');
       return;
     }
 
     try {
       setIsEnrichingCsv(true);
+      setEnrichStatusMessage('Uploading CSV for enrichment...');
       const rawCsv = await file.text();
 
-      const res = await fetch('https://cd07yrd4ce.execute-api.us-east-1.amazonaws.com/prod/enrich', {
+      const res = await fetch('/api/enrich', {
         method: 'POST',
         headers: { 'Content-Type': 'text/csv' },
         body: rawCsv
@@ -3984,14 +3987,17 @@ const handleSendWhatsApp = async (contact) => {
       const responseFileName = getDownloadFilenameFromResponse(res);
       triggerCsvDownload(enrichedCsv, responseFileName);
       addNotification('✅ Enriched CSV downloaded', 'success');
+      setEnrichStatusMessage(`Enrichment completed: ${responseFileName}`);
 
       if (mode === 'autoload') {
         processCsvContent(enrichedCsv, responseFileName);
         addNotification('✅ Enriched CSV auto-loaded into app', 'success');
+        setEnrichStatusMessage(`Enriched file loaded into app: ${responseFileName}`);
       }
     } catch (error) {
       console.error('CSV enrichment failed:', error);
       addNotification(`❌ Enrichment failed: ${error.message}`, 'error');
+      setEnrichStatusMessage(`Enrichment failed: ${error.message}`);
     } finally {
       setIsEnrichingCsv(false);
       setEnrichMode('download');
@@ -5133,6 +5139,9 @@ const handleSendWhatsApp = async (contact) => {
                   {isEnrichingCsv && enrichMode === 'autoload' ? 'Processing...' : 'Enrich CSV (Download + auto-load)'}
                 </button>
               </div>
+              {enrichStatusMessage && (
+                <p className="mt-2 text-xs text-indigo-300">{enrichStatusMessage}</p>
+              )}
               {csvFileName && (
                 <div className="mt-2 text-xs text-gray-400">
                   📁 {csvFileName} • {csvUploadDate ? new Date(csvUploadDate).toLocaleDateString() : ''}
