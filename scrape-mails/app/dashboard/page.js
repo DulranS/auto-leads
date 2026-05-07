@@ -1008,6 +1008,8 @@ export default function Dashboard() {
   const [fieldMappings, setFieldMappings] = useState({});
   const [csvFileName, setCsvFileName] = useState('');
   const [csvUploadDate, setCsvUploadDate] = useState(null);
+  const [isEnrichingCsv, setIsEnrichingCsv] = useState(false);
+  const [enrichMode, setEnrichMode] = useState('download');
   
   // ============================================================================
   // SENDER & TEMPLATE STATES
@@ -1262,6 +1264,8 @@ export default function Dashboard() {
   // REF FOR AUTO-SAVE
   // ============================================================================
   const autoSaveTimeoutRef = useRef(null);
+  const enrichCsvInputRef = useRef(null);
+  const enrichModeRef = useRef('download');
   
   // ============================================================================
   // NOTIFICATION HELPER
@@ -3733,15 +3737,284 @@ const handleSendWhatsApp = async (contact) => {
     }
   };
   
-  // ============================================================================
-  // HANDLE CSV UPLOAD
-  // ============================================================================
-  const handleCsvUpload = (e) => {
+  const processCsvContent = (rawContent, sourceFileName = '') => {
     setValidEmails(0);
     setValidWhatsApp(0);
     setWhatsappLinks([]);
     setLeadScores({});
-    
+    setCsvFileName(sourceFileName);
+    setCsvUploadDate(new Date().toISOString());
+    try {
+      const normalizedContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+      const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
+      
+      if (lines.length < 2) {
+        addNotification('CSV must have headers and data rows', 'error');
+        return;
+      }
+      
+      const headers = parseCsvRow(lines[0]).map(h => h.trim());
+      setCsvHeaders(headers);
+      setAvailableCsvVariables(headers);
+      setPreviewRecipient(null);
+      
+      // Extract all template variables
+      const allTemplateTexts = [
+        templateA.subject, templateA.body,
+        templateB.subject, templateB.body,
+        whatsappTemplate,
+        smsTemplate,
+        instagramTemplate,
+        twitterTemplate,
+        linkedinTemplate,
+        ...followUpTemplates.flatMap(t => [t.subject || '', t.body || ''])
+      ];
+      
+      const allVars = [...new Set([
+        ...allTemplateTexts.flatMap(text => extractTemplateVariables(text)),
+        'sender_name',
+        ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
+        ...headers
+      ])];
+      
+      // Auto-map fields
+      const initialMappings = {};
+      allVars.forEach(varName => {
+        if (headers.includes(varName)) {
+          initialMappings[varName] = varName;
+        }
+      });
+      
+      // Common mappings
+      const commonMappings = {
+        email: ['email', 'email_address', 'email_primary'],
+        phone: ['phone', 'phone_number', 'whatsapp_number', 'phone_raw'],
+        business_name: ['business_name', 'business', 'company', 'company_name'],
+        website: ['website', 'url', 'site'],
+        address: ['address', 'location']
+      };
+      
+      Object.entries(commonMappings).forEach(([varName, possibleCols]) => {
+        if (!initialMappings[varName]) {
+          const found = possibleCols.find(col => headers.includes(col));
+          if (found) {
+            initialMappings[varName] = found;
+          }
+        }
+      });
+      
+      initialMappings.sender_name = 'sender_name';
+      initialMappings.email = 'email';
+      initialMappings.lead_quality = 'lead_quality';
+      setFieldMappings(initialMappings);
+      
+      // Process rows
+      let hotEmails = 0;
+      let warmEmails = 0;
+      const validPhoneContacts = [];
+      const contactMap = new Map(); // For deduplication
+      const newLeadScores = {};
+      const hasLeadQualityCol = headers.includes('lead_quality');
+      
+      for (let i = 1; i < lines.length; i++) {
+        const values = parseCsvRow(lines[i]);
+        
+        if (values.length !== headers.length) {
+          continue;
+        }
+        
+        const row = {};
+        headers.forEach((header, idx) => {
+          row[header] = values[idx] || '';
+        });
+        
+        // Filter by lead quality
+        let includeEmail = true;
+        if (hasLeadQualityCol) {
+          const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
+          if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
+            includeEmail = false;
+          }
+        }
+        
+        // Validate email
+        const emailCol = initialMappings.email || 'email';
+        const hasValidEmail = isValidEmail(row[emailCol]);
+        
+        if (hasValidEmail && includeEmail) {
+          const score = calculateScore(row);
+          const email = row[emailCol].toLowerCase().trim();
+          newLeadScores[email] = score;
+          
+          const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
+          if (quality === 'HOT') {
+            hotEmails++;
+          } else if (quality === 'WARM') {
+            warmEmails++;
+          }
+        }
+        
+        // Validate phone
+        const phoneCol = initialMappings.phone || 'phone';
+        const rawPhone = row[phoneCol] || row.whatsapp_number || row.phone_raw;
+        const formattedPhone = formatForDialing(rawPhone);
+        
+        if (formattedPhone) {
+          const businessCol = initialMappings.business_name || 'business_name';
+          const contactId = generateId();
+          
+          // Create normalized key for deduplication
+          const normalizedKey = hasValidEmail ? row[emailCol].toLowerCase().trim() : formattedPhone;
+          
+          // Skip if we already have this contact
+          if (contactMap.has(normalizedKey)) {
+            continue;
+          }
+          
+          const contact = {
+            id: contactId,
+            business: row[businessCol] || 'Business',
+            address: row.address || '',
+            phone: formattedPhone,
+            email: hasValidEmail ? row[emailCol].toLowerCase().trim() : null,
+            place_id: row.place_id || '',
+            website: row.website || '',
+            instagram: row.instagram || '',
+            twitter: row.twitter || '',
+            facebook: row.facebook || '',
+            youtube: row.youtube || '',
+            tiktok: row.tiktok || '',
+            linkedin_company: row.linkedin_company || '',
+            linkedin_ceo: row.linkedin_ceo || '',
+            linkedin_founder: row.linkedin_founder || '',
+            contact_page_found: row.contact_page_found || 'No',
+            social_media_score: row.social_media_score || '0',
+            email_primary: row.email_primary || row[emailCol] || '',
+            phone_primary: row.phone_primary || formattedPhone || '',
+            lead_quality_score: row.lead_quality_score || '0',
+            contact_confidence: row.contact_confidence || 'Low',
+            best_contact_method: row.best_contact_method || 'Email',
+            decision_maker_found: row.decision_maker_found || 'No',
+            tech_stack_detected: row.tech_stack_detected || '',
+            company_size_indicator: row.company_size_indicator || 'unknown',
+            lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
+            rating: row.rating || '0',
+            review_count: row.review_count || '0',
+            createdAt: new Date().toISOString()
+          };
+          
+          validPhoneContacts.push(contact);
+          contactMap.set(normalizedKey, contact);
+        }
+      }
+      
+      // Set first valid as preview
+      if (validPhoneContacts.length > 0) {
+        setPreviewRecipient(validPhoneContacts[0]);
+      }
+      
+      // Update counts
+      if (leadQualityFilter === 'HOT') {
+        setValidEmails(hotEmails);
+      } else if (leadQualityFilter === 'WARM') {
+        setValidEmails(warmEmails);
+      } else {
+        setValidEmails(hotEmails + warmEmails);
+      }
+      
+      setValidWhatsApp(validPhoneContacts.length);
+      setWhatsappLinks(validPhoneContacts);
+      setLeadScores(newLeadScores);
+      setCsvContent(normalizedContent);
+      
+      addNotification(
+        `✅ CSV loaded successfully!\n${validPhoneContacts.length} contacts\n${hotEmails + warmEmails} valid emails`,
+        'success'
+      );
+    } catch (error) {
+      console.error('CSV upload error:', error);
+      addNotification(`❌ CSV upload failed: ${error.message}`, 'error');
+    }
+  };
+
+  const getDownloadFilenameFromResponse = (res) => {
+    const disposition = res.headers.get('content-disposition') || '';
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const basicMatch = disposition.match(/filename="?([^"]+)"?/i);
+    if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1]);
+    if (basicMatch?.[1]) return basicMatch[1];
+    return `enriched-${new Date().toISOString().split('T')[0]}.csv`;
+  };
+
+  const triggerCsvDownload = (csvText, filename) => {
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const runCsvEnrichment = async (file, mode) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      addNotification('Please choose a CSV file', 'error');
+      return;
+    }
+
+    try {
+      setIsEnrichingCsv(true);
+      const rawCsv = await file.text();
+
+      const res = await fetch('https://cd07yrd4ce.execute-api.us-east-1.amazonaws.com/prod/enrich', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        body: rawCsv
+      });
+
+      const enrichedCsv = await res.text();
+      if (!res.ok) {
+        throw new Error(enrichedCsv || `Enrichment request failed (${res.status})`);
+      }
+      if (!enrichedCsv?.trim()) {
+        throw new Error('Enrichment API returned an empty response');
+      }
+
+      const responseFileName = getDownloadFilenameFromResponse(res);
+      triggerCsvDownload(enrichedCsv, responseFileName);
+      addNotification('✅ Enriched CSV downloaded', 'success');
+
+      if (mode === 'autoload') {
+        processCsvContent(enrichedCsv, responseFileName);
+        addNotification('✅ Enriched CSV auto-loaded into app', 'success');
+      }
+    } catch (error) {
+      console.error('CSV enrichment failed:', error);
+      addNotification(`❌ Enrichment failed: ${error.message}`, 'error');
+    } finally {
+      setIsEnrichingCsv(false);
+      setEnrichMode('download');
+      enrichModeRef.current = 'download';
+    }
+  };
+
+  const startEnrichFlow = (mode) => {
+    enrichModeRef.current = mode;
+    setEnrichMode(mode);
+    enrichCsvInputRef.current?.click();
+  };
+
+  const handleEnrichCsvSelect = async (e) => {
+    const file = e.target.files?.[0];
+    await runCsvEnrichment(file, enrichModeRef.current);
+    e.target.value = '';
+  };
+
+  // ============================================================================
+  // HANDLE CSV UPLOAD
+  // ============================================================================
+  const handleCsvUpload = (e) => {
     const file = e.target.files?.[0];
     
     if (!file) {
@@ -3749,209 +4022,15 @@ const handleSendWhatsApp = async (contact) => {
       return;
     }
     
-    if (!file.name.endsWith('.csv')) {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
       addNotification('Please upload a CSV file', 'error');
       return;
     }
     
-    setCsvFileName(file.name);
-    setCsvUploadDate(new Date().toISOString());
-    
     const reader = new FileReader();
     
-    reader.onload = (e) => {
-      try {
-        const rawContent = e.target.result;
-        const normalizedContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
-        
-        if (lines.length < 2) {
-          addNotification('CSV must have headers and data rows', 'error');
-          return;
-        }
-        
-        const headers = parseCsvRow(lines[0]).map(h => h.trim());
-        setCsvHeaders(headers);
-        setAvailableCsvVariables(headers);
-        setPreviewRecipient(null);
-        
-        // Extract all template variables
-        const allTemplateTexts = [
-          templateA.subject, templateA.body,
-          templateB.subject, templateB.body,
-          whatsappTemplate,
-          smsTemplate,
-          instagramTemplate,
-          twitterTemplate,
-          linkedinTemplate,
-          ...followUpTemplates.flatMap(t => [t.subject || '', t.body || ''])
-        ];
-        
-        const allVars = [...new Set([
-          ...allTemplateTexts.flatMap(text => extractTemplateVariables(text)),
-          'sender_name',
-          ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
-          ...headers
-        ])];
-        
-        // Auto-map fields
-        const initialMappings = {};
-        allVars.forEach(varName => {
-          if (headers.includes(varName)) {
-            initialMappings[varName] = varName;
-          }
-        });
-        
-        // Common mappings
-        const commonMappings = {
-          email: ['email', 'email_address', 'email_primary'],
-          phone: ['phone', 'phone_number', 'whatsapp_number', 'phone_raw'],
-          business_name: ['business_name', 'business', 'company', 'company_name'],
-          website: ['website', 'url', 'site'],
-          address: ['address', 'location']
-        };
-        
-        Object.entries(commonMappings).forEach(([varName, possibleCols]) => {
-          if (!initialMappings[varName]) {
-            const found = possibleCols.find(col => headers.includes(col));
-            if (found) {
-              initialMappings[varName] = found;
-            }
-          }
-        });
-        
-        initialMappings.sender_name = 'sender_name';
-        initialMappings.email = 'email';
-        initialMappings.lead_quality = 'lead_quality';
-        setFieldMappings(initialMappings);
-        
-        // Process rows
-        let hotEmails = 0;
-        let warmEmails = 0;
-        const validPhoneContacts = [];
-        const contactMap = new Map(); // For deduplication
-        const newLeadScores = {};
-        const hasLeadQualityCol = headers.includes('lead_quality');
-        
-        for (let i = 1; i < lines.length; i++) {
-          const values = parseCsvRow(lines[i]);
-          
-          if (values.length !== headers.length) {
-            continue;
-          }
-          
-          const row = {};
-          headers.forEach((header, idx) => {
-            row[header] = values[idx] || '';
-          });
-          
-          // Filter by lead quality
-          let includeEmail = true;
-          if (hasLeadQualityCol) {
-            const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
-            if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
-              includeEmail = false;
-            }
-          }
-          
-          // Validate email
-          const emailCol = initialMappings.email || 'email';
-          const hasValidEmail = isValidEmail(row[emailCol]);
-          
-          if (hasValidEmail && includeEmail) {
-            const score = calculateScore(row);
-            const email = row[emailCol].toLowerCase().trim();
-            newLeadScores[email] = score;
-            
-            const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
-            if (quality === 'HOT') {
-              hotEmails++;
-            } else if (quality === 'WARM') {
-              warmEmails++;
-            }
-          }
-          
-          // Validate phone
-          const phoneCol = initialMappings.phone || 'phone';
-          const rawPhone = row[phoneCol] || row.whatsapp_number || row.phone_raw;
-          const formattedPhone = formatForDialing(rawPhone);
-          
-          if (formattedPhone) {
-            const businessCol = initialMappings.business_name || 'business_name';
-            const contactId = generateId();
-            
-            // Create normalized key for deduplication
-            const normalizedKey = hasValidEmail ? row[emailCol].toLowerCase().trim() : formattedPhone;
-            
-            // Skip if we already have this contact
-            if (contactMap.has(normalizedKey)) {
-              continue;
-            }
-            
-            const contact = {
-              id: contactId,
-              business: row[businessCol] || 'Business',
-              address: row.address || '',
-              phone: formattedPhone,
-              email: hasValidEmail ? row[emailCol].toLowerCase().trim() : null,
-              place_id: row.place_id || '',
-              website: row.website || '',
-              instagram: row.instagram || '',
-              twitter: row.twitter || '',
-              facebook: row.facebook || '',
-              youtube: row.youtube || '',
-              tiktok: row.tiktok || '',
-              linkedin_company: row.linkedin_company || '',
-              linkedin_ceo: row.linkedin_ceo || '',
-              linkedin_founder: row.linkedin_founder || '',
-              contact_page_found: row.contact_page_found || 'No',
-              social_media_score: row.social_media_score || '0',
-              email_primary: row.email_primary || row[emailCol] || '',
-              phone_primary: row.phone_primary || formattedPhone || '',
-              lead_quality_score: row.lead_quality_score || '0',
-              contact_confidence: row.contact_confidence || 'Low',
-              best_contact_method: row.best_contact_method || 'Email',
-              decision_maker_found: row.decision_maker_found || 'No',
-              tech_stack_detected: row.tech_stack_detected || '',
-              company_size_indicator: row.company_size_indicator || 'unknown',
-              lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
-              rating: row.rating || '0',
-              review_count: row.review_count || '0',
-              createdAt: new Date().toISOString()
-            };
-            
-            validPhoneContacts.push(contact);
-            contactMap.set(normalizedKey, contact);
-          }
-        }
-        
-        // Set first valid as preview
-        if (validPhoneContacts.length > 0) {
-          setPreviewRecipient(validPhoneContacts[0]);
-        }
-        
-        // Update counts
-        if (leadQualityFilter === 'HOT') {
-          setValidEmails(hotEmails);
-        } else if (leadQualityFilter === 'WARM') {
-          setValidEmails(warmEmails);
-        } else {
-          setValidEmails(hotEmails + warmEmails);
-        }
-        
-        setValidWhatsApp(validPhoneContacts.length);
-        setWhatsappLinks(validPhoneContacts);
-        setLeadScores(newLeadScores);
-        setCsvContent(normalizedContent);
-        
-        addNotification(
-          `✅ CSV loaded successfully!\n${validPhoneContacts.length} contacts\n${hotEmails + warmEmails} valid emails`,
-          'success'
-        );
-      } catch (error) {
-        console.error('CSV upload error:', error);
-        addNotification(`❌ CSV upload failed: ${error.message}`, 'error');
-      }
+    reader.onload = (event) => {
+      processCsvContent(event.target.result, file.name);
     };
     
     reader.onerror = () => {
@@ -5029,6 +5108,31 @@ const handleSendWhatsApp = async (contact) => {
                 onChange={handleCsvUpload}
                 className="w-full p-3 bg-gray-700 text-white border border-gray-600 rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700"
               />
+              <input
+                ref={enrichCsvInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleEnrichCsvSelect}
+                className="hidden"
+              />
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => startEnrichFlow('download')}
+                  disabled={isEnrichingCsv}
+                  className="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+                >
+                  {isEnrichingCsv && enrichMode === 'download' ? 'Processing...' : 'Enrich CSV (Download only)'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startEnrichFlow('autoload')}
+                  disabled={isEnrichingCsv}
+                  className="px-3 py-2 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
+                >
+                  {isEnrichingCsv && enrichMode === 'autoload' ? 'Processing...' : 'Enrich CSV (Download + auto-load)'}
+                </button>
+              </div>
               {csvFileName && (
                 <div className="mt-2 text-xs text-gray-400">
                   📁 {csvFileName} • {csvUploadDate ? new Date(csvUploadDate).toLocaleDateString() : ''}
