@@ -1,4 +1,4 @@
-const ENRICH_ENDPOINT = 'https://cd07yrd4ce.execute-api.us-east-1.amazonaws.com/prod/enrich';
+const ENRICH_ENDPOINT = 'https://wweobtkj7f.execute-api.us-east-1.amazonaws.com/prod/enrich';
 
 export async function POST(request) {
   try {
