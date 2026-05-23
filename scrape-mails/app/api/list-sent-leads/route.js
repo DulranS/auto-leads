@@ -110,6 +110,18 @@ export async function POST(request) {
       return data.followUpCount ?? data.followUpSentCount ?? 0;
     };
 
+    const getEmailAddress = (data) => {
+      const rawEmail =
+        data.to ||
+        data.email ||
+        data.contactEmail ||
+        data.recipientEmail ||
+        data.recipient?.email ||
+        data.toEmail ||
+        '';
+      return String(rawEmail).trim().toLowerCase();
+    };
+
     const getLastFollowUpAt = (data) => {
       return data.lastFollowUpAt ?? data.lastFollowUpSentAt ?? null;
     };
@@ -119,6 +131,12 @@ export async function POST(request) {
     snapshot.forEach(docSnapshot => {
       const data = docSnapshot.data();
       try {
+        const email = getEmailAddress(data);
+        if (!email) {
+          console.warn(`Skipping sent email record ${docSnapshot.id} because recipient email is missing`);
+          return;
+        }
+
         const sentAt = safeToDate(data.sentAt);
         const daysSinceSent = (now - sentAt) / (1000 * 60 * 60 * 24);
         
@@ -129,7 +147,7 @@ export async function POST(request) {
         
         leads.push({
           id: docSnapshot.id,
-          email: data.to || '',
+          email,
           businessName: data.businessName || '',
           sentAt: sentAt.toISOString(),
           replied: data.replied || false,

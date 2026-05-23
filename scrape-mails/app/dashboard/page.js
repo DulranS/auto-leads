@@ -1153,6 +1153,55 @@ export default function Dashboard() {
   const [followUpTemplate, setFollowUpTemplate] = useState('auto');
   const [scheduleFollowUp, setScheduleFollowUp] = useState(false);
   const [scheduledTime, setScheduledTime] = useState('');
+
+  const safeParseDate = useCallback((value) => {
+    if (!value) return null;
+    if (value instanceof Date) return value;
+    if (typeof value?.toDate === 'function') return value.toDate();
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, []);
+
+  const normalizeLeadEmail = useCallback((lead) => {
+    if (!lead) return '';
+    const rawEmail =
+      lead.email ||
+      lead.to ||
+      lead.contactEmail ||
+      lead.recipientEmail ||
+      lead.recipient?.email ||
+      lead.toEmail ||
+      '';
+    return String(rawEmail).trim().toLowerCase();
+  }, []);
+
+  const normalizeSentLead = useCallback((lead) => {
+    const email = normalizeLeadEmail(lead);
+    const sentAt = safeParseDate(lead.sentAt);
+    const followUpAt = safeParseDate(lead.followUpAt);
+    const lastFollowUpAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt);
+
+    return {
+      ...lead,
+      email,
+      sentAt: sentAt ? sentAt.toISOString() : null,
+      followUpAt: followUpAt ? followUpAt.toISOString() : null,
+      lastFollowUpAt: lastFollowUpAt ? lastFollowUpAt.toISOString() : null,
+      followUpCount: Number(lead.followUpCount ?? lead.followUpSentCount ?? 0)
+    };
+  }, [normalizeLeadEmail, safeParseDate]);
+
+  const getLeadNextFollowUpAt = useCallback((lead) => {
+    const explicitFollowUpAt = safeParseDate(lead.followUpAt);
+    if (explicitFollowUpAt) return explicitFollowUpAt;
+
+    const lastAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt) || safeParseDate(lead.sentAt);
+    if (!lastAt) return null;
+
+    const next = new Date(lastAt);
+    next.setDate(next.getDate() + 2);
+    return next;
+  }, [safeParseDate]);
   
   const [autoReplyProcessorEnabled, setAutoReplyProcessorEnabled] = useState(true);
   const [autoFollowupSchedulerEnabled, setAutoFollowupSchedulerEnabled] = useState(true);
@@ -1532,6 +1581,7 @@ export default function Dashboard() {
     
     const now = new Date();
     const candidates = sentLeads
+      .map(normalizeSentLead)
       .filter(lead => {
         if (!lead || !lead.email) {
           console.log('❌ Invalid lead:', lead);
@@ -1541,28 +1591,34 @@ export default function Dashboard() {
           console.log(`⏭️ Skipping ${lead.email} - already replied`);
           return false;
         }
-        
-        const followUpAt = new Date(lead.followUpAt);
+
+        const followUpAt = getLeadNextFollowUpAt(lead);
+        if (!followUpAt) {
+          console.log(`⏭️ Skipping ${lead.email} - missing follow-up schedule`);
+          return false;
+        }
         if (followUpAt > now) {
           console.log(`⏭️ Skipping ${lead.email} - not ready yet (${followUpAt} > ${now})`);
           return false;
         }
-        
+
         const followUpCount = followUpHistory[lead.email]?.count ?? lead.followUpCount ?? lead.followUpSentCount ?? 0;
         if (followUpCount >= 3) {
           console.log(`⏭️ Skipping ${lead.email} - max follow-ups reached (${followUpCount})`);
           return false;
         }
-        
+
         console.log(`✅ ${lead.email} is safe for follow-up`);
         return true;
       })
       .map(lead => {
         const followUpCount = followUpHistory[lead.email]?.count ?? lead.followUpCount ?? lead.followUpSentCount ?? 0;
-        const daysSinceSent = lead.sentAt ?
-          (now - new Date(lead.sentAt)) / (1000 * 60 * 60 * 24) : 999;
+        const sentAtDate = safeParseDate(lead.sentAt);
+        const daysSinceSent = sentAtDate ?
+          (now - sentAtDate) / (1000 * 60 * 60 * 24) : 999;
         return {
           ...lead,
+          followUpAt: getLeadNextFollowUpAt(lead)?.toISOString() || lead.followUpAt,
           followUpCount,
           daysSinceSent,
           urgencyScore: 100 - (daysSinceSent * 2),
@@ -2297,23 +2353,23 @@ export default function Dashboard() {
       const history = {};
       const now = new Date();
       
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        
+      const normalizedLeads = snapshot.docs
+        .map(doc => normalizeSentLead(doc.data()))
+        .filter(lead => lead.email);
+      
+      normalizedLeads.forEach((data) => {
         if (data.replied) {
-          repliedMap[data.to] = true;
+          repliedMap[data.email] = true;
         }
         
-        if (data.followUpAt && new Date(data.followUpAt) <= now) {
-          followUpMap[data.to] = true;
+        const followUpAt = getLeadNextFollowUpAt(data);
+        if (followUpAt && followUpAt <= now) {
+          followUpMap[data.email] = true;
         }
         
-        const followUpCount = data.followUpCount ?? data.followUpSentCount ?? 0;
-        const lastFollowUpAt = data.lastFollowUpAt ?? data.lastFollowUpSentAt ?? null;
-
-        history[data.to] = {
-          count: followUpCount,
-          lastFollowUpAt,
+        history[data.email] = {
+          count: Number(data.followUpCount ?? 0),
+          lastFollowUpAt: data.lastFollowUpAt ?? null,
           dates: data.followUpDates || []
         };
       });
@@ -2323,15 +2379,20 @@ export default function Dashboard() {
       setFollowUpHistory(history);
       
       // Calculate follow-up stats
-      const leads = snapshot.docs.map(doc => doc.data());
-      const replied = leads.filter(l => l.replied).length;
-      const followedUp = leads.filter(l => l.followUpCount > 0).length;
-      const readyForFU = leads.filter(l => !l.replied && l.followUpAt && new Date(l.followUpAt) <= now).length;
-      const awaiting = leads.filter(l => !l.replied && (!l.followUpAt || new Date(l.followUpAt) > now)).length;
-      const interested = leads.filter(l => l.seemsInterested && !l.replied).length;
+      const replied = normalizedLeads.filter(l => l.replied).length;
+      const followedUp = normalizedLeads.filter(l => Number(l.followUpCount) > 0).length;
+      const readyForFU = normalizedLeads.filter(l => {
+        const followUpAt = getLeadNextFollowUpAt(l);
+        return !l.replied && followUpAt && followUpAt <= now;
+      }).length;
+      const awaiting = normalizedLeads.filter(l => {
+        const followUpAt = getLeadNextFollowUpAt(l);
+        return !l.replied && (!followUpAt || followUpAt > now);
+      }).length;
+      const interested = normalizedLeads.filter(l => l.seemsInterested && !l.replied).length;
       
       setFollowUpStats({
-        totalSent: leads.length,
+        totalSent: normalizedLeads.length,
         totalReplied: replied,
         readyForFollowUp: readyForFU,
         alreadyFollowedUp: followedUp,
@@ -2452,48 +2513,53 @@ export default function Dashboard() {
       const data = await res.json();
       
       if (res.ok) {
-        setSentLeads(data.leads || []);
+        const normalizedLeads = (data.leads || [])
+          .map(normalizeSentLead)
+          .filter(lead => lead.email);
+
+        setSentLeads(normalizedLeads);
         
         const history = {};
         let replied = 0;
         let followedUp = 0;
         let readyForFU = 0;
         let awaiting = 0;
+        const now = new Date();
         
-        (data.leads || []).forEach(lead => {
+        normalizedLeads.forEach(lead => {
           if (lead.replied) {
             replied++;
           }
           
-          const followUpCount = lead.followUpCount ?? lead.followUpSentCount ?? 0;
+          const followUpCount = Number(lead.followUpCount ?? 0);
           if (followUpCount > 0) {
             followedUp++;
           }
           
           history[lead.email] = {
             count: followUpCount,
-            lastFollowUpAt: lead.lastFollowUpAt ?? lead.lastFollowUpSentAt ?? null,
+            lastFollowUpAt: lead.lastFollowUpAt ?? null,
             dates: lead.followUpDates || []
           };
           
-          const followUpAt = new Date(lead.followUpAt);
-          const now = new Date();
-          
-          if (!lead.replied && followUpAt <= now) {
+          const followUpAt = getLeadNextFollowUpAt(lead);
+          if (lead.replied) {
+            // Already replied, no follow-up needed
+          } else if (followUpAt && followUpAt <= now) {
             readyForFU++;
           } else if (!lead.replied) {
             awaiting++;
           }
         });
         
-        const interested = (data.leads || []).filter(lead =>
+        const interested = normalizedLeads.filter(lead =>
           lead.seemsInterested && !lead.replied
         );
         
         setInterestedLeadsList(interested);
         setFollowUpHistory(history);
         setFollowUpStats({
-          totalSent: data.leads?.length || 0,
+          totalSent: normalizedLeads.length,
           totalReplied: replied,
           readyForFollowUp: readyForFU,
           alreadyFollowedUp: followedUp,
