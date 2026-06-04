@@ -2082,6 +2082,7 @@ export default function Dashboard() {
         loadDeals();
         loadAbResults();
         loadRepliedAndFollowUp();
+        loadSentLeads();
         loadDailyEmailCount();
         loadSendTimeOptimization();
         loadManualContactStatus(user.uid);
@@ -2476,7 +2477,7 @@ export default function Dashboard() {
   // ============================================================================
   // LOAD SENT LEADS FROM API WITH ERROR HANDLING
   // ============================================================================
-  const loadSentLeads = async () => {
+  const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
     
     setLoadingSentLeads(true);
@@ -2576,7 +2577,7 @@ export default function Dashboard() {
     } finally {
       setLoadingSentLeads(false);
     }
-  };
+  }, [user?.uid, addNotification, normalizeSentLead, getLeadNextFollowUpAt]);
   
   // ============================================================================
   // LOAD CONTACTED COMPANIES FROM API
@@ -5093,7 +5094,7 @@ const handleSendWhatsApp = async (contact) => {
               </div>
               
               {followUpStats.interestedLeads > 0 && (
-                <div 
+                <div
                   className="bg-gradient-to-br from-pink-900/50 to-pink-800/50 p-4 rounded-xl shadow border border-pink-700/50 hover:border-pink-600 transition cursor-pointer"
                   onClick={() => {
                     document.getElementById('interested-leads-section')?.scrollIntoView({ behavior: 'smooth' });
@@ -5104,7 +5105,13 @@ const handleSendWhatsApp = async (contact) => {
                   <div className="text-xs text-pink-200 mt-1">opens/clicks (no reply)</div>
                 </div>
               )}
-              
+
+              <div className="bg-gradient-to-br from-indigo-900/50 to-purple-800/50 p-4 rounded-xl shadow border border-indigo-700/50 hover:border-indigo-600 transition">
+                <div className="text-xs text-indigo-300 font-semibold">📬 Followed Up</div>
+                <div className="text-2xl sm:text-3xl font-bold text-white mt-1">{followUpStats.alreadyFollowedUp}</div>
+                <div className="text-xs text-indigo-200 mt-1">emails sent for followups</div>
+              </div>
+
               <div className="bg-gradient-to-br from-yellow-900/50 to-yellow-800/50 p-4 rounded-xl shadow border border-yellow-700/50 hover:border-yellow-600 transition">
                 <div className="text-xs text-yellow-300 font-semibold">⭐ Quality</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
@@ -6238,6 +6245,14 @@ const handleSendWhatsApp = async (contact) => {
                       Replied ({Math.round((followUpStats.totalReplied / Math.max(followUpStats.totalSent, 1)) * 100)}%)
                     </div>
                     <div className="absolute top-3 right-3 text-2xl opacity-20">✅</div>
+                  </div>
+                </div>
+                <div className="relative group">
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/20 to-purple-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
+                  <div className="relative bg-gradient-to-br from-indigo-900/40 to-purple-800/40 p-5 rounded-xl border border-indigo-500/30 hover:border-indigo-400/50 transition-all">
+                    <div className="text-4xl font-bold text-indigo-400">{followUpStats.alreadyFollowedUp}</div>
+                    <div className="text-sm text-indigo-200 mt-2 font-medium">Already Followed Up</div>
+                    <div className="absolute top-3 right-3 text-2xl opacity-20">📬</div>
                   </div>
                 </div>
                 <div className="relative group">
