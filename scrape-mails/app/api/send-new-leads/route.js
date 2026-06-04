@@ -250,7 +250,7 @@ export async function POST(request) {
           replied: false,
           followUpCount: 0,
           followUpSentCount: 0,
-          followUpAt: null,
+          followUpAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
           lastFollowUpAt: null,
           lastFollowUpSentAt: null,
           followUpDates: [],
