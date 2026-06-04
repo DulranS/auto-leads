@@ -104,7 +104,8 @@ const CONFIG = {
   RATE_LIMIT_DELAY_MS: 200,
   BATCH_SIZE: 50,
   RETRY_ATTEMPTS: 3,
-  RETRY_DELAY_MS: 1000
+  RETRY_DELAY_MS: 1000,
+  DEBOUNCE_DELAY_MS: 300
 };
 
 // ============================================================================
@@ -1279,9 +1280,19 @@ export default function Dashboard() {
   // SEARCH & FILTER STATES
   // ============================================================================
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [contactFilter, setContactFilter] = useState('all');
   const [sortBy, setSortBy] = useState('score');
   const [sortOrder, setSortOrder] = useState('desc');
+
+  // Debounce search query to prevent filtering on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, CONFIG.DEBOUNCE_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
   
@@ -1573,12 +1584,12 @@ export default function Dashboard() {
     console.log('🔍 Getting safe follow-up candidates...');
     console.log('📊 Sent leads:', sentLeads);
     console.log('📈 Follow-up history:', followUpHistory);
-    
+
     if (!sentLeads || sentLeads.length === 0) {
       console.log('⚠️ No sent leads available');
       return [];
     }
-    
+
     const now = new Date();
     const candidates = sentLeads
       .map(normalizeSentLead)
@@ -1626,10 +1637,13 @@ export default function Dashboard() {
         };
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
-    
+
     console.log(`📋 Found ${candidates.length} safe candidates`);
     return candidates;
-  }, [sentLeads, followUpHistory]);
+  }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
+
+  // Memoize the result to prevent recalculation on every render
+  const safeFollowUpCandidates = useMemo(() => getSafeFollowUpCandidates(), [getSafeFollowUpCandidates]);
   
   // ============================================================================
   // ✅ HANDLE SEND BULK SMS (DEFINED BEFORE JSX - FIXES REFERENCE ERROR)
@@ -1749,10 +1763,10 @@ export default function Dashboard() {
   // ============================================================================
   const getFilteredAndSortedContacts = useCallback(() => {
     let filtered = [...whatsappLinks];
-    
+
     // Apply search
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
+    if (debouncedSearchQuery.trim()) {
+      const query = debouncedSearchQuery.toLowerCase();
       filtered = filtered.filter(c =>
         (c.business && c.business.toLowerCase().includes(query)) ||
         (c.email && c.email.toLowerCase().includes(query)) ||
@@ -1822,16 +1836,16 @@ export default function Dashboard() {
     
     return filtered;
   }, [
-    whatsappLinks, 
-    searchQuery, 
-    contactFilter, 
-    sortBy, 
-    sortOrder, 
-    leadScores, 
-    lastSent, 
-    lastWhatsAppSent, 
-    repliedLeads, 
-    isContactedOnAnyChannel, 
+    whatsappLinks,
+    debouncedSearchQuery,
+    contactFilter,
+    sortBy,
+    sortOrder,
+    leadScores,
+    lastSent,
+    lastWhatsAppSent,
+    repliedLeads,
+    isContactedOnAnyChannel,
     isPriorityPhone
   ]);
   
@@ -2013,12 +2027,11 @@ export default function Dashboard() {
 
   const getSafeFollowUpDisabledReason = useCallback(() => {
     if (isSending) return 'Send in progress. Please wait.';
-    const candidates = getSafeFollowUpCandidates();
-    if (!candidates || candidates.length === 0) {
+    if (!safeFollowUpCandidates || safeFollowUpCandidates.length === 0) {
       return 'No safe follow-up candidates available (replied or maximum follow-ups reached).';
     }
     return '';
-  }, [getSafeFollowUpCandidates, isSending]);
+  }, [safeFollowUpCandidates, isSending]);
 
   const getSendEmailsDisabledReason = useCallback(() => {
     if (!csvContent) return 'Upload a CSV before sending emails.';
@@ -2277,9 +2290,9 @@ export default function Dashboard() {
   // ============================================================================
   const loadClickStats = useCallback(async () => {
     if (!user?.uid || !db) return;
-    
+
     try {
-      const q = query(collection(db, 'clicks'), where('userId', '==', user.uid));
+      const q = query(collection(db, 'clicks'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
       
       const stats = {};
@@ -2298,9 +2311,9 @@ export default function Dashboard() {
   // ============================================================================
   const loadAbResults = useCallback(async () => {
     if (!user?.uid || !db) return;
-    
+
     try {
-      const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid));
+      const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid), limit(50));
       const snapshot = await getDocs(q);
       
       if (!snapshot.empty) {
@@ -2316,9 +2329,9 @@ export default function Dashboard() {
   // ============================================================================
   const loadDeals = useCallback(async () => {
     if (!user?.uid || !db) return;
-    
+
     try {
-      const q = query(collection(db, 'deals'), where('userId', '==', user.uid));
+      const q = query(collection(db, 'deals'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
       
       const stages = {};
@@ -2782,16 +2795,15 @@ const testFollowUpSend = useCallback(async () => {
   console.log('📧 Email quota:', quotas.emails);
   
   // Test 3: Check safe candidates
-  const candidates = getSafeFollowUpCandidates();
-  console.log('📊 Safe candidates:', candidates.length);
-  
-  if (candidates.length === 0) {
+  console.log('📊 Safe candidates:', safeFollowUpCandidates.length);
+
+  if (safeFollowUpCandidates.length === 0) {
     console.log('❌ No safe candidates found');
     addNotification('No safe candidates available for testing', 'warning');
     return;
   }
-  
-  const testCandidate = candidates[0];
+
+  const testCandidate = safeFollowUpCandidates[0];
   console.log('🎯 Test candidate:', testCandidate.email);
   
   try {
@@ -2836,21 +2848,20 @@ const testFollowUpSend = useCallback(async () => {
     console.error('💥 Test failed:', error);
     addNotification(`❌ Test error: ${error.message}`, 'error');
   }
-}, [user, senderName, quotas, getSafeFollowUpCandidates, requestGmailToken, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
+}, [user, senderName, quotas, safeFollowUpCandidates, requestGmailToken, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
 
 // ============================================================================
 // BYPASS QUOTA TEST (For debugging only)
 // ============================================================================
 const testFollowUpBypassQuota = useCallback(async () => {
   console.log('🚀 Starting bypass quota test...');
-  
-  const candidates = getSafeFollowUpCandidates();
-  if (candidates.length === 0) {
+
+  if (safeFollowUpCandidates.length === 0) {
     addNotification('No safe candidates available', 'warning');
     return;
   }
-  
-  const testCandidate = candidates[0];
+
+  const testCandidate = safeFollowUpCandidates[0];
   
   try {
     // Skip quota check
@@ -3032,10 +3043,9 @@ const handleMassEmailFollowUps = useCallback(async () => {
   }
 
   console.log('📊 Getting safe candidates...');
-  const safeCandidates = getSafeFollowUpCandidates();
-  console.log(`📋 Found ${safeCandidates.length} safe candidates:`, safeCandidates);
-  
-  if (safeCandidates.length === 0) {
+  console.log(`📋 Found ${safeFollowUpCandidates.length} safe candidates:`, safeFollowUpCandidates);
+
+  if (safeFollowUpCandidates.length === 0) {
     console.warn('⚠️ No safe leads available');
     addNotification('No safe leads available for follow-up', 'warning');
     return;
@@ -3043,9 +3053,9 @@ const handleMassEmailFollowUps = useCallback(async () => {
 
   console.log('📧 Checking email quota...');
   // Check email quota
-  const quotaCheck = canUse('email', safeCandidates.length);
+  const quotaCheck = canUse('email', safeFollowUpCandidates.length);
   console.log('💳 Quota check result:', quotaCheck);
-  
+
   if (!quotaCheck.available) {
     console.error('❌ Insufficient quota:', quotaCheck.reason);
     addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
@@ -3053,8 +3063,8 @@ const handleMassEmailFollowUps = useCallback(async () => {
   }
 
   const confirmed = window.confirm(
-    `📧 Send follow-up emails to ${safeCandidates.length} safe leads?\n\n` +
-    `This will use ${safeCandidates.length} of your daily email quota.\n\n` +
+    `📧 Send follow-up emails to ${safeFollowUpCandidates.length} safe leads?\n\n` +
+    `This will use ${safeFollowUpCandidates.length} of your daily email quota.\n\n` +
     `Each lead will receive their next scheduled follow-up.\n\n` +
     `Continue with mass send?`
   );
@@ -3067,7 +3077,7 @@ const handleMassEmailFollowUps = useCallback(async () => {
   console.log('✅ User confirmed, starting mass send...');
   setIsSending(true);
   setStatus('📧 Initiating mass follow-up send...');
-  setSendProgress({ current: 0, total: safeCandidates.length });
+  setSendProgress({ current: 0, total: safeFollowUpCandidates.length });
 
   let successCount = 0;
   let failCount = 0;
@@ -3079,15 +3089,15 @@ const handleMassEmailFollowUps = useCallback(async () => {
     // Get Gmail token once for all sends
     const accessToken = await requestGmailToken();
     console.log('✅ Gmail token obtained');
-    
-    setStatus(`📧 Sending follow-ups to ${safeCandidates.length} leads...`);
+
+    setStatus(`📧 Sending follow-ups to ${safeFollowUpCandidates.length} leads...`);
 
     // Process leads in batches to avoid overwhelming the API
-    const batchSize = Math.min(10, safeCandidates.length);
+    const batchSize = Math.min(10, safeFollowUpCandidates.length);
     console.log(`📦 Processing in batches of ${batchSize}`);
-    
-    for (let i = 0; i < safeCandidates.length; i += batchSize) {
-      const batch = safeCandidates.slice(i, i + batchSize);
+
+    for (let i = 0; i < safeFollowUpCandidates.length; i += batchSize) {
+      const batch = safeFollowUpCandidates.slice(i, i + batchSize);
       console.log(`🔄 Processing batch ${Math.floor(i/batchSize) + 1} with ${batch.length} leads`);
       
       for (const contact of batch) {
@@ -3165,15 +3175,15 @@ const handleMassEmailFollowUps = useCallback(async () => {
 
         // Update progress
         const currentProgress = i + batch.indexOf(contact) + 1;
-        setSendProgress({ current: currentProgress, total: safeCandidates.length });
-        console.log(`📈 Progress: ${currentProgress}/${safeCandidates.length}`);
+        setSendProgress({ current: currentProgress, total: safeFollowUpCandidates.length });
+        console.log(`📈 Progress: ${currentProgress}/${safeFollowUpCandidates.length}`);
         
         // Small delay between sends to avoid rate limiting
         await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
       }
 
       // Brief pause between batches
-      if (i + batchSize < safeCandidates.length) {
+      if (i + batchSize < safeFollowUpCandidates.length) {
         console.log('⏸️ Pausing between batches...');
         await new Promise(resolve => setTimeout(resolve, 500));
       }
@@ -3191,7 +3201,7 @@ const handleMassEmailFollowUps = useCallback(async () => {
       `✅ Success: ${successCount}\n` +
       `❌ Failed: ${failCount}\n` +
       `⏭️ Skipped: ${skipCount}\n` +
-      `📈 Total: ${safeCandidates.length}\n\n` +
+      `📈 Total: ${safeFollowUpCandidates.length}\n\n` +
       `Email quota used: ${successCount}/${quotaCheck.limit}`;
 
     if (failCount > 0) {
@@ -3214,7 +3224,7 @@ const handleMassEmailFollowUps = useCallback(async () => {
 }, [
   user,
   addNotification,
-  getSafeFollowUpCandidates,
+  safeFollowUpCandidates,
   canUse,
   requestGmailToken,
   loadSentLeads,
@@ -3721,9 +3731,9 @@ const handleSendWhatsApp = async (contact) => {
     if (!user?.uid || !db) return;
     
     setLoadingCallHistory(true);
-    
+
     try {
-      const q = query(collection(db, 'calls'), where('userId', '==', user.uid));
+      const q = query(collection(db, 'calls'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
       
       const calls = [];
@@ -6258,7 +6268,7 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="relative group">
                   <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/20 to-orange-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
                   <div className="relative bg-gradient-to-br from-yellow-900/40 to-orange-800/40 p-5 rounded-xl border border-yellow-500/30 hover:border-yellow-400/50 transition-all">
-                    <div className="text-4xl font-bold text-yellow-400">{getSafeFollowUpCandidates().length}</div>
+                    <div className="text-4xl font-bold text-yellow-400">{safeFollowUpCandidates.length}</div>
                     <div className="text-sm text-yellow-200 mt-2 font-medium">Ready for Follow-Up</div>
                     <div className="absolute top-3 right-3 text-2xl opacity-20">⏰</div>
                   </div>
@@ -6267,7 +6277,7 @@ const handleSendWhatsApp = async (contact) => {
                   <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-pink-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
                   <div className="relative bg-gradient-to-br from-purple-900/40 to-pink-800/40 p-5 rounded-xl border border-purple-500/30 hover:border-purple-400/50 transition-all">
                     <div className="text-4xl font-bold text-purple-400">
-                      ${Math.round((getSafeFollowUpCandidates().length * 0.25 * 5000) / 1000)}k
+                      ${Math.round((safeFollowUpCandidates.length * 0.25 * 5000) / 1000)}k
                     </div>
                     <div className="text-sm text-purple-200 mt-2 font-medium">Potential Revenue</div>
                     <div className="absolute top-3 right-3 text-2xl opacity-20">💰</div>
@@ -6276,7 +6286,7 @@ const handleSendWhatsApp = async (contact) => {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-900/30 to-gray-800/30">
-              {getSafeFollowUpCandidates().length === 0 ? (
+              {safeFollowUpCandidates.length === 0 ? (
                 <div className="text-center py-16">
                   <div className="text-6xl mb-4">✅</div>
                   <div className="text-2xl text-gray-200 font-bold mb-2">All Caught Up!</div>
@@ -6289,11 +6299,11 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="space-y-3">
                   <div className="text-lg font-bold text-indigo-300 mb-5 flex items-center gap-3">
                     <span className="text-2xl">🎯</span>
-                    <span>{getSafeFollowUpCandidates().length} leads ready for intelligent follow-up</span>
+                    <span>{safeFollowUpCandidates.length} leads ready for intelligent follow-up</span>
                   </div>
                   
                   {/* MASS EMAIL BUTTON */}
-                  {getSafeFollowUpCandidates().length > 0 && (
+                  {safeFollowUpCandidates.length > 0 && (
                     <div className="mb-6">
                       <button
                         onClick={handleMassEmailFollowUps}
@@ -6308,7 +6318,7 @@ const handleSendWhatsApp = async (contact) => {
                         <div className="relative px-8 py-4 text-white font-bold text-lg">
                           <div className="flex items-center justify-center gap-3">
                             <span className="text-2xl">📧</span>
-                            <span>{isSending ? 'Sending...' : `Mass Email All Safe Leads (${getSafeFollowUpCandidates().length})`}</span>
+                            <span>{isSending ? 'Sending...' : `Mass Email All Safe Leads (${safeFollowUpCandidates.length})`}</span>
                             {!isSending && <span className="text-lg">→</span>}
                           </div>
                           {!isSending && (
@@ -6345,15 +6355,14 @@ const handleSendWhatsApp = async (contact) => {
                           <button
                             onClick={() => {
                               console.log('🔍 DEBUG - Mass Email Diagnostic Info:');
-                              console.log('📊 Safe Candidates:', getSafeFollowUpCandidates());
+                              console.log('📊 Safe Candidates:', safeFollowUpCandidates);
                               console.log('👤 User:', user);
-                              console.log('📧 Quota Check:', canUse('email', getSafeFollowUpCandidates().length));
+                              console.log('📧 Quota Check:', canUse('email', safeFollowUpCandidates.length));
                               console.log('📈 Sent Leads:', sentLeads);
                               console.log('🔄 Follow-up History:', followUpHistory);
                               console.log('❌ Replied Leads:', repliedLeads);
                               
-                              const candidates = getSafeFollowUpCandidates();
-                              alert(`Debug Info:\n\nSafe Candidates: ${candidates.length}\nUser ID: ${user?.uid ? '✅' : '❌'}\nSent Leads: ${sentLeads?.length || 0}\n\nCheck console for detailed info.`);
+                              alert(`Debug Info:\n\nSafe Candidates: ${safeFollowUpCandidates.length}\nUser ID: ${user?.uid ? '✅' : '❌'}\nSent Leads: ${sentLeads?.length || 0}\n\nCheck console for detailed info.`);
                             }}
                             className="text-xs text-gray-400 hover:text-indigo-300 underline"
                           >
@@ -6420,7 +6429,7 @@ const handleSendWhatsApp = async (contact) => {
                       </div>
                     </div>
                   )}
-                  {getSafeFollowUpCandidates().map((contact) => {
+                  {safeFollowUpCandidates.map((contact) => {
                     const followUpCount = contact.followUpCount;
                     return (
                       <div key={contact.email} className="group relative">
