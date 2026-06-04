@@ -2468,78 +2468,37 @@ export default function Dashboard() {
   // ============================================================================
 
   // ============================================================================
-  // REPLY CHECKING WITH REFS TO AVOID CIRCULAR DEPENDENCIES
+  // REPLY CHECKING - MANUAL ONLY TO AVOID INITIALIZATION ISSUES
   // ============================================================================
-  const replyCheckData = useRef({
-    userId: null,
-    senderEmail: null,
-    requestGmailToken: null,
-    loadRepliedAndFollowUp: null,
-    addNotification: null
-  });
-
-  // Update refs when values change
-  useEffect(() => {
-    replyCheckData.current = {
-      userId: user?.uid,
-      senderEmail,
-      requestGmailToken,
-      loadRepliedAndFollowUp,
-      addNotification
-    };
-  }, [user?.uid, senderEmail, requestGmailToken, loadRepliedAndFollowUp, addNotification]);
-
-  // Simple function that uses refs instead of dependencies
   const checkForReplies = async () => {
-    const data = replyCheckData.current;
-    if (!data.userId) return;
+    if (!user?.uid) return;
 
     try {
-      const accessToken = await data.requestGmailToken?.();
+      const accessToken = await requestGmailToken();
       if (!accessToken) return;
 
       const res = await fetch('/api/check-replies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: data.userId,
+          userId: user.uid,
           accessToken,
-          senderEmail: data.senderEmail
+          senderEmail
         })
       });
 
       if (res.ok) {
         const responseData = await res.json();
         if (responseData.replyCount > 0) {
-          data.addNotification?.(`📬 Detected ${responseData.replyCount} new reply/replies!`, 'success', 5000);
-          await data.loadRepliedAndFollowUp?.();
+          addNotification(`📬 Detected ${responseData.replyCount} new reply/replies!`, 'success', 5000);
+          await loadRepliedAndFollowUp();
         }
       }
     } catch (error) {
       console.error('Error checking for replies:', error);
-      // Silent fail for periodic checks
+      addNotification('Failed to check for replies', 'error');
     }
   };
-
-  // Periodic reply checking with simple dependency
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    // Initial check with delay to avoid initialization issues
-    const initialCheckTimer = setTimeout(() => {
-      checkForReplies();
-    }, 3000); // 3 second delay after mount
-
-    // Periodic checks every 5 minutes
-    const interval = setInterval(() => {
-      checkForReplies();
-    }, 5 * 60 * 1000);
-
-    return () => {
-      clearTimeout(initialCheckTimer);
-      clearInterval(interval);
-    };
-  }, [user?.uid]);
 
   // ============================================================================
   // LOAD DAILY EMAIL COUNT FROM API WITH ERROR HANDLING
