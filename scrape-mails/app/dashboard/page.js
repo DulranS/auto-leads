@@ -2464,61 +2464,6 @@ export default function Dashboard() {
   }, [user?.uid]);
 
   // ============================================================================
-  // CHECK FOR EMAIL REPLIES
-  // ============================================================================
-  const checkForReplies = useCallback(async () => {
-    if (!user?.uid) return;
-
-    try {
-      const accessToken = await requestGmailToken();
-      if (!accessToken) return;
-
-      const res = await fetch('/api/check-replies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user.uid,
-          accessToken,
-          senderEmail
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.replyCount > 0) {
-          addNotification(`📬 Detected ${data.replyCount} new reply/replies!`, 'success', 5000);
-          // Refresh replied leads
-          await loadRepliedAndFollowUp();
-        }
-      }
-    } catch (error) {
-      console.error('Error checking for replies:', error);
-      // Don't show notification for this error as it runs periodically
-    }
-  }, [user?.uid, senderEmail, requestGmailToken, loadRepliedAndFollowUp]);
-
-  // ============================================================================
-  // PERIODICALLY CHECK FOR EMAIL REPLIES
-  // ============================================================================
-  // Temporarily disabled to avoid initialization issues
-  // Users can manually check for replies using the "Check Replies" button
-  /*
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    // Check for replies immediately on mount
-    checkForReplies();
-
-    // Then check every 5 minutes
-    const interval = setInterval(() => {
-      checkForReplies();
-    }, 5 * 60 * 1000); // 5 minutes
-
-    return () => clearInterval(interval);
-  }, [user?.uid]);
-  */
-
-  // ============================================================================
   // LOAD DAILY EMAIL COUNT FROM API WITH ERROR HANDLING
   // ============================================================================
   const loadDailyEmailCount = useCallback(async () => {
@@ -5228,15 +5173,6 @@ const handleSendWhatsApp = async (contact) => {
               >
                 <span>🔥</span>
                 <span className="hidden sm:inline">Scrape</span>
-              </button>
-
-              <button
-                onClick={() => checkForReplies()}
-                className="text-xs sm:text-sm bg-blue-700 hover:bg-blue-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
-                title="Check for new email replies"
-              >
-                <span>📬</span>
-                <span className="hidden sm:inline">Check Replies</span>
               </button>
 
               <button
