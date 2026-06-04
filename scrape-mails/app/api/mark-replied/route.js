@@ -106,7 +106,8 @@ export async function POST(request) {
 
     await updateDoc(docRef, {
       replied: true,
-      repliedAt: new Date().toISOString()
+      repliedAt: new Date().toISOString(),
+      followUpAt: null // Cancel any scheduled follow-ups
     });
 
     // Track company reply

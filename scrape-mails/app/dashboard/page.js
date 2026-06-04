@@ -6444,24 +6444,55 @@ const handleSendWhatsApp = async (contact) => {
                               </span>
                             </div>
                           </div>
-                          <button
-                            onClick={async () => {
-                              const confirmed = confirm(`Send follow-up #${followUpCount + 1} to ${contact.email}?`);
-                              if (!confirmed) return;
-                              try {
-                                const token = await requestGmailToken();
-                                await sendFollowUpWithToken(contact.email, token);
-                              } catch (err) {
-                                alert('Gmail access failed.');
-                              }
-                            }}
-                            className="ml-6 relative group/btn overflow-hidden"
-                          >
-                            <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 group-hover/btn:from-blue-500 group-hover/btn:to-indigo-500 transition-all"></div>
-                            <div className="relative px-6 py-3 text-white font-bold text-base rounded-lg">
-                              Send Now →
-                            </div>
-                          </button>
+                          <div className="flex gap-2 ml-6">
+                            <button
+                              onClick={async () => {
+                                const confirmed = confirm(`Mark ${contact.email} as replied? This will cancel all scheduled follow-ups.`);
+                                if (!confirmed) return;
+                                try {
+                                  const res = await fetch('/api/mark-replied', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId: user.uid, email: contact.email })
+                                  });
+                                  if (res.ok) {
+                                    addNotification(`✅ Marked ${contact.email} as replied`, 'success');
+                                    await loadSentLeads();
+                                    await loadRepliedAndFollowUp();
+                                  } else {
+                                    addNotification('Failed to mark as replied', 'error');
+                                  }
+                                } catch (err) {
+                                  addNotification('Error marking as replied', 'error');
+                                }
+                              }}
+                              className="relative group/btn overflow-hidden"
+                              title="Mark as Replied"
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-r from-green-600 to-emerald-600 group-hover/btn:from-green-500 group-hover/btn:to-emerald-500 transition-all"></div>
+                              <div className="relative px-4 py-3 text-white font-bold text-sm rounded-lg">
+                                ✓ Replied
+                              </div>
+                            </button>
+                            <button
+                              onClick={async () => {
+                                const confirmed = confirm(`Send follow-up #${followUpCount + 1} to ${contact.email}?`);
+                                if (!confirmed) return;
+                                try {
+                                  const token = await requestGmailToken();
+                                  await sendFollowUpWithToken(contact.email, token);
+                                } catch (err) {
+                                  alert('Gmail access failed.');
+                                }
+                              }}
+                              className="relative group/btn overflow-hidden"
+                            >
+                              <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 group-hover/btn:from-blue-500 group-hover/btn:to-indigo-500 transition-all"></div>
+                              <div className="relative px-6 py-3 text-white font-bold text-base rounded-lg">
+                                Send Now →
+                              </div>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );

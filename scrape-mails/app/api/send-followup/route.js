@@ -225,7 +225,7 @@ export async function POST(request) {
       lastFollowUpAt: now,
       lastFollowUpSentAt: now,
       followUpDates: [...(existingData.followUpDates || []), now],
-      followUpAt: newFollowUpCount < CONFIG.MAX_FOLLOW_UPS ? new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString() : null
+      followUpAt: newFollowUpCount < CONFIG.MAX_FOLLOW_UPS ? new Date(new Date(now).getTime() + 2 * 24 * 60 * 60 * 1000).toISOString() : null
     });
     
     // Track company followup
