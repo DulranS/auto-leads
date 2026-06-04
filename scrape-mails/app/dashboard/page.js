@@ -2,17 +2,17 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  updateDoc, 
-  addDoc, 
+import {
+  getFirestore,
+  doc,
+  setDoc,
+  getDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+  updateDoc,
+  addDoc,
   serverTimestamp,
   deleteDoc,
   onSnapshot,
@@ -23,11 +23,11 @@ import {
   limit,
   Timestamp
 } from 'firebase/firestore';
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  onAuthStateChanged, 
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  onAuthStateChanged,
   signOut,
   updateProfile,
   sendPasswordResetEmail
@@ -268,17 +268,17 @@ Best,
 function formatForDialing(raw) {
   if (!raw || raw === 'N/A' || raw === '' || raw === 'undefined' || raw === 'null') return null;
   let cleaned = raw.toString().replace(/\D/g, '');
-  
+
   // Handle Sri Lankan numbers starting with 0
   if (cleaned.startsWith('0') && cleaned.length >= 9) {
     cleaned = '94' + cleaned.slice(1);
   }
-  
+
   // Handle numbers without country code
   if (cleaned.length === 9 && /^[7-9]/.test(cleaned)) {
     cleaned = '94' + cleaned;
   }
-  
+
   // Validate international format
   const isValid = /^[1-9]\d{9,14}$/.test(cleaned);
   return isValid ? cleaned : null;
@@ -349,42 +349,42 @@ const parseMultipleEmails = (emailString) => {
  */
 const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
-  
+
   let cleaned = email.trim()
     .toLowerCase()
     .replace(/^["']+/, '')
     .replace(/["']+$/, '')
     .replace(/\s+/g, '')
     .replace(/[<>]/g, '');
-  
+
   if (cleaned.length < 5) return false;
   if (cleaned === 'undefined' || cleaned === 'null' || cleaned === 'na' || cleaned === 'n/a') return false;
   if (cleaned.startsWith('[') || cleaned.includes('missing')) return false;
-  
+
   const atCount = (cleaned.match(/@/g) || []).length;
   if (atCount !== 1) return false;
-  
+
   const parts = cleaned.split('@');
   const [localPart, domainPart] = parts;
-  
+
   if (!localPart || localPart.length < 1) return false;
   if (localPart.startsWith('.') || localPart.endsWith('.')) return false;
-  
+
   if (!domainPart || domainPart.length < 3) return false;
   if (!domainPart.includes('.')) return false;
   if (domainPart.startsWith('.') || domainPart.endsWith('.')) return false;
-  
+
   const domainBits = domainPart.split('.');
   const tld = domainBits[domainBits.length - 1];
-  
+
   if (!tld || tld.length < 2 || tld.length > 6) return false;
   if (!/^[a-z0-9-]+$/.test(tld)) return false;
   if (tld.startsWith('-') || tld.endsWith('-')) return false;
-  
+
   // Additional email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(cleaned)) return false;
-  
+
   return true;
 };
 
@@ -395,10 +395,10 @@ const parseCsvRow = (str) => {
   const result = [];
   let current = '';
   let inQuotes = false;
-  
+
   for (let i = 0; i < str.length; i++) {
     const char = str[i];
-    
+
     if (char === '"' && !inQuotes) {
       inQuotes = true;
     } else if (char === '"' && inQuotes) {
@@ -415,9 +415,9 @@ const parseCsvRow = (str) => {
       current += char;
     }
   }
-  
+
   result.push(current);
-  
+
   return result.map(field => {
     let cleaned = field.replace(/[\r\n]/g, '').trim();
     if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
@@ -433,10 +433,10 @@ const parseCsvRow = (str) => {
 const renderPreviewText = (text, recipient, mappings, sender) => {
   if (!text) return '';
   let result = text;
-  
+
   Object.entries(mappings).forEach(([varName, col]) => {
     const regex = new RegExp(`{{\\s*${varName}\\s*}}`, 'g');
-    
+
     if (varName === 'sender_name') {
       result = result.replace(regex, sender || 'Team');
     } else if (recipient && col && recipient[col] !== undefined) {
@@ -449,13 +449,13 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
       result = result.replace(regex, `[${varName}]`);
     }
   });
-  
+
   // Replace any remaining unmatched variables
   result = result.replace(/\{\{\s*[^}]+\s*\}\}/g, (match) => {
     const varName = match.replace(/\{\{\s*|\s*\}\}/g, '').trim();
     return `[${varName}]`;
   });
-  
+
   return result;
 };
 
@@ -464,16 +464,16 @@ const renderPreviewText = (text, recipient, mappings, sender) => {
  */
 const generateSocialHandle = (businessName, platform) => {
   if (!businessName) return null;
-  
+
   let handle = businessName
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '_')
     .substring(0, 30);
-  
+
   // Remove leading/trailing underscores
   handle = handle.replace(/^_+|_+$/g, '');
-  
+
   return handle || null;
 };
 
@@ -528,7 +528,7 @@ const debounce = (func, wait) => {
  */
 const throttle = (func, limit) => {
   let inThrottle;
-  return function(...args) {
+  return function (...args) {
     if (!inThrottle) {
       func.apply(this, args);
       inThrottle = true;
@@ -550,7 +550,7 @@ const localStorageHelper = {
       return defaultValue;
     }
   },
-  
+
   set: (key, value) => {
     try {
       if (typeof window !== 'undefined') {
@@ -562,7 +562,7 @@ const localStorageHelper = {
       return false;
     }
   },
-  
+
   remove: (key) => {
     try {
       if (typeof window !== 'undefined') {
@@ -589,7 +589,7 @@ const sessionStorageHelper = {
       return defaultValue;
     }
   },
-  
+
   set: (key, value) => {
     try {
       if (typeof window !== 'undefined') {
@@ -614,14 +614,14 @@ const useContactTracking = (userId) => {
   const [contactHistory, setContactHistory] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
+
   // Load contact history from Firebase
   useEffect(() => {
     if (!userId || !db) {
       setLoading(false);
       return;
     }
-    
+
     const loadContactHistory = async () => {
       try {
         setLoading(true);
@@ -630,7 +630,7 @@ const useContactTracking = (userId) => {
           where('userId', '==', userId)
         );
         const snapshot = await getDocs(q);
-        
+
         const history = {};
         snapshot.forEach(doc => {
           const data = doc.data();
@@ -643,13 +643,13 @@ const useContactTracking = (userId) => {
             };
           }
         });
-        
+
         setContactHistory(history);
         localStorageHelper.set(`contact_history_${userId}`, history);
       } catch (err) {
         console.error('Load contact history error:', err);
         setError(err.message);
-        
+
         // Fallback to localStorage
         const cached = localStorageHelper.get(`contact_history_${userId}`, {});
         setContactHistory(cached);
@@ -657,20 +657,20 @@ const useContactTracking = (userId) => {
         setLoading(false);
       }
     };
-    
+
     loadContactHistory();
   }, [userId]);
-  
+
   // Update contact history
   const updateContact = useCallback(async (contactKey, channel, data = {}) => {
     if (!userId || !db || !contactKey) return false;
     const normalizedKey = normalizeContactKey(contactKey);
     if (!normalizedKey) return false;
-    
+
     try {
       const now = new Date().toISOString();
       const docRef = doc(db, 'contact_history', `${userId}_${normalizedKey}`);
-      
+
       const updateData = {
         userId,
         contactKey,
@@ -681,9 +681,9 @@ const useContactTracking = (userId) => {
         lastUpdated: now,
         ...data
       };
-      
+
       await setDoc(docRef, updateData, { merge: true });
-      
+
       // Update local state
       setContactHistory(prev => ({
         ...prev,
@@ -693,25 +693,25 @@ const useContactTracking = (userId) => {
           lastUpdated: now
         }
       }));
-      
+
       return true;
     } catch (err) {
       console.error('Update contact error:', err);
       return false;
     }
   }, [userId]);
-  
+
   // Check if contact can be reached
   const canContact = useCallback((contactKey, channel, minDays = CONFIG.MIN_DAYS_BETWEEN_CONTACT) => {
     const history = contactHistory[contactKey];
-    
+
     if (!history) return { canContact: true, reason: 'No previous contact' };
-    
+
     const lastContact = history.lastContacted;
     if (!lastContact) return { canContact: true, reason: 'No contact date' };
-    
+
     const daysSince = daysBetween(lastContact, new Date());
-    
+
     if (daysSince < minDays) {
       return {
         canContact: false,
@@ -720,13 +720,13 @@ const useContactTracking = (userId) => {
         lastContact
       };
     }
-    
+
     // Check channel-specific limits
     const channelCount = history[`${channel}Count`] || 0;
     const maxChannelContacts = channel === 'email' ? CONFIG.MAX_FOLLOW_UPS + 1 :
-                               channel === 'whatsapp' ? 5 :
-                               channel === 'sms' ? 3 : 2;
-    
+      channel === 'whatsapp' ? 5 :
+        channel === 'sms' ? 3 : 2;
+
     if (channelCount >= maxChannelContacts) {
       return {
         canContact: false,
@@ -735,14 +735,14 @@ const useContactTracking = (userId) => {
         maxChannelContacts
       };
     }
-    
+
     return { canContact: true, reason: 'Safe to contact', daysSince };
   }, [contactHistory]);
-  
+
   // Get contact summary
   const getContactSummary = useCallback((contactKey) => {
     const history = contactHistory[contactKey];
-    
+
     if (!history) {
       return {
         contacted: false,
@@ -752,7 +752,7 @@ const useContactTracking = (userId) => {
         lastChannel: null
       };
     }
-    
+
     return {
       contacted: true,
       totalContacts: history.contactCount || 0,
@@ -765,7 +765,7 @@ const useContactTracking = (userId) => {
       callCount: history.callCount || 0
     };
   }, [contactHistory]);
-  
+
   return {
     contactHistory,
     loading,
@@ -788,14 +788,14 @@ const useDailyQuotas = (userId) => {
     calls: { used: 0, limit: CONFIG.MAX_DAILY_CALLS, resetTime: null }
   });
   const [loading, setLoading] = useState(true);
-  
+
   // Load quotas from API
   useEffect(() => {
     if (!userId) {
       setLoading(false);
       return;
     }
-    
+
     const loadQuotas = async () => {
       try {
         const res = await fetch('/api/get-daily-count', {
@@ -803,27 +803,27 @@ const useDailyQuotas = (userId) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId })
         });
-        
+
         if (res.ok) {
           const data = await res.json();
           setQuotas({
-            emails: { 
-              used: data.count || 0, 
+            emails: {
+              used: data.count || 0,
               limit: CONFIG.MAX_DAILY_EMAILS,
               resetTime: data.resetTime || null
             },
-            whatsapp: { 
-              used: data.whatsappCount || 0, 
+            whatsapp: {
+              used: data.whatsappCount || 0,
               limit: CONFIG.MAX_DAILY_WHATSAPP,
               resetTime: data.resetTime || null
             },
-            sms: { 
-              used: data.smsCount || 0, 
+            sms: {
+              used: data.smsCount || 0,
               limit: CONFIG.MAX_DAILY_SMS,
               resetTime: data.resetTime || null
             },
-            calls: { 
-              used: data.callCount || 0, 
+            calls: {
+              used: data.callCount || 0,
               limit: CONFIG.MAX_DAILY_CALLS,
               resetTime: data.resetTime || null
             }
@@ -835,28 +835,28 @@ const useDailyQuotas = (userId) => {
         setLoading(false);
       }
     };
-    
+
     loadQuotas();
-    
+
     // Refresh quotas every hour
     const interval = setInterval(loadQuotas, 3600000);
     return () => clearInterval(interval);
   }, [userId]);
-  
+
   // Check if quota available
   const canUse = useCallback((channel, count = 1) => {
     // Map channel names to quota keys
     const channelMap = {
       'email': 'emails',
-      'whatsapp': 'whatsapp', 
+      'whatsapp': 'whatsapp',
       'sms': 'sms',
       'call': 'calls'
     };
-    
+
     const quotaKey = channelMap[channel] || channel;
     const quota = quotas[quotaKey];
     if (!quota) return { available: false, reason: 'Invalid channel' };
-    
+
     const remaining = quota.limit - quota.used;
     if (remaining < count) {
       return {
@@ -867,7 +867,7 @@ const useDailyQuotas = (userId) => {
         limit: quota.limit
       };
     }
-    
+
     return {
       available: true,
       reason: 'Quota available',
@@ -876,19 +876,19 @@ const useDailyQuotas = (userId) => {
       limit: quota.limit
     };
   }, [quotas]);
-  
+
   // Increment quota usage
   const incrementQuota = useCallback((channel, count = 1) => {
     // Map channel names to quota keys
     const channelMap = {
       'email': 'emails',
-      'whatsapp': 'whatsapp', 
+      'whatsapp': 'whatsapp',
       'sms': 'sms',
       'call': 'calls'
     };
-    
+
     const quotaKey = channelMap[channel] || channel;
-    
+
     setQuotas(prev => ({
       ...prev,
       [quotaKey]: {
@@ -897,7 +897,7 @@ const useDailyQuotas = (userId) => {
       }
     }));
   }, []);
-  
+
   return {
     quotas,
     loading,
@@ -912,24 +912,24 @@ const useDailyQuotas = (userId) => {
  */
 const useLeadScoring = () => {
   const [scores, setScores] = useState({});
-  
+
   const calculateScore = useCallback((contact, contactHistory = {}) => {
     if (!contact) return 50;
-    
+
     let score = 50;
     const contactKey = contact.email || contact.phone;
     const history = contactHistory[contactKey] || {};
-    
+
     // Email quality
     if (contact.email && isValidEmail(contact.email)) {
       score += 15;
     }
-    
+
     // Phone quality
     if (contact.phone && formatForDialing(contact.phone)) {
       score += 10;
     }
-    
+
     // Social media presence
     const socialChannels = [
       contact.twitter,
@@ -940,53 +940,53 @@ const useLeadScoring = () => {
       contact.linkedin_ceo,
       contact.linkedin_founder
     ].filter(Boolean).length;
-    
+
     score += Math.min(15, socialChannels * 3);
-    
+
     // Contact confidence
     if (contact.contact_confidence === 'High') score += 10;
     else if (contact.contact_confidence === 'Medium') score += 5;
-    
+
     // Decision maker
     if (contact.linkedin_ceo || contact.linkedin_founder) score += 10;
     if (contact.decision_maker_found === 'Yes') score += 8;
-    
+
     // Engagement history
     if (history.contactCount > 0) {
       score += Math.min(10, history.contactCount * 2);
     }
-    
+
     if (history.replied) {
       score += 25;
     }
-    
+
     // Company size
     if (contact.company_size_indicator === 'small') score += 5;
     else if (contact.company_size_indicator === 'medium') score += 10;
     else if (contact.company_size_indicator === 'enterprise') score += 12;
-    
+
     // Website presence
     if (contact.website) score += 5;
     if (contact.contact_page_found === 'Yes') score += 5;
-    
+
     // Lead quality from CSV
     if (contact.lead_quality === 'HOT') score += 30;
     else if (contact.lead_quality === 'WARM') score += 15;
-    
+
     // Rating and reviews
     if (parseFloat(contact.rating) >= 4.8) score += 20;
     if (parseInt(contact.review_count) > 100) score += 10;
-    
+
     return Math.min(100, Math.max(0, score));
   }, []);
-  
+
   const updateScore = useCallback((contactKey, score) => {
     setScores(prev => ({
       ...prev,
       [contactKey]: score
     }));
   }, []);
-  
+
   return {
     scores,
     calculateScore,
@@ -1007,7 +1007,7 @@ export default function Dashboard() {
   const [isGoogleLoaded, setIsGoogleLoaded] = useState(false);
   const [authError, setAuthError] = useState(null);
   const router = useRouter();
-  
+
   // ============================================================================
   // CSV & LEAD DATA STATES
   // ============================================================================
@@ -1025,7 +1025,7 @@ export default function Dashboard() {
   const [isEnrichingCsv, setIsEnrichingCsv] = useState(false);
   const [enrichMode, setEnrichMode] = useState('download');
   const [enrichStatusMessage, setEnrichStatusMessage] = useState('');
-  
+
   // ============================================================================
   // SENDER & TEMPLATE STATES
   // ============================================================================
@@ -1043,7 +1043,7 @@ export default function Dashboard() {
   const [emailAttachments, setEmailAttachments] = useState([]);
   const [smsConsent, setSmsConsent] = useState(true);
   const [activeTemplateTab, setActiveTemplateTab] = useState('email');
-  
+
   // ============================================================================
   // TEMPLATE VARIABLES COLLECTION
   // ============================================================================
@@ -1065,7 +1065,7 @@ export default function Dashboard() {
     ...availableCsvVariables,
     'sender_name'
   ])];
-  
+
   // ============================================================================
   // CONTACT TRACKING STATES (Using custom hook)
   // ============================================================================
@@ -1078,7 +1078,7 @@ export default function Dashboard() {
     getContactSummary,
     setContactHistory
   } = useContactTracking(user?.uid);
-  
+
   // Legacy tracking states (for backward compatibility)
   const [lastSent, setLastSent] = useState({});
   const [lastWhatsAppSent, setLastWhatsAppSent] = useState({});
@@ -1086,7 +1086,7 @@ export default function Dashboard() {
   const [lastCallMade, setLastCallMade] = useState({});
   const [contactedChannels, setContactedChannels] = useState({});
   const [manualContactStatus, setManualContactStatus] = useState({});
-  
+
   // ============================================================================
   // QUOTA MANAGEMENT (Using custom hook)
   // ============================================================================
@@ -1097,13 +1097,13 @@ export default function Dashboard() {
     incrementQuota,
     setQuotas
   } = useDailyQuotas(user?.uid);
-  
+
   const [dailyEmailCount, setDailyEmailCount] = useState(0);
   const [dailyWhatsAppCount, setDailyWhatsAppCount] = useState(0);
   const [dailySMSCount, setDailySMSCount] = useState(0);
   const [dailyCallCount, setDailyCallCount] = useState(0);
   const [loadingDailyCount, setLoadingDailyCount] = useState(false);
-  
+
   // ============================================================================
   // LEAD SCORING (Using custom hook)
   // ============================================================================
@@ -1113,16 +1113,16 @@ export default function Dashboard() {
     updateScore,
     setScores: setLeadScores
   } = useLeadScoring();
-  
+
   // ============================================================================
   // ANALYTICS & METRICS STATES
   // ============================================================================
   const [clickStats, setClickStats] = useState({});
   const [dealStage, setDealStage] = useState({});
   const [pipelineValue, setPipelineValue] = useState(0);
-  const [abResults, setAbResults] = useState({ 
-    a: { opens: 0, clicks: 0, sent: 0, replied: 0 }, 
-    b: { opens: 0, clicks: 0, sent: 0, replied: 0 } 
+  const [abResults, setAbResults] = useState({
+    a: { opens: 0, clicks: 0, sent: 0, replied: 0 },
+    b: { opens: 0, clicks: 0, sent: 0, replied: 0 }
   });
   const [advancedMetrics, setAdvancedMetrics] = useState({
     avgDaysToFirstReply: 0,
@@ -1136,7 +1136,7 @@ export default function Dashboard() {
   });
   const [showAdvancedAnalytics, setShowAdvancedAnalytics] = useState(false);
   const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
-  
+
   // ============================================================================
   // SEND & STATUS STATES
   // ============================================================================
@@ -1144,7 +1144,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState('');
   const [statusType, setStatusType] = useState('info');
   const [sendProgress, setSendProgress] = useState({ current: 0, total: 0 });
-  
+
   // ============================================================================
   // FOLLOW-UP STATES
   // ============================================================================
@@ -1216,12 +1216,12 @@ export default function Dashboard() {
     next.setDate(next.getDate() + 2);
     return next;
   }, [safeParseDate]);
-  
+
   const [autoReplyProcessorEnabled, setAutoReplyProcessorEnabled] = useState(true);
   const [autoFollowupSchedulerEnabled, setAutoFollowupSchedulerEnabled] = useState(true);
   const [aiProcessorStatus, setAiProcessorStatus] = useState('Idle');
   const [followupSchedulerStatus, setFollowupSchedulerStatus] = useState('Idle');
-  
+
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
   // ============================================================================
@@ -1241,7 +1241,7 @@ export default function Dashboard() {
     bestTemplate: 'auto',
     bestTimeToSend: 'afternoon'
   });
-  
+
   // ============================================================================
   // COMPANY TRACKING STATES
   // ============================================================================
@@ -1255,7 +1255,7 @@ export default function Dashboard() {
     companiesReplied: 0,
     replyRate: 0
   });
-  
+
   // ============================================================================
   // CALL TRACKING STATES
   // ============================================================================
@@ -1263,23 +1263,23 @@ export default function Dashboard() {
   const [loadingCallHistory, setLoadingCallHistory] = useState(false);
   const [showCallHistoryModal, setShowCallHistoryModal] = useState(false);
   const [activeCallStatus, setActiveCallStatus] = useState(null);
-  
+
   // ============================================================================
   // BUSINESS INTELLIGENCE & ANALYTICS STATES
   // ============================================================================
   const [analyticsTab, setAnalyticsTab] = useState('overview');
   const [analyticsData, setAnalyticsData] = useState(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  
+
   const [pipelineData, setPipelineData] = useState(null);
   const [loadingPipeline, setLoadingPipeline] = useState(false);
-  
+
   const [assignmentData, setAssignmentData] = useState(null);
   const [loadingAssignment, setLoadingAssignment] = useState(false);
-  
+
   const [predictiveData, setPredictiveData] = useState(null);
   const [loadingPredictive, setLoadingPredictive] = useState(false);
-  
+
   // ============================================================================
   // MULTI-CHANNEL MODAL STATES
   // ============================================================================
@@ -1288,7 +1288,7 @@ export default function Dashboard() {
   const [multiChannelView, setMultiChannelView] = useState('grid');
   const [multiChannelPanel, setMultiChannelPanel] = useState('not-contacted');
   const [multiChannelFilter, setMultiChannelFilter] = useState('all');
-  
+
   // ============================================================================
   // SEARCH & FILTER STATES
   // ============================================================================
@@ -1308,13 +1308,13 @@ export default function Dashboard() {
   }, [searchQuery]);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [currentPage, setCurrentPage] = useState(1);
-  
+
   // ============================================================================
   // NOTIFICATION STATES
   // ============================================================================
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  
+
   // ============================================================================
   // SETTINGS & PREFERENCES STATES
   // ============================================================================
@@ -1327,20 +1327,20 @@ export default function Dashboard() {
     defaultChannel: 'email',
     timezone: 'Asia/Colombo'
   });
-  
+
   // ============================================================================
   // BACKUP & EXPORT STATES
   // ============================================================================
   const [lastBackup, setLastBackup] = useState(null);
   const [isBackingUp, setIsBackingUp] = useState(false);
-  
+
   // ============================================================================
   // REF FOR AUTO-SAVE
   // ============================================================================
   const autoSaveTimeoutRef = useRef(null);
   const enrichCsvInputRef = useRef(null);
   const enrichModeRef = useRef('download');
-  
+
   // ============================================================================
   // NOTIFICATION HELPER
   // ============================================================================
@@ -1353,28 +1353,28 @@ export default function Dashboard() {
       createdAt: new Date().toISOString(),
       read: false
     };
-    
+
     setNotifications(prev => [notification, ...prev].slice(0, CONFIG.MAX_NOTIFICATIONS));
-    
+
     if (duration > 0) {
       setTimeout(() => {
         setNotifications(prev => prev.filter(n => n.id !== id));
       }, duration);
     }
-    
+
     return id;
   }, []);
-  
+
   const markNotificationRead = useCallback((id) => {
-    setNotifications(prev => prev.map(n => 
+    setNotifications(prev => prev.map(n =>
       n.id === id ? { ...n, read: true } : n
     ));
   }, []);
-  
+
   const clearNotifications = useCallback(() => {
     setNotifications([]);
   }, []);
-  
+
   // ============================================================================
   // HELPER: Check if contact was reached on ANY channel
   // ============================================================================
@@ -1400,25 +1400,25 @@ export default function Dashboard() {
       (contactedChannels[key] && contactedChannels[key].length > 0)
     );
   }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels, manualContactStatus, getContactSummary]);
-  
+
   // ============================================================================
   // HELPER: Get all contact attempts for a contact
   // ============================================================================
   const getContactHistory = useCallback((contact) => {
-    if (!contact) return { 
-      email: null, 
-      whatsapp: null, 
-      sms: null, 
-      call: null, 
+    if (!contact) return {
+      email: null,
+      whatsapp: null,
+      sms: null,
+      call: null,
       channels: [],
       totalContacts: 0,
       lastContacted: null
     };
-    
+
     const key = normalizeContactKey(contact);
     const summary = getContactSummary(key);
     const manual = manualContactStatus[key];
-    
+
     return {
       email: lastSent[key] ? new Date(lastSent[key]) : null,
       whatsapp: lastWhatsAppSent[key] ? new Date(lastWhatsAppSent[key]) : null,
@@ -1430,24 +1430,24 @@ export default function Dashboard() {
       manuallyMarked: manual?.contacted || false
     };
   }, [lastSent, lastWhatsAppSent, lastSMSSent, lastCallMade, contactedChannels, getContactSummary, manualContactStatus]);
-  
+
   // ============================================================================
   // HELPER: Check if safe to contact on specific channel
   // ============================================================================
   const isSafeToContactOnChannel = useCallback((contact, channel, minDaysBetween = CONFIG.MIN_DAYS_BETWEEN_CONTACT) => {
     if (!contact) return { safe: true, reason: 'No contact' };
-    
+
     const key = contact.email || contact.phone;
     if (!key) return { safe: true, reason: 'No contact key' };
-    
+
     // Check manual override
     if (manualContactStatus[key]?.blocked) {
       return { safe: false, reason: 'Manually blocked' };
     }
-    
+
     // Use contact tracking hook
     const canContactResult = canContact(key, channel, minDaysBetween);
-    
+
     return {
       safe: canContactResult.canContact,
       reason: canContactResult.reason,
@@ -1455,7 +1455,7 @@ export default function Dashboard() {
       lastContact: canContactResult.lastContact
     };
   }, [canContact, manualContactStatus]);
-  
+
   // ============================================================================
   // HELPER: Check if phone is a 077 priority number (formatted as 9477...)
   // ============================================================================
@@ -1464,33 +1464,33 @@ export default function Dashboard() {
     const cleaned = phone.toString().replace(/\D/g, '');
     return cleaned.startsWith('9477') || cleaned.startsWith('9476') || cleaned.startsWith('9475');
   }, []);
-  
+
   // ============================================================================
   // HELPER: Get recommended channel based on engagement
   // ============================================================================
   const getRecommendedChannel = useCallback((contact) => {
     if (!contact) return 'email';
-    
+
     const history = getContactHistory(contact);
     const key = contact.email || contact.phone;
     const canContactEmail = isSafeToContactOnChannel(contact, 'email');
     const canContactWhatsApp = isSafeToContactOnChannel(contact, 'whatsapp');
     const canContactSMS = isSafeToContactOnChannel(contact, 'sms');
     const canContactCall = isSafeToContactOnChannel(contact, 'call');
-    
+
     const scores = {
       email: contact.email && canContactEmail.safe ? (leadScores[key] || 50) : 0,
       whatsapp: contact.phone && canContactWhatsApp.safe ? 60 : 0,
       sms: contact.phone && canContactSMS.safe ? 50 : 0,
       call: contact.phone && canContactCall.safe ? 70 : 0
     };
-    
+
     // Boost channels that haven't been used yet
     if (!history.email) scores.email += 20;
     if (!history.whatsapp) scores.whatsapp += 20;
     if (!history.sms) scores.sms += 20;
     if (!history.call) scores.call += 20;
-    
+
     // Reduce score for recently used channels
     Object.keys(scores).forEach(channel => {
       if (history[channel]) {
@@ -1498,14 +1498,14 @@ export default function Dashboard() {
         if (daysSince < 3) scores[channel] -= 30;
       }
     });
-    
+
     const bestChannel = Object.entries(scores)
       .filter(([channel]) => channel === 'email' ? contact.email : contact.phone)
       .sort((a, b) => b[1] - a[1])[0];
-    
+
     return bestChannel ? bestChannel[0] : 'email';
   }, [leadScores, getContactHistory, isSafeToContactOnChannel]);
-  
+
   // ============================================================================
   // HELPER: Mark contact as manually contacted/not contacted
   // ============================================================================
@@ -1514,7 +1514,7 @@ export default function Dashboard() {
       addNotification('❌ Invalid contact provided', 'error');
       return false;
     }
-    
+
     const key = normalizeContactKey(contact);
     if (!key) {
       addNotification('❌ Contact must have email or phone', 'error');
@@ -1532,7 +1532,7 @@ export default function Dashboard() {
       addNotification('❌ Database connection error. Please refresh and try again.', 'error');
       return false;
     }
-    
+
     try {
       const now = new Date().toISOString();
       const status = {
@@ -1542,12 +1542,12 @@ export default function Dashboard() {
         updatedAt: now,
         manual: true
       };
-      
+
       setManualContactStatus(prev => ({
         ...prev,
         [key]: status
       }));
-      
+
       // Save to Firebase
       try {
         const docRef = doc(db, 'manual_contact_status', `${user.uid}_${key}`);
@@ -1560,7 +1560,7 @@ export default function Dashboard() {
         console.error('Firebase setDoc error in markContactManually:', firebaseError);
         throw new Error(`Firebase save failed: ${firebaseError.message}`);
       }
-      
+
       // Also update contact history if marked as contacted
       if (contacted) {
         try {
@@ -1570,12 +1570,12 @@ export default function Dashboard() {
           // Don't fail completely if history update fails - status was already saved
         }
       }
-      
+
       addNotification(
         contacted ? `✅ Marked ${contact.business || key} as contacted` : `🔄 Marked ${contact.business || key} as not contacted`,
         'success'
       );
-      
+
       return true;
     } catch (error) {
       console.error('Mark contact manually error:', error);
@@ -1589,7 +1589,7 @@ export default function Dashboard() {
       return false;
     }
   }, [user?.uid, db, updateContact, addNotification]);
-  
+
   // ============================================================================
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
   // ============================================================================
@@ -1657,7 +1657,7 @@ export default function Dashboard() {
 
   // Memoize the result to prevent recalculation on every render
   const safeFollowUpCandidates = useMemo(() => getSafeFollowUpCandidates(), [getSafeFollowUpCandidates]);
-  
+
   // ============================================================================
   // ✅ HANDLE SEND BULK SMS (DEFINED BEFORE JSX - FIXES REFERENCE ERROR)
   // ============================================================================
@@ -1666,58 +1666,58 @@ export default function Dashboard() {
       addNotification('No contacts available', 'error');
       return;
     }
-    
+
     const quotaCheck = canUse('sms', whatsappLinks.length);
     if (!quotaCheck.available) {
       addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
       return;
     }
-    
+
     const confirmed = window.confirm(
       `Send SMS to ${whatsappLinks.length} contacts?\n\nThis will use ${whatsappLinks.length} of your daily SMS quota.`
     );
-    
+
     if (!confirmed) return;
-    
+
     let successCount = 0;
     let failCount = 0;
     let skipCount = 0;
-    
+
     setStatus('📤 Sending SMS batch...');
     setStatusType('info');
     setIsSending(true);
     setSendProgress({ current: 0, total: whatsappLinks.length });
-    
+
     for (let i = 0; i < whatsappLinks.length; i++) {
       const contact = whatsappLinks[i];
       const phone = formatForDialing(contact.phone);
-      
+
       if (!phone) {
         skipCount++;
         continue;
       }
-      
+
       const contactKey = contact.email || contact.phone;
-      
+
       // Check if already contacted recently
       const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
       if (!safetyCheck.safe) {
         skipCount++;
         continue;
       }
-      
+
       try {
         const message = renderPreviewText(
           smsTemplate,
-          { 
-            business_name: contact.business, 
-            address: contact.address || '', 
-            phone_raw: contact.phone 
+          {
+            business_name: contact.business,
+            address: contact.address || '',
+            phone_raw: contact.phone
           },
           fieldMappings,
           senderName
         );
-        
+
         const response = await fetch('/api/send-sms', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1728,49 +1728,49 @@ export default function Dashboard() {
             userId: user.uid
           })
         });
-        
+
         if (response.ok) {
           successCount++;
-          
+
           const now = new Date().toISOString();
           setLastSMSSent(prev => ({ ...prev, [contactKey]: now }));
           setContactedChannels(prev => ({
             ...prev,
             [contactKey]: [...(prev[contactKey] || []), 'sms']
           }));
-          
+
           await updateContact(contactKey, 'sms', {
             smsCount: increment(1),
             lastSMSSent: now
           });
-          
+
           if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
             updateDealStage(contactKey, 'contacted');
           }
         } else {
           failCount++;
         }
-        
+
         setSendProgress({ current: i + 1, total: whatsappLinks.length });
       } catch (error) {
         console.error(`SMS error for ${contact.business}:`, error);
         failCount++;
       }
-      
+
       // Add small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
     }
-    
+
     setIsSending(false);
     setStatus(`✅ SMS batch complete: ${successCount}/${whatsappLinks.length} sent.`);
     setStatusType('success');
-    
+
     addNotification(
       `SMS batch complete!\nSent: ${successCount}\nFailed: ${failCount}\nSkipped: ${skipCount}`,
       successCount > 0 ? 'success' : 'error'
     );
   }, [user?.uid, whatsappLinks, canUse, smsTemplate, fieldMappings, senderName, isSafeToContactOnChannel, updateContact, dealStage, addNotification]);
-  
+
   // ============================================================================
   // FILTERED AND SORTED CONTACTS - CONTACTED AT BOTTOM, 077 PRIORITY
   // ============================================================================
@@ -1786,7 +1786,7 @@ export default function Dashboard() {
         (c.phone && c.phone.includes(query.replace(/\D/g, '')))
       );
     }
-    
+
     // Apply status filter
     if (contactFilter === 'replied') {
       filtered = filtered.filter(c => repliedLeads[c.email]);
@@ -1806,27 +1806,27 @@ export default function Dashboard() {
         return score >= CONFIG.LEAD_SCORE_WARM && score < CONFIG.LEAD_SCORE_HOT;
       });
     }
-    
+
     // Apply sorting
     filtered.sort((a, b) => {
       const aKey = a.email || a.phone;
       const bKey = b.email || b.phone;
-      
+
       const aIsContacted = isContactedOnAnyChannel(a);
       const bIsContacted = isContactedOnAnyChannel(b);
       const aIsPriority = isPriorityPhone(a.phone);
       const bIsPriority = isPriorityPhone(b.phone);
       const aScore = leadScores[aKey] || 0;
       const bScore = leadScores[bKey] || 0;
-      
+
       // Priority 1: Non-contacted first, contacted last
       if (!aIsContacted && bIsContacted) return -1;
       if (aIsContacted && !bIsContacted) return 1;
-      
+
       // Priority 2: 077/076/075 numbers
       if (aIsPriority && !bIsPriority) return -1;
       if (!aIsPriority && bIsPriority) return 1;
-      
+
       // Priority 3: Selected sort
       if (sortBy === 'score') {
         return sortOrder === 'desc' ? bScore - aScore : aScore - bScore;
@@ -1837,16 +1837,16 @@ export default function Dashboard() {
       } else if (sortBy === 'name') {
         const aName = (a.business || '').toLowerCase();
         const bName = (b.business || '').toLowerCase();
-        return sortOrder === 'desc' 
-          ? bName.localeCompare(aName) 
+        return sortOrder === 'desc'
+          ? bName.localeCompare(aName)
           : aName.localeCompare(bName);
       } else if (sortBy === 'added') {
         return sortOrder === 'desc' ? b.id - a.id : a.id - b.id;
       }
-      
+
       return 0;
     });
-    
+
     return filtered;
   }, [
     whatsappLinks,
@@ -1861,7 +1861,7 @@ export default function Dashboard() {
     isContactedOnAnyChannel,
     isPriorityPhone
   ]);
-  
+
   // ============================================================================
   // PAGINATED CONTACTS
   // ============================================================================
@@ -1877,37 +1877,37 @@ export default function Dashboard() {
       itemsPerPage
     };
   }, [getFilteredAndSortedContacts, currentPage, itemsPerPage]);
-  
+
   // ============================================================================
   // PREPARE SORTED CONTACTS FOR MAIN OUTREACH LIST
   // ============================================================================
   const sortedWhatsappLinks = useMemo(() => {
     if (!whatsappLinks || whatsappLinks.length === 0) return [];
-    
+
     return [...whatsappLinks].sort((a, b) => {
       const aKey = a.email || a.phone;
       const bKey = b.email || b.phone;
-      
+
       const aIsContacted = isContactedOnAnyChannel(a);
       const bIsContacted = isContactedOnAnyChannel(b);
       const aIsPriority = isPriorityPhone(a.phone);
       const bIsPriority = isPriorityPhone(b.phone);
       const aScore = leadScores[aKey] || 0;
       const bScore = leadScores[bKey] || 0;
-      
+
       // 1. Non-contacted first, contacted last
       if (!aIsContacted && bIsContacted) return -1;
       if (aIsContacted && !bIsContacted) return 1;
-      
+
       // 2. Then 077/076/075 priority
       if (aIsPriority && !bIsPriority) return -1;
       if (!aIsPriority && bIsPriority) return 1;
-      
+
       // 3. Fallback to score ranking
       return bScore - aScore;
     });
   }, [whatsappLinks, leadScores, isContactedOnAnyChannel, isPriorityPhone]);
-  
+
   // ============================================================================
   // CALCULATE CONVERSION FUNNEL
   // ============================================================================
@@ -1915,7 +1915,7 @@ export default function Dashboard() {
     const total = whatsappLinks.length;
     const replied = Object.values(repliedLeads).filter(Boolean).length;
     const contacted = whatsappLinks.filter(c => isContactedOnAnyChannel(c)).length;
-    
+
     const stages = {
       total,
       contacted,
@@ -1923,7 +1923,7 @@ export default function Dashboard() {
       demo: Math.round(replied * 0.40),
       closed: Math.round(replied * 0.15)
     };
-    
+
     return {
       stages,
       conversionRate: {
@@ -1934,7 +1934,7 @@ export default function Dashboard() {
       }
     };
   }, [whatsappLinks, repliedLeads, isContactedOnAnyChannel]);
-  
+
   // ============================================================================
   // CALCULATE REVENUE FORECASTS
   // ============================================================================
@@ -1943,7 +1943,7 @@ export default function Dashboard() {
     const replies = Object.values(repliedLeads).filter(Boolean).length;
     const demoOpportunities = Math.ceil(replies * CONFIG.DEFAULT_DEMO_RATE);
     const expectedClosures = Math.ceil(demoOpportunities * CONFIG.DEFAULT_CLOSE_RATE);
-    
+
     return {
       currentPipeline: replies * avgDealValue,
       demoOpportunities: demoOpportunities * avgDealValue,
@@ -1957,7 +1957,7 @@ export default function Dashboard() {
       }
     };
   }, [repliedLeads]);
-  
+
   // ============================================================================
   // SEGMENT LEADS
   // ============================================================================
@@ -1969,15 +1969,15 @@ export default function Dashboard() {
       cold: [],
       inactive: []
     };
-    
+
     whatsappLinks.forEach(contact => {
       const key = contact.email || contact.phone;
       const score = leadScores[key] || 0;
       const replied = repliedLeads[contact.email];
       const contacted = isContactedOnAnyChannel(contact);
-      const daysSinceContact = contacted ? 
+      const daysSinceContact = contacted ?
         daysBetween(getContactHistory(contact).lastContacted, new Date()) : 999;
-      
+
       if (replied) {
         segments.veryHot.push(contact);
       } else if (score >= CONFIG.LEAD_SCORE_HOT) {
@@ -1990,10 +1990,10 @@ export default function Dashboard() {
         segments.inactive.push(contact);
       }
     });
-    
+
     return segments;
   }, [whatsappLinks, leadScores, repliedLeads, isContactedOnAnyChannel, getContactHistory]);
-  
+
   // ============================================================================
   // GET NEW LEADS (NOT YET EMAILED)
   // ============================================================================
@@ -2090,18 +2090,18 @@ export default function Dashboard() {
   const newLeadsDisabledReason = useMemo(() => getNewLeadsDisabledReason(), [getNewLeadsDisabledReason]);
   const sendEmailsDisabledReason = useMemo(() => getSendEmailsDisabledReason(), [getSendEmailsDisabledReason]);
   const safeFollowUpDisabledReason = useMemo(() => getSafeFollowUpDisabledReason(), [getSafeFollowUpDisabledReason]);
-  
+
   // ============================================================================
   // GOOGLE OAUTH SCRIPT LOADER
   // ============================================================================
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    
+
     if (window.google?.accounts?.oauth2?.initTokenClient) {
       setIsGoogleLoaded(true);
       return;
     }
-    
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
@@ -2111,14 +2111,14 @@ export default function Dashboard() {
       addNotification('Failed to load Google OAuth. Please refresh.', 'error');
     };
     document.head.appendChild(script);
-    
+
     return () => {
       if (document.head.contains(script)) {
         document.head.removeChild(script);
       }
     };
   }, [addNotification]);
-  
+
   // ============================================================================
   // AUTH STATE LISTENER
   // ============================================================================
@@ -2127,7 +2127,7 @@ export default function Dashboard() {
       setLoadingAuth(false);
       return;
     }
-    
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
@@ -2151,7 +2151,7 @@ export default function Dashboard() {
       }
       setLoadingAuth(false);
     });
-    
+
     return () => unsubscribe();
   }, [auth, addNotification]);
 
@@ -2160,14 +2160,14 @@ export default function Dashboard() {
   // ============================================================================
   const loadManualContactStatus = async (userId) => {
     if (!userId || !db) return;
-    
+
     try {
       const q = query(
         collection(db, 'manual_contact_status'),
         where('userId', '==', userId)
       );
       const snapshot = await getDocs(q);
-      
+
       const status = {};
       snapshot.forEach(doc => {
         const data = doc.data();
@@ -2176,19 +2176,19 @@ export default function Dashboard() {
           status[key] = data;
         }
       });
-      
+
       setManualContactStatus(status);
     } catch (error) {
       console.error('Load manual contact status error:', error);
     }
   };
-  
+
   // ============================================================================
   // AUTO-SAVE SETTINGS
   // ============================================================================
   const saveSettings = useCallback(async () => {
     if (!user?.uid || !db || !userPreferences.autoSaveEnabled) return;
-    
+
     try {
       const docRef = doc(db, 'users', user.uid, 'settings', 'templates');
       await setDoc(docRef, {
@@ -2208,76 +2208,76 @@ export default function Dashboard() {
         userPreferences,
         lastSaved: new Date().toISOString()
       }, { merge: true });
-      
+
       addNotification('Settings auto-saved', 'success', 2000);
     } catch (error) {
       console.warn('Failed to save settings:', error);
       addNotification('Failed to auto-save settings', 'warning');
     }
   }, [
-    user?.uid, 
-    senderName, 
+    user?.uid,
+    senderName,
     senderEmail,
-    templateA, 
-    templateB, 
-    whatsappTemplate, 
-    smsTemplate, 
-    instagramTemplate, 
+    templateA,
+    templateB,
+    whatsappTemplate,
+    smsTemplate,
+    instagramTemplate,
     twitterTemplate,
     linkedinTemplate,
-    followUpTemplates, 
-    fieldMappings, 
-    abTestMode, 
+    followUpTemplates,
+    fieldMappings,
+    abTestMode,
     smsConsent,
     userPreferences,
     addNotification
   ]);
-  
+
   // Debounced auto-save
   useEffect(() => {
     if (autoSaveTimeoutRef.current) {
       clearTimeout(autoSaveTimeoutRef.current);
     }
-    
+
     autoSaveTimeoutRef.current = setTimeout(() => {
       saveSettings();
     }, CONFIG.AUTO_SAVE_DELAY_MS);
-    
+
     return () => {
       if (autoSaveTimeoutRef.current) {
         clearTimeout(autoSaveTimeoutRef.current);
       }
     };
   }, [saveSettings]);
-  
+
   // Recalculate validEmails when leadQualityFilter changes
   useEffect(() => {
     if (!csvContent) return;
-    
+
     const lines = csvContent.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) return;
-    
+
     const headers = parseCsvRow(lines[0]).map(h => h.trim());
     let hotEmails = 0;
     let warmEmails = 0;
-    
+
     for (let i = 1; i < lines.length; i++) {
       const values = parseCsvRow(lines[i]);
-      
+
       if (values.length !== headers.length) continue;
-      
+
       const row = {};
       headers.forEach((header, idx) => {
         row[header] = values[idx]?.toString().trim() || '';
       });
-      
+
       const emailCol = fieldMappings.email || 'email';
       const email = row[emailCol] || '';
-      
+
       if (isValidEmail(email)) {
         const qualityCol = fieldMappings.lead_quality || 'lead_quality';
         const quality = (row[qualityCol] || '').trim().toUpperCase() || 'HOT';
-        
+
         if (quality === 'HOT') {
           hotEmails++;
         } else if (quality === 'WARM') {
@@ -2285,7 +2285,7 @@ export default function Dashboard() {
         }
       }
     }
-    
+
     if (leadQualityFilter === 'HOT') {
       setValidEmails(hotEmails);
     } else if (leadQualityFilter === 'WARM') {
@@ -2294,17 +2294,17 @@ export default function Dashboard() {
       setValidEmails(hotEmails + warmEmails);
     }
   }, [leadQualityFilter, csvContent, fieldMappings]);
-  
+
   // ============================================================================
   // LOAD SETTINGS FROM FIREBASE
   // ============================================================================
   const loadSettings = async (userId) => {
     if (!userId || !db) return;
-    
+
     try {
       const docRef = doc(db, 'users', userId, 'settings', 'templates');
       const snap = await getDoc(docRef);
-      
+
       if (snap.exists()) {
         const data = snap.data();
         setSenderName(data.senderName || '');
@@ -2321,7 +2321,7 @@ export default function Dashboard() {
         setAbTestMode(data.abTestMode || false);
         setSmsConsent(data.smsConsent !== undefined ? data.smsConsent : true);
         setUserPreferences(data.userPreferences || userPreferences);
-        
+
         addNotification('Settings loaded successfully', 'success', 2000);
       }
     } catch (error) {
@@ -2329,7 +2329,7 @@ export default function Dashboard() {
       addNotification('Using default settings', 'info', 2000);
     }
   };
-  
+
   // ============================================================================
   // LOAD CLICK STATS FROM FIREBASE
   // ============================================================================
@@ -2339,18 +2339,18 @@ export default function Dashboard() {
     try {
       const q = query(collection(db, 'clicks'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
-      
+
       const stats = {};
       snapshot.forEach(doc => {
         stats[doc.id] = doc.data();
       });
-      
+
       setClickStats(stats);
     } catch (e) {
       console.warn('Click stats load failed:', e);
     }
   }, [user?.uid]);
-  
+
   // ============================================================================
   // LOAD A/B TEST RESULTS FROM FIREBASE
   // ============================================================================
@@ -2360,7 +2360,7 @@ export default function Dashboard() {
     try {
       const q = query(collection(db, 'ab_results'), where('userId', '==', user.uid), limit(50));
       const snapshot = await getDocs(q);
-      
+
       if (!snapshot.empty) {
         setAbResults(snapshot.docs[0].data());
       }
@@ -2368,7 +2368,7 @@ export default function Dashboard() {
       console.warn('AB results load failed:', e);
     }
   }, [user?.uid]);
-  
+
   // ============================================================================
   // LOAD DEALS FROM FIREBASE
   // ============================================================================
@@ -2378,10 +2378,10 @@ export default function Dashboard() {
     try {
       const q = query(collection(db, 'deals'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
-      
+
       const stages = {};
       let totalValue = 0;
-      
+
       snapshot.forEach(doc => {
         const data = doc.data();
         stages[data.email] = data.stage || 'new';
@@ -2389,54 +2389,54 @@ export default function Dashboard() {
           totalValue += CONFIG.DEFAULT_AVG_DEAL_VALUE;
         }
       });
-      
+
       setDealStage(stages);
       setPipelineValue(totalValue);
     } catch (e) {
       console.warn('Deals load failed:', e);
     }
   }, [user?.uid]);
-  
+
   // ============================================================================
   // LOAD REPLIED LEADS AND FOLLOW-UP FROM FIREBASE
   // ============================================================================
   const loadRepliedAndFollowUp = useCallback(async () => {
     if (!user?.uid || !db) return;
-    
+
     try {
       const q = query(collection(db, 'sent_emails'), where('userId', '==', user.uid));
       const snapshot = await getDocs(q);
-      
+
       const repliedMap = {};
       const followUpMap = {};
       const history = {};
       const now = new Date();
-      
+
       const normalizedLeads = snapshot.docs
         .map(doc => normalizeSentLead(doc.data()))
         .filter(lead => lead.email);
-      
+
       normalizedLeads.forEach((data) => {
         if (data.replied) {
           repliedMap[data.email] = true;
         }
-        
+
         const followUpAt = getLeadNextFollowUpAt(data);
         if (followUpAt && followUpAt <= now) {
           followUpMap[data.email] = true;
         }
-        
+
         history[data.email] = {
           count: Number(data.followUpCount ?? 0),
           lastFollowUpAt: data.lastFollowUpAt ?? null,
           dates: data.followUpDates || []
         };
       });
-      
+
       setRepliedLeads(repliedMap);
       setFollowUpLeads(followUpMap);
       setFollowUpHistory(history);
-      
+
       // Calculate follow-up stats
       const replied = normalizedLeads.filter(l => l.replied).length;
       const followedUp = normalizedLeads.filter(l => Number(l.followUpCount) > 0).length;
@@ -2449,7 +2449,7 @@ export default function Dashboard() {
         return !l.replied && (!followUpAt || followUpAt > now);
       }).length;
       const interested = normalizedLeads.filter(l => l.seemsInterested && !l.replied).length;
-      
+
       setFollowUpStats({
         totalSent: normalizedLeads.length,
         totalReplied: replied,
@@ -2505,16 +2505,16 @@ export default function Dashboard() {
   // ============================================================================
   const loadDailyEmailCount = useCallback(async () => {
     if (!user?.uid) return;
-    
+
     setLoadingDailyCount(true);
-    
+
     try {
       const res = await fetch('/api/get-daily-count', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
-      
+
       // Handle 404 gracefully
       if (res.status === 404) {
         console.warn('Daily count API not found, using local state');
@@ -2525,9 +2525,9 @@ export default function Dashboard() {
         setLoadingDailyCount(false);
         return;
       }
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         setDailyEmailCount(data.count || 0);
         setDailyWhatsAppCount(data.whatsappCount || 0);
@@ -2545,22 +2545,22 @@ export default function Dashboard() {
       setLoadingDailyCount(false);
     }
   }, [user?.uid]);
-  
+
   // ============================================================================
   // LOAD SEND TIME OPTIMIZATION FROM API
   // ============================================================================
   const loadSendTimeOptimization = useCallback(async () => {
     if (!user?.uid) return;
-    
+
     try {
       const res = await fetch('/api/ai-send-time-optimizer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         setSendTimeOptimization(data);
       }
@@ -2568,22 +2568,22 @@ export default function Dashboard() {
       console.error('Send time optimization error:', err);
     }
   }, [user?.uid]);
-  
+
   // ============================================================================
   // LOAD SENT LEADS FROM API WITH ERROR HANDLING
   // ============================================================================
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
-    
+
     setLoadingSentLeads(true);
-    
+
     try {
       const res = await fetch('/api/list-sent-leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
-      
+
       // Handle 404 gracefully
       if (res.status === 404) {
         console.warn('Sent leads API not found, using empty state');
@@ -2599,45 +2599,45 @@ export default function Dashboard() {
         setLoadingSentLeads(false);
         return;
       }
-      
+
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         throw new Error('Response is not JSON');
       }
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
         setSentLeads(normalizedLeads);
-        
+
         const history = {};
         let replied = 0;
         let followedUp = 0;
         let readyForFU = 0;
         let awaiting = 0;
         const now = new Date();
-        
+
         normalizedLeads.forEach(lead => {
           if (lead.replied) {
             replied++;
           }
-          
+
           const followUpCount = Number(lead.followUpCount ?? 0);
           if (followUpCount > 0) {
             followedUp++;
           }
-          
+
           history[lead.email] = {
             count: followUpCount,
             lastFollowUpAt: lead.lastFollowUpAt ?? null,
             dates: lead.followUpDates || []
           };
-          
+
           const followUpAt = getLeadNextFollowUpAt(lead);
           if (lead.replied) {
             // Already replied, no follow-up needed
@@ -2647,11 +2647,11 @@ export default function Dashboard() {
             awaiting++;
           }
         });
-        
+
         const interested = normalizedLeads.filter(lead =>
           lead.seemsInterested && !lead.replied
         );
-        
+
         setInterestedLeadsList(interested);
         setFollowUpHistory(history);
         setFollowUpStats({
@@ -2673,18 +2673,18 @@ export default function Dashboard() {
       setLoadingSentLeads(false);
     }
   }, [user?.uid, addNotification, normalizeSentLead, getLeadNextFollowUpAt]);
-  
+
   // ============================================================================
   // LOAD CONTACTED COMPANIES FROM API
   // ============================================================================
   const loadContactedCompanies = async () => {
     if (!user?.uid) return;
-    
+
     setLoadingContactedCompanies(true);
-    
+
     try {
       const res = await fetch(`/api/track-company?userId=${user.uid}`);
-      
+
       if (res.status === 404) {
         console.warn('Company tracking API not found, using empty state');
         setContactedCompanies([]);
@@ -2698,12 +2698,12 @@ export default function Dashboard() {
         setLoadingContactedCompanies(false);
         return;
       }
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         setContactedCompanies(data.companies || []);
-        
+
         // Calculate stats
         const companies = data.companies || [];
         const totalCompanies = companies.length;
@@ -2711,7 +2711,7 @@ export default function Dashboard() {
         const avgContactsPerCompany = totalCompanies > 0 ? (totalContacts / totalCompanies).toFixed(1) : 0;
         const companiesReplied = companies.filter(company => company.hasReplied).length;
         const replyRate = totalCompanies > 0 ? ((companiesReplied / totalCompanies) * 100).toFixed(1) : 0;
-        
+
         setCompanyStats({
           totalCompanies,
           totalContacts,
@@ -2730,7 +2730,7 @@ export default function Dashboard() {
       setLoadingContactedCompanies(false);
     }
   };
-  
+
   // ============================================================================
   // REQUEST GMAIL OAUTH TOKEN
   // ============================================================================
@@ -2740,19 +2740,19 @@ export default function Dashboard() {
         reject('Browser only');
         return;
       }
-      
+
       const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-      
+
       if (!clientId) {
         reject('Google Client ID missing');
         return;
       }
-      
+
       if (!window.google?.accounts?.oauth2) {
         reject('Google OAuth not loaded');
         return;
       }
-      
+
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly',
@@ -2769,574 +2769,574 @@ export default function Dashboard() {
         ...(senderEmail ? { login_hint: senderEmail, prompt: 'consent' } : {}),
         prompt: 'consent' // Force consent screen to ensure proper permissions
       });
-      
+
       client.requestAccessToken();
     });
   };
 
-// ============================================================================
-// DEBUG EMAIL SYSTEM
-// ============================================================================
-const handleDebugSystem = async () => {
-  try {
-    addNotification('🔍 Running system diagnostics...', 'info');
-    
-    const response = await fetch('/api/email-debug', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    
-    const data = await response.json();
-    
-    if (data.success) {
-      const { debugInfo } = data;
-      
-      let message = '🔍 System Debug Results:\n\n';
-      
-      // Environment status
-      message += `Environment Variables:\n`;
-      Object.entries(debugInfo.environment.requiredVars).forEach(([key, status]) => {
-        message += `  ${key}: ${status}\n`;
+  // ============================================================================
+  // DEBUG EMAIL SYSTEM
+  // ============================================================================
+  const handleDebugSystem = async () => {
+    try {
+      addNotification('🔍 Running system diagnostics...', 'info');
+
+      const response = await fetch('/api/email-debug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
       });
-      
-      // Dependencies
-      message += `\nDependencies:\n`;
-      Object.entries(debugInfo.dependencies).forEach(([key, status]) => {
-        message += `  ${key}: ${status}\n`;
-      });
-      
-      // Issues and fixes
-      if (debugInfo.issues.length > 0) {
-        message += `\n❌ Issues Found:\n`;
-        debugInfo.issues.forEach(issue => {
-          message += `  • ${issue}\n`;
+
+      const data = await response.json();
+
+      if (data.success) {
+        const { debugInfo } = data;
+
+        let message = '🔍 System Debug Results:\n\n';
+
+        // Environment status
+        message += `Environment Variables:\n`;
+        Object.entries(debugInfo.environment.requiredVars).forEach(([key, status]) => {
+          message += `  ${key}: ${status}\n`;
         });
-        
-        message += `\n💡 Recommended Fixes:\n`;
-        debugInfo.fixes.forEach(fix => {
-          message += `  • ${fix}\n`;
+
+        // Dependencies
+        message += `\nDependencies:\n`;
+        Object.entries(debugInfo.dependencies).forEach(([key, status]) => {
+          message += `  ${key}: ${status}\n`;
         });
-      } else {
-        message += '\n✅ No issues found!';
-      }
-      
-      addNotification(message, debugInfo.issues.length > 0 ? 'warning' : 'success', 10000);
-    } else {
-      addNotification(`❌ Debug failed: ${data.error}`, 'error');
-    }
-  } catch (error) {
-    console.error('Debug error:', error);
-    addNotification(`❌ Debug error: ${error.message}`, 'error');
-  }
-};
 
-// ============================================================================
-// UPDATE DEAL STAGE IN FIREBASE
-// ============================================================================
-const updateDealStage = async (email, stage) => {
-  if (!user?.uid || !email || !db) return;
-  
-  try {
-    const dealRef = doc(db, 'deals', email);
-    await setDoc(dealRef, {
-      userId: user.uid,
-      email,
-      stage,
-      lastUpdate: new Date().toISOString(),
-      value: CONFIG.DEFAULT_AVG_DEAL_VALUE
-    }, { merge: true });
-    
-    setDealStage(prev => ({ ...prev, [email]: stage }));
-    
-    if (stage === 'won') {
-      setPipelineValue(prev => prev - CONFIG.DEFAULT_AVG_DEAL_VALUE);
-      addNotification(`🎉 Deal won: ${email}`, 'success');
-    } else if (dealStage[email] === 'won') {
-      setPipelineValue(prev => prev + CONFIG.DEFAULT_AVG_DEAL_VALUE);
-    }
-  } catch (e) {
-    console.error('Update deal error:', e);
-    addNotification('Failed to update deal stage', 'error');
-  }
-};
-
-// ============================================================================
-// DEBUG FOLLOW-UP FUNCTION
-// ============================================================================
-const testFollowUpSend = useCallback(async () => {
-  console.log('🧪 Starting follow-up test...');
-  
-  // Test 1: Check basic setup
-  console.log('👤 User:', user);
-  console.log('📧 Sender Name:', senderName);
-  console.log('🔑 Google Client ID:', process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? '✅' : '❌ Missing');
-  
-  // Test 2: Check quotas
-  console.log('💳 Current quotas:', quotas);
-  console.log('📧 Email quota:', quotas.emails);
-  
-  // Test 3: Check safe candidates
-  console.log('📊 Safe candidates:', safeFollowUpCandidates.length);
-
-  if (safeFollowUpCandidates.length === 0) {
-    console.log('❌ No safe candidates found');
-    addNotification('No safe candidates available for testing', 'warning');
-    return;
-  }
-
-  const testCandidate = safeFollowUpCandidates[0];
-  console.log('🎯 Test candidate:', testCandidate.email);
-  
-  try {
-    // Test 4: Request Gmail token
-    console.log('🔐 Testing Gmail token request...');
-    const accessToken = await requestGmailToken();
-    console.log('✅ Gmail token obtained:', accessToken ? 'Success' : 'Failed');
-    
-    if (!accessToken) {
-      addNotification('❌ Failed to get Gmail token', 'error');
-      return;
-    }
-    
-    // Test 5: Test API call
-    console.log('📡 Testing API call to /api/send-followup...');
-    const res = await fetch('/api/send-followup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: testCandidate.email,
-        accessToken,
-        userId: user.uid,
-        senderName
-      })
-    });
-    
-    console.log('📬 API Response status:', res.status);
-    const data = await res.json();
-    console.log('📬 API Response data:', data);
-    
-    if (res.ok) {
-      addNotification(`✅ Test follow-up sent to ${testCandidate.email}`, 'success');
-      // Refresh data after successful test
-      await loadSentLeads();
-      await loadContactedCompanies();
-      await loadRepliedAndFollowUp();
-    } else {
-      addNotification(`❌ Test failed: ${data.error || 'Unknown error'}`, 'error');
-    }
-    
-  } catch (error) {
-    console.error('💥 Test failed:', error);
-    addNotification(`❌ Test error: ${error.message}`, 'error');
-  }
-}, [user, senderName, quotas, safeFollowUpCandidates, requestGmailToken, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
-
-// ============================================================================
-// BYPASS QUOTA TEST (For debugging only)
-// ============================================================================
-const testFollowUpBypassQuota = useCallback(async () => {
-  console.log('🚀 Starting bypass quota test...');
-
-  if (safeFollowUpCandidates.length === 0) {
-    addNotification('No safe candidates available', 'warning');
-    return;
-  }
-
-  const testCandidate = safeFollowUpCandidates[0];
-  
-  try {
-    // Skip quota check
-    console.log('⚡ Bypassing quota check...');
-    const accessToken = await requestGmailToken();
-    
-    const res = await fetch('/api/send-followup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: testCandidate.email,
-        accessToken,
-        userId: user.uid,
-        senderName
-      })
-    });
-    
-    const data = await res.json();
-    
-    if (res.ok) {
-      addNotification(`✅ Bypass test successful: ${testCandidate.email}`, 'success');
-    } else {
-      addNotification(`❌ Bypass test failed: ${data.error}`, 'error');
-    }
-    
-  } catch (error) {
-    addNotification(`❌ Bypass test error: ${error.message}`, 'error');
-  }
-}, [getSafeFollowUpCandidates, requestGmailToken, user, senderName, addNotification]);
-
-// ============================================================================
-// SEND FOLLOW-UP WITH GMAIL TOKEN
-// ============================================================================
-const sendFollowUpWithToken = useCallback(async (email, accessToken) => {
-  if (!user?.uid || !email || !accessToken) {
-    addNotification('Missing required data to send follow-up.', 'error');
-    return;
-  }
-  
-  if (repliedLeads[email]) {
-    addNotification(`❌ Cannot send follow-up: ${email} has already replied.`, 'error');
-    return;
-  }
-  
-  const history = followUpHistory[email];
-  const followUpCount = history?.count || 0;
-  
-  if (followUpCount >= 3) {
-    addNotification(`❌ Max follow-ups reached for ${email}`, 'error');
-    return;
-  }
-  
-  try {
-    const res = await fetch('/api/send-followup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        accessToken,
-        userId: user.uid,
-        senderName
-      })
-    });
-    
-    const data = await res.json();
-    
-    if (res.ok) {
-      const isFinalFollowUp = data.followUpCount >= 3;
-      addNotification(
-        `✅ Follow-up #${data.followUpCount} sent to ${email}` +
-        (isFinalFollowUp ? '\n⚠️ Loop closed' : ''),
-        'success'
-      );
-      
-      setFollowUpHistory(prev => ({
-        ...prev,
-        [email]: {
-          count: data.followUpCount || (prev[email]?.count || 0) + 1,
-          lastFollowUpAt: new Date().toISOString(),
-          dates: [...(prev[email]?.dates || []), new Date().toISOString()],
-          loopClosed: isFinalFollowUp
-        }
-      }));
-      
-      await loadSentLeads();
-      await loadRepliedAndFollowUp();
-      await loadDeals();
-    } else {
-      addNotification(`❌ Follow-up failed: ${data.error}`, 'error');
-    }
-  } catch (err) {
-    console.error('Follow-up send error:', err);
-    addNotification(`❌ Error: ${err.message}`, 'error');
-  }
-}, [user, repliedLeads, followUpHistory, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
-
-// ============================================================================
-// AI AUTO-REPLY PROCESSOR
-// ============================================================================
-const runAutoReplyProcessor = useCallback(async () => {
-  if (!autoReplyProcessorEnabled) {
-    setAiProcessorStatus('Disabled');
-    addNotification('AI auto-reply processor is disabled', 'warning');
-    return;
-  }
-
-  if (!user?.uid) {
-    addNotification('User not authenticated', 'error');
-    return;
-  }
-
-  setAiProcessorStatus('Running...');
-
-  try {
-    const res = await fetch('/api/auto-reply-processor', { method: 'POST' });
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data?.error || 'Auto-reply processor failed');
-    }
-
-    setAiProcessorStatus(`Done · processed ${data.processed || 0} replies`);
-    addNotification('✅ AI auto-reply processor completed', 'success', 4000);
-
-    await loadSentLeads();
-    await loadRepliedAndFollowUp();
-  } catch (error) {
-    setAiProcessorStatus(`Error · ${error.message}`);
-    addNotification(`❌ Auto-reply processor error: ${error.message}`, 'error', 6000);
-  }
-}, [user, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
-
-// ============================================================================
-// AI FOLLOWUP SCHEDULER
-// ============================================================================
-const runFollowupScheduler = useCallback(async () => {
-  if (!autoFollowupSchedulerEnabled) {
-    setFollowupSchedulerStatus('Disabled');
-    addNotification('Smart follow-up scheduler is disabled', 'warning');
-    return;
-  }
-
-  if (!user?.uid) {
-    addNotification('User not authenticated', 'error');
-    return;
-  }
-
-  setFollowupSchedulerStatus('Running...');
-
-  try {
-    const res = await fetch('/api/followup-scheduler', { method: 'POST' });
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data?.error || 'Follow-up scheduler failed');
-    }
-
-    setFollowupSchedulerStatus(`Done · processed ${data.processed || 0} followups`);
-    addNotification('✅ Smart follow-up scheduler completed', 'success', 4000);
-
-    await loadSentLeads();
-    await loadRepliedAndFollowUp();
-  } catch (error) {
-    setFollowupSchedulerStatus(`Error · ${error.message}`);
-    addNotification(`❌ Follow-up scheduler error: ${error.message}`, 'error', 6000);
-  }
-}, [user, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
-
-// ============================================================================
-// MASS EMAIL FOLLOW-UP TO ALL SAFE LEADS
-// ============================================================================
-const handleMassEmailFollowUps = useCallback(async () => {
-  console.log('🚀 Mass email follow-up initiated');
-  
-  if (!user?.uid) {
-    console.error('❌ No user UID found');
-    addNotification('Please sign in first', 'error');
-    return;
-  }
-
-  console.log('📊 Getting safe candidates...');
-  console.log(`📋 Found ${safeFollowUpCandidates.length} safe candidates:`, safeFollowUpCandidates);
-
-  if (safeFollowUpCandidates.length === 0) {
-    console.warn('⚠️ No safe leads available');
-    addNotification('No safe leads available for follow-up', 'warning');
-    return;
-  }
-
-  console.log('📧 Checking email quota...');
-  // Check email quota
-  const quotaCheck = canUse('email', safeFollowUpCandidates.length);
-  console.log('💳 Quota check result:', quotaCheck);
-
-  if (!quotaCheck.available) {
-    console.error('❌ Insufficient quota:', quotaCheck.reason);
-    addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
-    return;
-  }
-
-  const confirmed = window.confirm(
-    `📧 Send follow-up emails to ${safeFollowUpCandidates.length} safe leads?\n\n` +
-    `This will use ${safeFollowUpCandidates.length} of your daily email quota.\n\n` +
-    `Each lead will receive their next scheduled follow-up.\n\n` +
-    `Continue with mass send?`
-  );
-
-  if (!confirmed) {
-    console.log('👤 User cancelled mass email');
-    return;
-  }
-
-  console.log('✅ User confirmed, starting mass send...');
-  setIsSending(true);
-  setStatus('📧 Initiating mass follow-up send...');
-  setSendProgress({ current: 0, total: safeFollowUpCandidates.length });
-
-  let successCount = 0;
-  let failCount = 0;
-  let skipCount = 0;
-  const results = [];
-
-  try {
-    console.log('🔐 Requesting Gmail token...');
-    // Get Gmail token once for all sends
-    const accessToken = await requestGmailToken();
-    console.log('✅ Gmail token obtained');
-
-    setStatus(`📧 Sending follow-ups to ${safeFollowUpCandidates.length} leads...`);
-
-    // Process leads in batches to avoid overwhelming the API
-    const batchSize = Math.min(10, safeFollowUpCandidates.length);
-    console.log(`📦 Processing in batches of ${batchSize}`);
-
-    for (let i = 0; i < safeFollowUpCandidates.length; i += batchSize) {
-      const batch = safeFollowUpCandidates.slice(i, i + batchSize);
-      console.log(`🔄 Processing batch ${Math.floor(i/batchSize) + 1} with ${batch.length} leads`);
-      
-      for (const contact of batch) {
-        try {
-          console.log(`📤 Processing lead: ${contact.email}`);
-          
-          // Double-check safety before sending
-          if (repliedLeads[contact.email]) {
-            console.log(`⏭️ Skipping ${contact.email} - already replied`);
-            skipCount++;
-            results.push({ email: contact.email, status: 'skipped', reason: 'Already replied' });
-            continue;
-          }
-
-          const followUpCount = followUpHistory[contact.email]?.count || contact.followUpCount || 0;
-          if (followUpCount >= 3) {
-            console.log(`⏭️ Skipping ${contact.email} - max follow-ups reached`);
-            skipCount++;
-            results.push({ email: contact.email, status: 'skipped', reason: 'Max follow-ups reached' });
-            continue;
-          }
-
-          // Send email
-          const res = await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contact, followUpCount: followUpCount + 1 })
+        // Issues and fixes
+        if (debugInfo.issues.length > 0) {
+          message += `\n❌ Issues Found:\n`;
+          debugInfo.issues.forEach(issue => {
+            message += `  • ${issue}\n`;
           });
 
-          const data = await res.json();
-          console.log(`📬 Response for ${contact.email}:`, data);
-            
-          if (res.ok) {
-            // Check if email was skipped due to duplicate
-            if (data.skipped && data.skipped > 0) {
-              console.log(`⏭️ Duplicate detected and skipped for ${contact.email}`);
+          message += `\n💡 Recommended Fixes:\n`;
+          debugInfo.fixes.forEach(fix => {
+            message += `  • ${fix}\n`;
+          });
+        } else {
+          message += '\n✅ No issues found!';
+        }
+
+        addNotification(message, debugInfo.issues.length > 0 ? 'warning' : 'success', 10000);
+      } else {
+        addNotification(`❌ Debug failed: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Debug error:', error);
+      addNotification(`❌ Debug error: ${error.message}`, 'error');
+    }
+  };
+
+  // ============================================================================
+  // UPDATE DEAL STAGE IN FIREBASE
+  // ============================================================================
+  const updateDealStage = async (email, stage) => {
+    if (!user?.uid || !email || !db) return;
+
+    try {
+      const dealRef = doc(db, 'deals', email);
+      await setDoc(dealRef, {
+        userId: user.uid,
+        email,
+        stage,
+        lastUpdate: new Date().toISOString(),
+        value: CONFIG.DEFAULT_AVG_DEAL_VALUE
+      }, { merge: true });
+
+      setDealStage(prev => ({ ...prev, [email]: stage }));
+
+      if (stage === 'won') {
+        setPipelineValue(prev => prev - CONFIG.DEFAULT_AVG_DEAL_VALUE);
+        addNotification(`🎉 Deal won: ${email}`, 'success');
+      } else if (dealStage[email] === 'won') {
+        setPipelineValue(prev => prev + CONFIG.DEFAULT_AVG_DEAL_VALUE);
+      }
+    } catch (e) {
+      console.error('Update deal error:', e);
+      addNotification('Failed to update deal stage', 'error');
+    }
+  };
+
+  // ============================================================================
+  // DEBUG FOLLOW-UP FUNCTION
+  // ============================================================================
+  const testFollowUpSend = useCallback(async () => {
+    console.log('🧪 Starting follow-up test...');
+
+    // Test 1: Check basic setup
+    console.log('👤 User:', user);
+    console.log('📧 Sender Name:', senderName);
+    console.log('🔑 Google Client ID:', process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? '✅' : '❌ Missing');
+
+    // Test 2: Check quotas
+    console.log('💳 Current quotas:', quotas);
+    console.log('📧 Email quota:', quotas.emails);
+
+    // Test 3: Check safe candidates
+    console.log('📊 Safe candidates:', safeFollowUpCandidates.length);
+
+    if (safeFollowUpCandidates.length === 0) {
+      console.log('❌ No safe candidates found');
+      addNotification('No safe candidates available for testing', 'warning');
+      return;
+    }
+
+    const testCandidate = safeFollowUpCandidates[0];
+    console.log('🎯 Test candidate:', testCandidate.email);
+
+    try {
+      // Test 4: Request Gmail token
+      console.log('🔐 Testing Gmail token request...');
+      const accessToken = await requestGmailToken();
+      console.log('✅ Gmail token obtained:', accessToken ? 'Success' : 'Failed');
+
+      if (!accessToken) {
+        addNotification('❌ Failed to get Gmail token', 'error');
+        return;
+      }
+
+      // Test 5: Test API call
+      console.log('📡 Testing API call to /api/send-followup...');
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: testCandidate.email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+
+      console.log('📬 API Response status:', res.status);
+      const data = await res.json();
+      console.log('📬 API Response data:', data);
+
+      if (res.ok) {
+        addNotification(`✅ Test follow-up sent to ${testCandidate.email}`, 'success');
+        // Refresh data after successful test
+        await loadSentLeads();
+        await loadContactedCompanies();
+        await loadRepliedAndFollowUp();
+      } else {
+        addNotification(`❌ Test failed: ${data.error || 'Unknown error'}`, 'error');
+      }
+
+    } catch (error) {
+      console.error('💥 Test failed:', error);
+      addNotification(`❌ Test error: ${error.message}`, 'error');
+    }
+  }, [user, senderName, quotas, safeFollowUpCandidates, requestGmailToken, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
+
+  // ============================================================================
+  // BYPASS QUOTA TEST (For debugging only)
+  // ============================================================================
+  const testFollowUpBypassQuota = useCallback(async () => {
+    console.log('🚀 Starting bypass quota test...');
+
+    if (safeFollowUpCandidates.length === 0) {
+      addNotification('No safe candidates available', 'warning');
+      return;
+    }
+
+    const testCandidate = safeFollowUpCandidates[0];
+
+    try {
+      // Skip quota check
+      console.log('⚡ Bypassing quota check...');
+      const accessToken = await requestGmailToken();
+
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: testCandidate.email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        addNotification(`✅ Bypass test successful: ${testCandidate.email}`, 'success');
+      } else {
+        addNotification(`❌ Bypass test failed: ${data.error}`, 'error');
+      }
+
+    } catch (error) {
+      addNotification(`❌ Bypass test error: ${error.message}`, 'error');
+    }
+  }, [getSafeFollowUpCandidates, requestGmailToken, user, senderName, addNotification]);
+
+  // ============================================================================
+  // SEND FOLLOW-UP WITH GMAIL TOKEN
+  // ============================================================================
+  const sendFollowUpWithToken = useCallback(async (email, accessToken) => {
+    if (!user?.uid || !email || !accessToken) {
+      addNotification('Missing required data to send follow-up.', 'error');
+      return;
+    }
+
+    if (repliedLeads[email]) {
+      addNotification(`❌ Cannot send follow-up: ${email} has already replied.`, 'error');
+      return;
+    }
+
+    const history = followUpHistory[email];
+    const followUpCount = history?.count || 0;
+
+    if (followUpCount >= 3) {
+      addNotification(`❌ Max follow-ups reached for ${email}`, 'error');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/send-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          accessToken,
+          userId: user.uid,
+          senderName
+        })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        const isFinalFollowUp = data.followUpCount >= 3;
+        addNotification(
+          `✅ Follow-up #${data.followUpCount} sent to ${email}` +
+          (isFinalFollowUp ? '\n⚠️ Loop closed' : ''),
+          'success'
+        );
+
+        setFollowUpHistory(prev => ({
+          ...prev,
+          [email]: {
+            count: data.followUpCount || (prev[email]?.count || 0) + 1,
+            lastFollowUpAt: new Date().toISOString(),
+            dates: [...(prev[email]?.dates || []), new Date().toISOString()],
+            loopClosed: isFinalFollowUp
+          }
+        }));
+
+        await loadSentLeads();
+        await loadRepliedAndFollowUp();
+        await loadDeals();
+      } else {
+        addNotification(`❌ Follow-up failed: ${data.error}`, 'error');
+      }
+    } catch (err) {
+      console.error('Follow-up send error:', err);
+      addNotification(`❌ Error: ${err.message}`, 'error');
+    }
+  }, [user, repliedLeads, followUpHistory, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
+
+  // ============================================================================
+  // AI AUTO-REPLY PROCESSOR
+  // ============================================================================
+  const runAutoReplyProcessor = useCallback(async () => {
+    if (!autoReplyProcessorEnabled) {
+      setAiProcessorStatus('Disabled');
+      addNotification('AI auto-reply processor is disabled', 'warning');
+      return;
+    }
+
+    if (!user?.uid) {
+      addNotification('User not authenticated', 'error');
+      return;
+    }
+
+    setAiProcessorStatus('Running...');
+
+    try {
+      const res = await fetch('/api/auto-reply-processor', { method: 'POST' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Auto-reply processor failed');
+      }
+
+      setAiProcessorStatus(`Done · processed ${data.processed || 0} replies`);
+      addNotification('✅ AI auto-reply processor completed', 'success', 4000);
+
+      await loadSentLeads();
+      await loadRepliedAndFollowUp();
+    } catch (error) {
+      setAiProcessorStatus(`Error · ${error.message}`);
+      addNotification(`❌ Auto-reply processor error: ${error.message}`, 'error', 6000);
+    }
+  }, [user, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
+
+  // ============================================================================
+  // AI FOLLOWUP SCHEDULER
+  // ============================================================================
+  const runFollowupScheduler = useCallback(async () => {
+    if (!autoFollowupSchedulerEnabled) {
+      setFollowupSchedulerStatus('Disabled');
+      addNotification('Smart follow-up scheduler is disabled', 'warning');
+      return;
+    }
+
+    if (!user?.uid) {
+      addNotification('User not authenticated', 'error');
+      return;
+    }
+
+    setFollowupSchedulerStatus('Running...');
+
+    try {
+      const res = await fetch('/api/followup-scheduler', { method: 'POST' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Follow-up scheduler failed');
+      }
+
+      setFollowupSchedulerStatus(`Done · processed ${data.processed || 0} followups`);
+      addNotification('✅ Smart follow-up scheduler completed', 'success', 4000);
+
+      await loadSentLeads();
+      await loadRepliedAndFollowUp();
+    } catch (error) {
+      setFollowupSchedulerStatus(`Error · ${error.message}`);
+      addNotification(`❌ Follow-up scheduler error: ${error.message}`, 'error', 6000);
+    }
+  }, [user, addNotification, loadSentLeads, loadRepliedAndFollowUp]);
+
+  // ============================================================================
+  // MASS EMAIL FOLLOW-UP TO ALL SAFE LEADS
+  // ============================================================================
+  const handleMassEmailFollowUps = useCallback(async () => {
+    console.log('🚀 Mass email follow-up initiated');
+
+    if (!user?.uid) {
+      console.error('❌ No user UID found');
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+
+    console.log('📊 Getting safe candidates...');
+    console.log(`📋 Found ${safeFollowUpCandidates.length} safe candidates:`, safeFollowUpCandidates);
+
+    if (safeFollowUpCandidates.length === 0) {
+      console.warn('⚠️ No safe leads available');
+      addNotification('No safe leads available for follow-up', 'warning');
+      return;
+    }
+
+    console.log('📧 Checking email quota...');
+    // Check email quota
+    const quotaCheck = canUse('email', safeFollowUpCandidates.length);
+    console.log('💳 Quota check result:', quotaCheck);
+
+    if (!quotaCheck.available) {
+      console.error('❌ Insufficient quota:', quotaCheck.reason);
+      addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `📧 Send follow-up emails to ${safeFollowUpCandidates.length} safe leads?\n\n` +
+      `This will use ${safeFollowUpCandidates.length} of your daily email quota.\n\n` +
+      `Each lead will receive their next scheduled follow-up.\n\n` +
+      `Continue with mass send?`
+    );
+
+    if (!confirmed) {
+      console.log('👤 User cancelled mass email');
+      return;
+    }
+
+    console.log('✅ User confirmed, starting mass send...');
+    setIsSending(true);
+    setStatus('📧 Initiating mass follow-up send...');
+    setSendProgress({ current: 0, total: safeFollowUpCandidates.length });
+
+    let successCount = 0;
+    let failCount = 0;
+    let skipCount = 0;
+    const results = [];
+
+    try {
+      console.log('🔐 Requesting Gmail token...');
+      // Get Gmail token once for all sends
+      const accessToken = await requestGmailToken();
+      console.log('✅ Gmail token obtained');
+
+      setStatus(`📧 Sending follow-ups to ${safeFollowUpCandidates.length} leads...`);
+
+      // Process leads in batches to avoid overwhelming the API
+      const batchSize = Math.min(10, safeFollowUpCandidates.length);
+      console.log(`📦 Processing in batches of ${batchSize}`);
+
+      for (let i = 0; i < safeFollowUpCandidates.length; i += batchSize) {
+        const batch = safeFollowUpCandidates.slice(i, i + batchSize);
+        console.log(`🔄 Processing batch ${Math.floor(i / batchSize) + 1} with ${batch.length} leads`);
+
+        for (const contact of batch) {
+          try {
+            console.log(`📤 Processing lead: ${contact.email}`);
+
+            // Double-check safety before sending
+            if (repliedLeads[contact.email]) {
+              console.log(`⏭️ Skipping ${contact.email} - already replied`);
               skipCount++;
-              results.push({ email: contact.email, status: 'skipped', reason: 'Already sent' });
+              results.push({ email: contact.email, status: 'skipped', reason: 'Already replied' });
               continue;
             }
 
-            successCount++;
-            results.push({ 
-              email: contact.email, 
-              status: 'success', 
-              followUpCount: data.followUpCount,
-              loopClosed: data.followUpCount >= 3
+            const followUpCount = followUpHistory[contact.email]?.count || contact.followUpCount || 0;
+            if (followUpCount >= 3) {
+              console.log(`⏭️ Skipping ${contact.email} - max follow-ups reached`);
+              skipCount++;
+              results.push({ email: contact.email, status: 'skipped', reason: 'Max follow-ups reached' });
+              continue;
+            }
+
+            // Send email
+            const res = await fetch('/api/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contact, followUpCount: followUpCount + 1 })
             });
 
-            // Update local state immediately
-            setFollowUpHistory(prev => ({
-              ...prev,
-              [contact.email]: {
-                count: data.followUpCount || (prev[contact.email]?.count || 0) + 1,
-                lastFollowUpAt: new Date().toISOString(),
-                dates: [...(prev[contact.email]?.dates || []), new Date().toISOString()],
-                loopClosed: data.followUpCount >= 3
-              }
-            }));
+            const data = await res.json();
+            console.log(`📬 Response for ${contact.email}:`, data);
 
-            // Update quota
-            incrementQuota('email', 1);
-            
-          } else {
-            console.error(`❌ Failed to send to ${contact.email}:`, data.error);
+            if (res.ok) {
+              // Check if email was skipped due to duplicate
+              if (data.skipped && data.skipped > 0) {
+                console.log(`⏭️ Duplicate detected and skipped for ${contact.email}`);
+                skipCount++;
+                results.push({ email: contact.email, status: 'skipped', reason: 'Already sent' });
+                continue;
+              }
+
+              successCount++;
+              results.push({
+                email: contact.email,
+                status: 'success',
+                followUpCount: data.followUpCount,
+                loopClosed: data.followUpCount >= 3
+              });
+
+              // Update local state immediately
+              setFollowUpHistory(prev => ({
+                ...prev,
+                [contact.email]: {
+                  count: data.followUpCount || (prev[contact.email]?.count || 0) + 1,
+                  lastFollowUpAt: new Date().toISOString(),
+                  dates: [...(prev[contact.email]?.dates || []), new Date().toISOString()],
+                  loopClosed: data.followUpCount >= 3
+                }
+              }));
+
+              // Update quota
+              incrementQuota('email', 1);
+
+            } else {
+              console.error(`❌ Failed to send to ${contact.email}:`, data.error);
+              failCount++;
+              results.push({ email: contact.email, status: 'failed', reason: data.error || 'API error' });
+            }
+
+          } catch (error) {
+            console.error(`💥 Error processing ${contact.email}:`, error);
             failCount++;
-            results.push({ email: contact.email, status: 'failed', reason: data.error || 'API error' });
+            results.push({ email: contact.email, status: 'failed', reason: error.message });
           }
 
-        } catch (error) {
-          console.error(`💥 Error processing ${contact.email}:`, error);
-          failCount++;
-          results.push({ email: contact.email, status: 'failed', reason: error.message });
+          // Update progress
+          const currentProgress = i + batch.indexOf(contact) + 1;
+          setSendProgress({ current: currentProgress, total: safeFollowUpCandidates.length });
+          console.log(`📈 Progress: ${currentProgress}/${safeFollowUpCandidates.length}`);
+
+          // Small delay between sends to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
         }
 
-        // Update progress
-        const currentProgress = i + batch.indexOf(contact) + 1;
-        setSendProgress({ current: currentProgress, total: safeFollowUpCandidates.length });
-        console.log(`📈 Progress: ${currentProgress}/${safeFollowUpCandidates.length}`);
-        
-        // Small delay between sends to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
+        // Brief pause between batches
+        if (i + batchSize < safeFollowUpCandidates.length) {
+          console.log('⏸️ Pausing between batches...');
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
 
-      // Brief pause between batches
-      if (i + batchSize < safeFollowUpCandidates.length) {
-        console.log('⏸️ Pausing between batches...');
-        await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('🔄 Refreshing data after mass send...');
+      // Refresh data after all sends complete
+      await loadSentLeads();
+      await loadRepliedAndFollowUp();
+      await loadDeals();
+
+      console.log('📊 Generating completion report...');
+      // Show comprehensive results
+      const message = `📊 Mass Follow-Up Complete!\n\n` +
+        `✅ Success: ${successCount}\n` +
+        `❌ Failed: ${failCount}\n` +
+        `⏭️ Skipped: ${skipCount}\n` +
+        `📈 Total: ${safeFollowUpCandidates.length}\n\n` +
+        `Email quota used: ${successCount}/${quotaCheck.limit}`;
+
+      if (failCount > 0) {
+        const failedEmails = results.filter(r => r.status === 'failed').slice(0, 3);
+        const failedList = failedEmails.map(f => `• ${f.email}: ${f.reason}`).join('\n');
+        addNotification(message + `\n\n❌ Failed sends:\n${failedList}${failCount > 3 ? `\n... and ${failCount - 3} more` : ''}`,
+          failCount > 0 ? 'warning' : 'success');
+      } else {
+        addNotification(message, 'success');
       }
+
+    } catch (error) {
+      console.error('💥 Error in mass follow-up:', error);
+      addNotification(`❌ Mass follow-up failed: ${error.message}`, 'error');
+    } finally {
+      setIsSending(false);
+      setSendProgress(null);
+      setStatus('');
     }
+  }, [
+    user,
+    addNotification,
+    safeFollowUpCandidates,
+    canUse,
+    requestGmailToken,
+    loadSentLeads,
+    loadRepliedAndFollowUp,
+    loadDeals,
+    repliedLeads,
+    followUpHistory
+  ]);
 
-    console.log('🔄 Refreshing data after mass send...');
-    // Refresh data after all sends complete
-    await loadSentLeads();
-    await loadRepliedAndFollowUp();
-    await loadDeals();
+  console.log('✅ Mass email follow-up handler defined');
 
-    console.log('📊 Generating completion report...');
-    // Show comprehensive results
-    const message = `📊 Mass Follow-Up Complete!\n\n` +
-      `✅ Success: ${successCount}\n` +
-      `❌ Failed: ${failCount}\n` +
-      `⏭️ Skipped: ${skipCount}\n` +
-      `📈 Total: ${safeFollowUpCandidates.length}\n\n` +
-      `Email quota used: ${successCount}/${quotaCheck.limit}`;
-
-    if (failCount > 0) {
-      const failedEmails = results.filter(r => r.status === 'failed').slice(0, 3);
-      const failedList = failedEmails.map(f => `• ${f.email}: ${f.reason}`).join('\n');
-      addNotification(message + `\n\n❌ Failed sends:\n${failedList}${failCount > 3 ? `\n... and ${failCount - 3} more` : ''}`, 
-        failCount > 0 ? 'warning' : 'success');
-    } else {
-      addNotification(message, 'success');
-    }
-    
-  } catch (error) {
-    console.error('💥 Error in mass follow-up:', error);
-    addNotification(`❌ Mass follow-up failed: ${error.message}`, 'error');
-  } finally {
-    setIsSending(false);
-    setSendProgress(null);
-    setStatus('');
-  }
-}, [
-  user,
-  addNotification,
-  safeFollowUpCandidates,
-  canUse,
-  requestGmailToken,
-  loadSentLeads,
-  loadRepliedAndFollowUp,
-  loadDeals,
-  repliedLeads,
-  followUpHistory
-]);
-
-console.log('✅ Mass email follow-up handler defined');
-
-// ============================================================================
-// WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
-// ============================================================================
-const handleSendWhatsApp = async (contact) => {
+  // ============================================================================
+  // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
+  // ============================================================================
+  const handleSendWhatsApp = async (contact) => {
     if (!contact?.phone) {
       addNotification('No phone number for this contact', 'error');
       return;
     }
-    
+
     const contactKey = contact.email || contact.phone;
     const business = contact.business || 'Contact';
-    
+
     // Check quota
     const quotaCheck = canUse('whatsapp');
     if (!quotaCheck.available) {
       addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
       return;
     }
-    
+
     // Check if safe to contact
     const safetyCheck = isSafeToContactOnChannel(contact, 'whatsapp');
     if (!safetyCheck.safe) {
@@ -3345,24 +3345,24 @@ const handleSendWhatsApp = async (contact) => {
       );
       if (!confirmed) return;
     }
-    
+
     try {
       const message = renderPreviewText(
         whatsappTemplate,
-        { 
-          business_name: contact.business, 
-          address: contact.address || '', 
-          phone_raw: contact.phone 
+        {
+          business_name: contact.business,
+          address: contact.address || '',
+          phone_raw: contact.phone
         },
         fieldMappings,
         senderName
       );
-      
+
       const formattedPhone = formatForDialing(contact.phone);
       const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
-      
+
       window.open(whatsappUrl, '_blank');
-      
+
       // Track WhatsApp
       const now = new Date().toISOString();
       setLastWhatsAppSent(prev => ({ ...prev, [contactKey]: now }));
@@ -3370,22 +3370,22 @@ const handleSendWhatsApp = async (contact) => {
         ...prev,
         [contactKey]: [...(prev[contactKey] || []), 'whatsapp']
       }));
-      
+
       // Update contact history
       await updateContact(contactKey, 'whatsapp', {
         whatsappCount: increment(1),
         lastWhatsAppSent: now
       });
-      
+
       // Update quota
       incrementQuota('whatsapp', 1);
       setDailyWhatsAppCount(prev => prev + 1);
-      
+
       // Update deal stage
       if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
         updateDealStage(contactKey, 'contacted');
       }
-      
+
       addNotification(`✅ WhatsApp opened for ${business}!`, 'success');
     } catch (error) {
       console.error('WhatsApp send error:', error);
@@ -3462,17 +3462,17 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     const contactKey = contact.email || contact.phone;
     const business = contact.business || 'Contact';
-    
+
     // Check quota
     const quotaCheck = canUse('sms');
     if (!quotaCheck.available) {
       addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
       return;
     }
-    
+
     // Check if safe to contact
     const safetyCheck = isSafeToContactOnChannel(contact, 'sms');
     if (!safetyCheck.safe) {
@@ -3481,25 +3481,25 @@ const handleSendWhatsApp = async (contact) => {
       );
       if (!confirmed) return;
     }
-    
+
     const confirmed = window.confirm(
       `Send SMS to ${business} at ${formatPhoneForDisplay(contact.phone)}?`
     );
-    
+
     if (!confirmed) return;
-    
+
     try {
       const message = renderPreviewText(
         smsTemplate,
-        { 
-          business_name: contact.business, 
-          address: contact.address || '', 
-          phone_raw: contact.phone 
+        {
+          business_name: contact.business,
+          address: contact.address || '',
+          phone_raw: contact.phone
         },
         fieldMappings,
         senderName
       );
-      
+
       const response = await fetch('/api/send-sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3510,9 +3510,9 @@ const handleSendWhatsApp = async (contact) => {
           userId: user.uid
         })
       });
-      
+
       const data = await response.json();
-      
+
       if (response.ok) {
         // Track SMS
         const now = new Date().toISOString();
@@ -3521,22 +3521,22 @@ const handleSendWhatsApp = async (contact) => {
           ...prev,
           [contactKey]: [...(prev[contactKey] || []), 'sms']
         }));
-        
+
         // Update contact history
         await updateContact(contactKey, 'sms', {
           smsCount: increment(1),
           lastSMSSent: now
         });
-        
+
         // Update quota
         incrementQuota('sms', 1);
         setDailySMSCount(prev => prev + 1);
-        
+
         // Update deal stage
         if (dealStage[contactKey] === 'new' || !dealStage[contactKey]) {
           updateDealStage(contactKey, 'contacted');
         }
-        
+
         addNotification(`✅ SMS sent to ${business}!`, 'success');
       } else {
         addNotification(`❌ SMS failed: ${data.error}`, 'error');
@@ -3555,32 +3555,32 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('No phone number', 'error');
       return;
     }
-    
+
     const messageBody = renderPreviewText(
       smsTemplate,
-      { 
-        business_name: contact.business, 
-        address: contact.address || '', 
-        phone_raw: contact.phone 
+      {
+        business_name: contact.business,
+        address: contact.address || '',
+        phone_raw: contact.phone
       },
       fieldMappings,
       senderName
     );
-    
+
     let formattedPhone = contact.phone.toString().replace(/\D/g, '');
-    
+
     if (formattedPhone.startsWith('0') && formattedPhone.length >= 9) {
       formattedPhone = '94' + formattedPhone.slice(1);
     }
-    
+
     if (!formattedPhone.startsWith('+')) {
       formattedPhone = '+' + formattedPhone;
     }
-    
+
     const smsUrl = `sms:${formattedPhone}?body=${encodeURIComponent(messageBody)}`;
     window.location.href = smsUrl;
   };
-  
+
   // ============================================================================
   // HANDLE DIRECT CALL
   // ============================================================================
@@ -3589,12 +3589,12 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('No phone number', 'error');
       return;
     }
-    
+
     const dialNumber = formatForDialing(phone) || phone.toString().replace(/\D/g, '');
-    
+
     if (typeof window !== 'undefined') {
       const isMobile = /iPhone|Android/i.test(navigator.userAgent);
-      
+
       if (isMobile) {
         window.location.href = `tel:${dialNumber}`;
       } else {
@@ -3604,28 +3604,28 @@ const handleSendWhatsApp = async (contact) => {
       }
     }
   };
-  
+
   // ============================================================================
   // POLL CALL STATUS FROM FIREBASE
   // ============================================================================
   const pollCallStatus = (callId, businessName) => {
     let attempts = 0;
-    
+
     const interval = setInterval(async () => {
       attempts++;
-      
+
       try {
         if (!db) {
           clearInterval(interval);
           return;
         }
-        
+
         const callDoc = await getDoc(doc(db, 'calls', callId));
-        
+
         if (callDoc.exists()) {
           const callData = callDoc.data();
           const status = callData.status;
-          
+
           setActiveCallStatus(prev => ({
             ...prev,
             status: status,
@@ -3633,7 +3633,7 @@ const handleSendWhatsApp = async (contact) => {
             answeredBy: callData.answeredBy || 'unknown',
             updatedAt: callData.updatedAt
           }));
-          
+
           if (status === 'ringing') {
             setStatus(`📞 Ringing ${businessName}...`);
             setStatusType('info');
@@ -3650,7 +3650,7 @@ const handleSendWhatsApp = async (contact) => {
             clearInterval(interval);
           }
         }
-        
+
         if (attempts >= CONFIG.MAX_POLL_ATTEMPTS) {
           clearInterval(interval);
           setStatus(`⏱️ Status polling stopped. Check call history.`);
@@ -3661,7 +3661,7 @@ const handleSendWhatsApp = async (contact) => {
       }
     }, CONFIG.POLL_INTERVAL_MS);
   };
-  
+
   // ============================================================================
   // HANDLE TWILIO CALL WITH TRACKING
   // ============================================================================
@@ -3670,51 +3670,51 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('❌ Contact data is incomplete', 'error');
       return;
     }
-    
+
     if (!user?.uid) {
       addNotification('❌ You must be signed in to make calls', 'error');
       return;
     }
-    
+
     const contactKey = contact.email || contact.phone;
-    
+
     // Check quota
     const quotaCheck = canUse('calls');
     if (!quotaCheck.available) {
       addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
       return;
     }
-    
+
     // Check if safe to contact
     if (!isSafeToContactOnChannel(contact, 'call', 1).safe) {
       const confirmed = window.confirm('⚠️ This contact was recently called. Continue anyway?');
       if (!confirmed) return;
     }
-    
+
     const callTypeLabels = {
       direct: 'Automated Message',
       bridge: 'Bridge Call',
       interactive: 'Interactive Menu'
     };
-    
+
     const confirmed = window.confirm(
       `📞 Call ${contact.business} at ${formatPhoneForDisplay(contact.phone)}?\nType: ${callTypeLabels[callType]}`
     );
-    
+
     if (!confirmed) return;
-    
+
     try {
       setStatus(`📞 Initiating ${callType} call to ${contact.business}...`);
       setStatusType('info');
       setIsSending(true);
-      
+
       setActiveCallStatus({
         business: contact.business,
         phone: contact.phone,
         status: 'initiating',
         timestamp: new Date().toISOString()
       });
-      
+
       const response = await fetch('/api/make-call', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3725,18 +3725,18 @@ const handleSendWhatsApp = async (contact) => {
           callType
         })
       });
-      
+
       let data;
       try {
         data = await response.json();
       } catch (parseError) {
         throw new Error('Server returned an invalid response');
       }
-      
+
       if (response.ok) {
         setStatus(`✅ Call initiated to ${contact.business}!`);
         setStatusType('success');
-        
+
         setActiveCallStatus({
           business: contact.business,
           phone: contact.phone,
@@ -3745,7 +3745,7 @@ const handleSendWhatsApp = async (contact) => {
           callSid: data.callSid,
           timestamp: new Date().toISOString()
         });
-        
+
         // Track call
         const now = new Date().toISOString();
         setLastCallMade(prev => ({ ...prev, [contactKey]: now }));
@@ -3753,21 +3753,21 @@ const handleSendWhatsApp = async (contact) => {
           ...prev,
           [contactKey]: [...(prev[contactKey] || []), 'call']
         }));
-        
+
         await updateContact(contactKey, 'call', {
           callCount: increment(1),
           lastCallMade: now
         });
-        
+
         // Update quota
         incrementQuota('calls', 1);
         setDailyCallCount(prev => prev + 1);
-        
+
         // Update deal stage
         if (contact.email && (dealStage[contactKey] === 'new' || !dealStage[contactKey])) {
           updateDealStage(contactKey, 'contacted');
         }
-        
+
         addNotification(`✅ Call initiated to ${contact.business}`, 'success');
         pollCallStatus(data.callId, contact.business);
       } else {
@@ -3785,18 +3785,18 @@ const handleSendWhatsApp = async (contact) => {
       setIsSending(false);
     }
   };
-  
+
   // ============================================================================
   // HANDLE SMART CALL (AI-POWERED)
   // ============================================================================
   const handleSmartCall = (contact) => {
     if (!contact) return;
-    
+
     const key = contact.email || contact.phone;
     const score = leadScores[key] || 0;
     const history = followUpHistory[key];
     const followUpCount = history?.count || 0;
-    
+
     if (repliedLeads[contact.email] || score >= 80) {
       handleTwilioCall(contact, 'bridge');
     } else if (followUpCount >= 2) {
@@ -3805,24 +3805,24 @@ const handleSendWhatsApp = async (contact) => {
       handleTwilioCall(contact, 'interactive');
     }
   };
-  
+
   // ============================================================================
   // LOAD CALL HISTORY FROM FIREBASE
   // ============================================================================
   const loadCallHistory = async () => {
     if (!user?.uid || !db) return;
-    
+
     setLoadingCallHistory(true);
 
     try {
       const q = query(collection(db, 'calls'), where('userId', '==', user.uid), limit(100));
       const snapshot = await getDocs(q);
-      
+
       const calls = [];
       snapshot.forEach(doc => {
         calls.push({ id: doc.id, ...doc.data() });
       });
-      
+
       calls.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setCallHistory(calls);
     } catch (error) {
@@ -3832,7 +3832,7 @@ const handleSendWhatsApp = async (contact) => {
       setLoadingCallHistory(false);
     }
   };
-  
+
   // ============================================================================
   // HANDLE SOCIAL MEDIA OUTREACH
   // ============================================================================
@@ -3841,9 +3841,9 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('No business name', 'error');
       return;
     }
-    
+
     let url;
-    
+
     if (type === 'company' && contact.linkedin_company) {
       url = contact.linkedin_company;
     } else if (type === 'ceo' && contact.linkedin_ceo) {
@@ -3854,33 +3854,33 @@ const handleSendWhatsApp = async (contact) => {
       const query = encodeURIComponent(contact.business);
       url = `https://www.linkedin.com/search/results/companies/?keywords=${query}`;
     }
-    
+
     window.open(url, '_blank');
   };
-  
+
   const handleOpenInstagram = (contact) => {
     if (!contact?.business) {
       addNotification('No business name', 'error');
       return;
     }
-    
+
     const igHandle = generateSocialHandle(contact.business, 'instagram');
-    
+
     if (igHandle) {
       window.open(`https://www.instagram.com/${igHandle}/`, '_blank');
     } else {
       window.open('https://www.instagram.com/', '_blank');
     }
   };
-  
+
   const handleOpenTwitter = (contact) => {
     if (!contact?.business) {
       addNotification('No business name', 'error');
       return;
     }
-    
+
     const twitterHandle = generateSocialHandle(contact.business, 'twitter');
-    
+
     if (twitterHandle) {
       const tweetText = encodeURIComponent(
         `@${twitterHandle} ${renderPreviewText(
@@ -3896,7 +3896,7 @@ const handleSendWhatsApp = async (contact) => {
       window.open(`https://twitter.com/search?q=${query}&src=typed_query`, '_blank');
     }
   };
-  
+
   const processCsvContent = (rawContent, sourceFileName = '') => {
     setValidEmails(0);
     setValidWhatsApp(0);
@@ -3907,17 +3907,17 @@ const handleSendWhatsApp = async (contact) => {
     try {
       const normalizedContent = rawContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
       const lines = normalizedContent.split('\n').filter(line => line.trim() !== '');
-      
+
       if (lines.length < 2) {
         addNotification('CSV must have headers and data rows', 'error');
         return;
       }
-      
+
       const headers = parseCsvRow(lines[0]).map(h => h.trim());
       setCsvHeaders(headers);
       setAvailableCsvVariables(headers);
       setPreviewRecipient(null);
-      
+
       // Extract all template variables
       const allTemplateTexts = [
         templateA.subject, templateA.body,
@@ -3929,14 +3929,14 @@ const handleSendWhatsApp = async (contact) => {
         linkedinTemplate,
         ...followUpTemplates.flatMap(t => [t.subject || '', t.body || ''])
       ];
-      
+
       const allVars = [...new Set([
         ...allTemplateTexts.flatMap(text => extractTemplateVariables(text)),
         'sender_name',
         ...emailImages.map(img => img.placeholder.replace(/{{|}}/g, '')),
         ...headers
       ])];
-      
+
       // Auto-map fields
       const initialMappings = {};
       allVars.forEach(varName => {
@@ -3944,7 +3944,7 @@ const handleSendWhatsApp = async (contact) => {
           initialMappings[varName] = varName;
         }
       });
-      
+
       // Common mappings
       const commonMappings = {
         email: ['email', 'email_address', 'email_primary'],
@@ -3953,7 +3953,7 @@ const handleSendWhatsApp = async (contact) => {
         website: ['website', 'url', 'site'],
         address: ['address', 'location']
       };
-      
+
       Object.entries(commonMappings).forEach(([varName, possibleCols]) => {
         if (!initialMappings[varName]) {
           const found = possibleCols.find(col => headers.includes(col));
@@ -3962,12 +3962,12 @@ const handleSendWhatsApp = async (contact) => {
           }
         }
       });
-      
+
       initialMappings.sender_name = 'sender_name';
       initialMappings.email = 'email';
       initialMappings.lead_quality = 'lead_quality';
       setFieldMappings(initialMappings);
-      
+
       // Process rows
       let hotEmails = 0;
       let warmEmails = 0;
@@ -3975,19 +3975,19 @@ const handleSendWhatsApp = async (contact) => {
       const contactMap = new Map(); // For deduplication
       const newLeadScores = {};
       const hasLeadQualityCol = headers.includes('lead_quality');
-      
+
       for (let i = 1; i < lines.length; i++) {
         const values = parseCsvRow(lines[i]);
-        
+
         if (values.length !== headers.length) {
           continue;
         }
-        
+
         const row = {};
         headers.forEach((header, idx) => {
           row[header] = values[idx] || '';
         });
-        
+
         // Filter by lead quality
         let includeEmail = true;
         if (hasLeadQualityCol) {
@@ -3996,7 +3996,7 @@ const handleSendWhatsApp = async (contact) => {
             includeEmail = false;
           }
         }
-        
+
         // Validate email - handle multiple emails
         const emailCol = initialMappings.email || 'email';
         const emailString = row[emailCol] || '';
@@ -4016,12 +4016,12 @@ const handleSendWhatsApp = async (contact) => {
             warmEmails += emails.length;
           }
         }
-        
+
         // Validate phone
         const phoneCol = initialMappings.phone || 'phone';
         const rawPhone = row[phoneCol] || row.whatsapp_number || row.phone_raw;
         const formattedPhone = formatForDialing(rawPhone);
-        
+
         if (formattedPhone) {
           const businessCol = initialMappings.business_name || 'business_name';
           const rowGroupId = generateId(); // Group emails from same row
@@ -4122,12 +4122,12 @@ const handleSendWhatsApp = async (contact) => {
           }
         }
       }
-      
+
       // Set first valid as preview
       if (validPhoneContacts.length > 0) {
         setPreviewRecipient(validPhoneContacts[0]);
       }
-      
+
       // Update counts
       if (leadQualityFilter === 'HOT') {
         setValidEmails(hotEmails);
@@ -4136,12 +4136,12 @@ const handleSendWhatsApp = async (contact) => {
       } else {
         setValidEmails(hotEmails + warmEmails);
       }
-      
+
       setValidWhatsApp(validPhoneContacts.length);
       setWhatsappLinks(validPhoneContacts);
       setLeadScores(newLeadScores);
       setCsvContent(normalizedContent);
-      
+
       addNotification(
         `✅ CSV loaded successfully!\n${validPhoneContacts.length} contacts\n${hotEmails + warmEmails} valid emails`,
         'success'
@@ -4236,61 +4236,61 @@ const handleSendWhatsApp = async (contact) => {
   // ============================================================================
   const handleCsvUpload = (e) => {
     const file = e.target.files?.[0];
-    
+
     if (!file) {
       addNotification('No file selected', 'error');
       return;
     }
-    
+
     if (!file.name.toLowerCase().endsWith('.csv')) {
       addNotification('Please upload a CSV file', 'error');
       return;
     }
-    
+
     const reader = new FileReader();
-    
+
     reader.onload = (event) => {
       processCsvContent(event.target.result, file.name);
     };
-    
+
     reader.onerror = () => {
       addNotification('Failed to read file', 'error');
     };
-    
+
     reader.readAsText(file);
   };
-  
+
   // ============================================================================
   // HANDLE IMAGE UPLOAD
   // ============================================================================
   const handleImageUpload = (e) => {
     const files = Array.from(e.target.files).slice(0, CONFIG.MAX_IMAGES_PER_EMAIL);
-    
+
     if (files.length === 0) {
       addNotification('No files selected', 'info');
       return;
     }
-    
+
     // Validate file sizes
     const validFiles = files.filter(file => file.size <= CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024);
-    
+
     if (validFiles.length < files.length) {
       addNotification(`${files.length - validFiles.length} file(s) exceeded ${CONFIG.MAX_IMAGE_SIZE_MB}MB limit`, 'warning');
     }
-    
+
     const newImages = validFiles.map((file, index) => {
       const preview = URL.createObjectURL(file);
       const cid = `img${index + 1}@massmailer`;
-      return { 
-        file, 
-        preview, 
-        cid, 
+      return {
+        file,
+        preview,
+        cid,
         placeholder: `{{image${index + 1}}}`,
         size: file.size,
         type: file.type
       };
     });
-    
+
     setEmailImages(newImages);
     addNotification(`✅ ${newImages.length} image(s) uploaded`, 'success');
   };
@@ -4321,7 +4321,7 @@ const handleSendWhatsApp = async (contact) => {
   const handleRemoveAttachment = (index) => {
     setEmailAttachments((prev) => prev.filter((_, idx) => idx !== index));
   };
-  
+
   // ============================================================================
   // SEND TO NEW LEADS (SMART DUPLICATE PREVENTION)
   // ============================================================================
@@ -4330,16 +4330,16 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     const newLeads = getNewLeads();
-    
+
     if (newLeads.length === 0) {
       addNotification('✅ No new leads to email. All contacts have been reached.', 'success');
       return;
     }
-    
+
     const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
-    
+
     if (remainingQuota <= 0) {
       addNotification(
         `⚠️ Daily email limit reached (${CONFIG.MAX_DAILY_EMAILS} emails/day). ${dailyEmailCount} emails sent today.`,
@@ -4347,33 +4347,33 @@ const handleSendWhatsApp = async (contact) => {
       );
       return;
     }
-    
+
     const leadsToSend = newLeads.slice(0, Math.min(remainingQuota, newLeads.length));
     const potentialValue = Math.round((leadsToSend.length * 0.15 * CONFIG.DEFAULT_AVG_DEAL_VALUE) / 1000);
-    
+
     const confirmMsg = `🚀 Smart New Lead Outreach\n\n` +
       `📊 ${leadsToSend.length} new leads ready (${newLeads.length} total available)\n` +
       `📈 Prioritized by lead quality\n` +
       `💰 Estimated potential value: $${potentialValue}k\n` +
       `📧 Daily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS} (${remainingQuota} remaining)\n\n` +
       `Send to ${leadsToSend.length} leads now?`;
-    
+
     if (!window.confirm(confirmMsg)) return;
-    
+
     if (!templateA.subject?.trim()) {
       addNotification('Email subject is required', 'error');
       return;
     }
-    
+
     setIsSending(true);
     setStatus('Getting Gmail access...');
     setStatusType('info');
     setSendProgress({ current: 0, total: leadsToSend.length });
-    
+
     try {
       const accessToken = await requestGmailToken();
       setStatus(`Sending to ${leadsToSend.length} new leads...`);
-      
+
       const imagesWithBase64 = await Promise.all(
         emailImages.map(async (img, index) => {
           const base64 = await new Promise((resolve) => {
@@ -4381,7 +4381,7 @@ const handleSendWhatsApp = async (contact) => {
             reader.onload = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(img.file);
           });
-          
+
           return {
             cid: img.cid,
             mimeType: img.file.type,
@@ -4406,7 +4406,7 @@ const handleSendWhatsApp = async (contact) => {
           };
         })
       );
-      
+
       const res = await fetch('/api/send-new-leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4422,16 +4422,16 @@ const handleSendWhatsApp = async (contact) => {
           emailAttachments: attachmentsWithBase64
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         const sentCount = data.sent || 0;
         setStatus(`✅ ${sentCount}/${leadsToSend.length} emails sent to new leads!`);
         setStatusType('success');
-        
+
         setDailyEmailCount(data.dailyCount || dailyEmailCount + sentCount);
-        
+
         addNotification(
           `✅ Successfully sent ${sentCount} emails!\n` +
           `📊 Stats:\n` +
@@ -4441,7 +4441,7 @@ const handleSendWhatsApp = async (contact) => {
           `• Daily count: ${data.dailyCount}/${CONFIG.MAX_DAILY_EMAILS}`,
           'success'
         );
-        
+
         await loadSentLeads();
         await loadDailyEmailCount();
       } else {
@@ -4464,23 +4464,23 @@ const handleSendWhatsApp = async (contact) => {
       setSendProgress({ current: 0, total: 0 });
     }
   };
-  
+
   // ============================================================================
   // SEND EMAILS (MAIN FUNCTION)
   // ============================================================================
   const handleSendEmails = async (templateToSend = null) => {
     const lines = csvContent?.split('\n').filter(line => line.trim() !== '') || [];
-    
+
     if (lines.length < 2) {
       addNotification('Please upload a valid CSV file first', 'error');
       return;
     }
-    
+
     if (validEmails === 0) {
       addNotification('No valid recipients available', 'error');
       return;
     }
-    
+
     // Check quota
     const remainingQuota = CONFIG.MAX_DAILY_EMAILS - dailyEmailCount;
     if (remainingQuota <= 0) {
@@ -4490,12 +4490,12 @@ const handleSendWhatsApp = async (contact) => {
       );
       return;
     }
-    
+
     if (abTestMode && !templateToSend) {
       addNotification('Please select Template A or B', 'error');
       return;
     }
-    
+
     if (abTestMode) {
       if (templateToSend === 'A' && !templateA.subject?.trim()) {
         addNotification('Template A subject is required', 'error');
@@ -4511,26 +4511,26 @@ const handleSendWhatsApp = async (contact) => {
         return;
       }
     }
-    
+
     // Confirm before sending
     if (userPreferences.confirmBeforeSend) {
       const confirmed = window.confirm(
         `Send emails to ${validEmails} leads?\n\nDaily quota: ${dailyEmailCount}/${CONFIG.MAX_DAILY_EMAILS}\nRemaining: ${remainingQuota}`
       );
-      
+
       if (!confirmed) return;
     }
-    
+
     setIsSending(true);
     setStatus('Getting Gmail access...');
     setStatusType('info');
     setSendProgress({ current: 0, total: validEmails });
-    
+
     try {
       const accessToken = await requestGmailToken();
-      
+
       setStatus(`Sending to ${validEmails} leads...`);
-      
+
       // Process images
       const imagesWithBase64 = await Promise.all(
         emailImages.map(async (img, index) => {
@@ -4539,7 +4539,7 @@ const handleSendWhatsApp = async (contact) => {
             reader.onload = () => resolve(reader.result.split(',')[1]);
             reader.readAsDataURL(img.file);
           });
-          
+
           return {
             cid: img.cid,
             mimeType: img.file.type,
@@ -4564,25 +4564,25 @@ const handleSendWhatsApp = async (contact) => {
           };
         })
       );
-      
+
       const headers = parseCsvRow(lines[0]).map(h => h.trim());
       let validRecipients = [];
-      
+
       const emailColumnName = Object.entries(fieldMappings).find(([key, val]) => key === 'email')?.[1] || 'email';
       const qualityColumnName = Object.entries(fieldMappings).find(([key, val]) => key === 'lead_quality')?.[1] || 'lead_quality';
-      
+
       for (let i = 1; i < lines.length; i++) {
         const values = parseCsvRow(lines[i]);
-        
+
         if (values.length !== headers.length) {
           continue;
         }
-        
+
         const row = {};
         headers.forEach((header, idx) => {
           row[header] = values[idx]?.toString().trim() || '';
         });
-        
+
         const emailValue = row[emailColumnName] || '';
         const emails = parseMultipleEmails(emailValue);
 
@@ -4639,7 +4639,7 @@ const handleSendWhatsApp = async (contact) => {
       }
 
       let recipientsToSend = [];
-      
+
       if (abTestMode && templateToSend) {
         const half = Math.ceil(validRecipients.length / 2);
         if (templateToSend === 'A') {
@@ -4650,13 +4650,13 @@ const handleSendWhatsApp = async (contact) => {
       } else {
         recipientsToSend = validRecipients;
       }
-      
+
       // Limit by quota
       if (recipientsToSend.length > remainingQuota) {
         recipientsToSend = recipientsToSend.slice(0, remainingQuota);
         addNotification(`Limited to ${remainingQuota} emails due to daily quota`, 'warning');
       }
-      
+
       if (recipientsToSend.length === 0) {
         setStatus('❌ No valid leads for selected criteria');
         setStatusType('error');
@@ -4664,7 +4664,7 @@ const handleSendWhatsApp = async (contact) => {
         addNotification('No valid recipients found', 'error');
         return;
       }
-      
+
       // Reconstruct CSV
       const csvLines = [headers.join(',')];
       for (const row of recipientsToSend) {
@@ -4678,7 +4678,7 @@ const handleSendWhatsApp = async (contact) => {
         csvLines.push(csvFields.join(','));
       }
       const reconstructedCsv = csvLines.join('\n');
-      
+
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4700,14 +4700,14 @@ const handleSendWhatsApp = async (contact) => {
           csvSource: csvFileName || 'uploaded_csv'
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         const sentCount = data.sent || 0;
         setStatus(`✅ ${sentCount}/${recipientsToSend.length} emails sent!`);
         setStatusType('success');
-        
+
         // Update A/B test results
         if (abTestMode) {
           const newResults = { ...abResults };
@@ -4717,27 +4717,27 @@ const handleSendWhatsApp = async (contact) => {
             newResults.b.sent = (newResults.b.sent || 0) + sentCount;
           }
           setAbResults(newResults);
-          
+
           if (db) {
             await setDoc(doc(db, 'ab_results', user.uid), newResults);
           }
         }
-        
+
         // Update daily count
         setDailyEmailCount(prev => prev + sentCount);
         incrementQuota('emails', sentCount);
-        
+
         addNotification(
           `✅ Successfully sent ${sentCount} emails!\nFailed: ${data.failed || 0}\nSkipped: ${data.skipped || 0}`,
           'success'
         );
-        
+
         await loadSentLeads();
         await loadDailyEmailCount();
       } else {
         setStatus(`❌ ${data.error}`);
         setStatusType('error');
-        
+
         if (res.status === 429) {
           addNotification(`⚠️ Daily limit reached! ${data.error}`, 'warning');
           setDailyEmailCount(data.dailyCount || CONFIG.MAX_DAILY_EMAILS);
@@ -4766,7 +4766,7 @@ const handleSendWhatsApp = async (contact) => {
       setSendProgress({ current: 0, total: 0 });
     }
   };
-  
+
   // ============================================================================
   // AI RESEARCH COMPANY
   // ============================================================================
@@ -4775,12 +4775,12 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('Please sign in to use AI research', 'error');
       return;
     }
-    
+
     setResearchingCompany(email);
-    
+
     try {
       const defaultTemplate = `${templateA.subject}\n${templateA.body}`;
-      
+
       const res = await fetch('/api/research-company', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4791,9 +4791,9 @@ const handleSendWhatsApp = async (contact) => {
           userId: user.uid
         })
       });
-      
+
       const data = await res.json();
-      
+
       if (res.ok) {
         setResearchResults(prev => ({
           ...prev,
@@ -4811,7 +4811,7 @@ const handleSendWhatsApp = async (contact) => {
       setResearchingCompany(null);
     }
   };
-  
+
   // ============================================================================
   // EXPORT DATA
   // ============================================================================
@@ -4820,11 +4820,11 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     try {
       let data = [];
       let filename = '';
-      
+
       if (type === 'contacts') {
         data = whatsappLinks;
         filename = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
@@ -4836,17 +4836,17 @@ const handleSendWhatsApp = async (contact) => {
         data = callHistory;
         filename = `call-history-${new Date().toISOString().split('T')[0]}.csv`;
       }
-      
+
       if (data.length === 0) {
         addNotification('No data to export', 'warning');
         return;
       }
-      
+
       // Convert to CSV
       const headers = Object.keys(data[0]);
       const csvContent = [
         headers.join(','),
-        ...data.map(row => 
+        ...data.map(row =>
           headers.map(h => {
             const val = (row[h] || '').toString();
             if (val.includes(',') || val.includes('"') || val.includes('\n')) {
@@ -4856,7 +4856,7 @@ const handleSendWhatsApp = async (contact) => {
           }).join(',')
         )
       ].join('\n');
-      
+
       // Download
       const blob = new Blob([csvContent], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
@@ -4865,22 +4865,22 @@ const handleSendWhatsApp = async (contact) => {
       a.download = filename;
       a.click();
       window.URL.revokeObjectURL(url);
-      
+
       addNotification(`✅ Exported ${data.length} records`, 'success');
     } catch (error) {
       console.error('Export error:', error);
       addNotification('Failed to export data', 'error');
     }
   };
-  
+
   // ============================================================================
   // BACKUP DATA
   // ============================================================================
   const backupData = async () => {
     if (!user?.uid || isBackingUp) return;
-    
+
     setIsBackingUp(true);
-    
+
     try {
       const backup = {
         userId: user.uid,
@@ -4908,16 +4908,16 @@ const handleSendWhatsApp = async (contact) => {
           userPreferences
         }
       };
-      
+
       // Save to Firebase
       if (db) {
         const backupRef = doc(db, 'backups', `${user.uid}_${Date.now()}`);
         await setDoc(backupRef, backup);
       }
-      
+
       // Save to localStorage
       localStorageHelper.set(`backup_${user.uid}`, backup);
-      
+
       setLastBackup(new Date().toISOString());
       addNotification('✅ Backup completed successfully', 'success');
     } catch (error) {
@@ -4927,14 +4927,14 @@ const handleSendWhatsApp = async (contact) => {
       setIsBackingUp(false);
     }
   };
-  
+
   // ============================================================================
   // HANDLE FIELD MAPPING CHANGE
   // ============================================================================
   const handleMappingChange = (varName, csvColumn) => {
     setFieldMappings(prev => ({ ...prev, [varName]: csvColumn }));
   };
-  
+
   // ============================================================================
   // A/B TEST SUMMARY
   // ============================================================================
@@ -4958,7 +4958,7 @@ const handleSendWhatsApp = async (contact) => {
       </div>
     </div>
   ) : null;
-  
+
   // ============================================================================
   // LOADING STATE
   // ============================================================================
@@ -4969,7 +4969,7 @@ const handleSendWhatsApp = async (contact) => {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     try {
       setLoadingAnalytics(true);
       const res = await fetch('/api/analytics-engine', {
@@ -4982,7 +4982,7 @@ const handleSendWhatsApp = async (contact) => {
           data: { avg_deal_value: 5000 }
         })
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setAnalyticsData(data.analytics);
@@ -4995,13 +4995,13 @@ const handleSendWhatsApp = async (contact) => {
       setLoadingAnalytics(false);
     }
   }, [user, addNotification]);
-  
+
   const loadPipeline = useCallback(async (action = 'comprehensive') => {
     if (!user?.uid) {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     try {
       setLoadingPipeline(true);
       const res = await fetch('/api/deal-pipeline', {
@@ -5013,7 +5013,7 @@ const handleSendWhatsApp = async (contact) => {
           data: { targetDays: 90 }
         })
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setPipelineData(data.pipeline);
@@ -5026,13 +5026,13 @@ const handleSendWhatsApp = async (contact) => {
       setLoadingPipeline(false);
     }
   }, [user, addNotification]);
-  
+
   const loadPredictiveAnalysis = useCallback(async (action = 'comprehensive', leadId = null) => {
     if (!user?.uid) {
       addNotification('Please sign in first', 'error');
       return;
     }
-    
+
     try {
       setLoadingPredictive(true);
       const res = await fetch('/api/predictive-scoring', {
@@ -5044,7 +5044,7 @@ const handleSendWhatsApp = async (contact) => {
           action
         })
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         setPredictiveData(data.predictions);
@@ -5072,7 +5072,7 @@ const handleSendWhatsApp = async (contact) => {
       </div>
     );
   }
-  
+
   // ============================================================================
   // NOT AUTHENTICATED STATE
   // ============================================================================
@@ -5084,7 +5084,7 @@ const handleSendWhatsApp = async (contact) => {
             <h1 className="text-3xl font-bold text-white mb-2">B2B Growth Engine</h1>
             <p className="text-gray-400">Strategic Outreach Automation</p>
           </div>
-          
+
           <div className="space-y-4">
             <button
               onClick={() => {
@@ -5097,21 +5097,21 @@ const handleSendWhatsApp = async (contact) => {
               className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-xl transition font-medium flex items-center justify-center gap-3"
             >
               <svg className="w-6 h-6" viewBox="0 0 24 24">
-                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
               </svg>
               Sign in with Google
             </button>
-            
+
             {authError && (
               <div className="bg-red-900/30 border border-red-700 text-red-300 p-3 rounded-lg text-sm">
                 {authError}
               </div>
             )}
           </div>
-          
+
           <div className="mt-6 pt-6 border-t border-gray-700">
             <div className="text-xs text-gray-500 text-center">
               Secure authentication powered by Firebase
@@ -5121,7 +5121,7 @@ const handleSendWhatsApp = async (contact) => {
       </div>
     );
   }
-  
+
   // ============================================================================
   // MAIN DASHBOARD UI
   // ============================================================================
@@ -5131,18 +5131,17 @@ const handleSendWhatsApp = async (contact) => {
         <title>B2B Growth Engine | Strategic Outreach</title>
         <meta name="description" content="Marketing automation dashboard for B2B outreach" />
       </Head>
-      
+
       {/* NOTIFICATIONS */}
       <div className="fixed top-4 right-4 z-50 space-y-2 max-w-sm">
         {notifications.slice(0, 5).map(notification => (
           <div
             key={notification.id}
-            className={`p-4 rounded-lg shadow-lg border backdrop-blur-sm animate-fade-in ${
-              notification.type === 'success' ? 'bg-green-900/80 border-green-700 text-green-200' :
-              notification.type === 'error' ? 'bg-red-900/80 border-red-700 text-red-200' :
-              notification.type === 'warning' ? 'bg-yellow-900/80 border-yellow-700 text-yellow-200' :
-              'bg-blue-900/80 border-blue-700 text-blue-200'
-            }`}
+            className={`p-4 rounded-lg shadow-lg border backdrop-blur-sm animate-fade-in ${notification.type === 'success' ? 'bg-green-900/80 border-green-700 text-green-200' :
+                notification.type === 'error' ? 'bg-red-900/80 border-red-700 text-red-200' :
+                  notification.type === 'warning' ? 'bg-yellow-900/80 border-yellow-700 text-yellow-200' :
+                    'bg-blue-900/80 border-blue-700 text-blue-200'
+              }`}
           >
             <div className="flex justify-between items-start">
               <div className="text-sm whitespace-pre-line">{notification.message}</div>
@@ -5156,7 +5155,7 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         ))}
       </div>
-      
+
       {/* HEADER */}
       <header className="bg-gray-800/80 backdrop-blur-sm shadow-lg border-b border-gray-700 sticky top-0 z-40">
         <div className="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
@@ -5172,7 +5171,7 @@ const handleSendWhatsApp = async (contact) => {
                 <p className="text-xs text-gray-400 hidden sm:block">Strategic Outreach Automation</p>
               </div>
             </div>
-            
+
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={() => {
@@ -5184,7 +5183,7 @@ const handleSendWhatsApp = async (contact) => {
                 <span>📞</span>
                 <span className="hidden sm:inline">Call History</span>
               </button>
-              
+
               <button
                 onClick={() => {
                   loadSentLeads();
@@ -5195,7 +5194,7 @@ const handleSendWhatsApp = async (contact) => {
                 <span>📬</span>
                 <span className="hidden sm:inline">Reply Center</span>
               </button>
-              
+
               <button
                 onClick={() => setShowAdvancedAnalytics(!showAdvancedAnalytics)}
                 className="text-xs sm:text-sm bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white px-3 py-2 rounded-lg transition font-medium flex items-center gap-2"
@@ -5203,7 +5202,7 @@ const handleSendWhatsApp = async (contact) => {
                 <span>🤖</span>
                 <span className="hidden sm:inline">AI Analytics</span>
               </button>
-              
+
               <button
                 onClick={() => router.push('/format')}
                 className="text-xs sm:text-sm bg-green-700 hover:bg-green-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
@@ -5227,7 +5226,7 @@ const handleSendWhatsApp = async (contact) => {
               >
                 ⚙️
               </button>
-              
+
               <button
                 onClick={() => signOut(auth)}
                 className="text-xs sm:text-sm text-gray-300 hover:text-white px-3 py-2 rounded-lg transition"
@@ -5238,16 +5237,15 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       </header>
-      
+
       <main className="container mx-auto px-3 sm:px-4 py-4 sm:py-6">
         {/* STATUS BAR */}
         {status && (
-          <div className={`mb-4 p-4 rounded-xl border backdrop-blur-sm ${
-            statusType === 'success' ? 'bg-green-900/30 border-green-700 text-green-200' :
-            statusType === 'error' ? 'bg-red-900/30 border-red-700 text-red-200' :
-            statusType === 'warning' ? 'bg-yellow-900/30 border-yellow-700 text-yellow-200' :
-            'bg-blue-900/30 border-blue-700 text-blue-200'
-          }`}>
+          <div className={`mb-4 p-4 rounded-xl border backdrop-blur-sm ${statusType === 'success' ? 'bg-green-900/30 border-green-700 text-green-200' :
+              statusType === 'error' ? 'bg-red-900/30 border-red-700 text-red-200' :
+                statusType === 'warning' ? 'bg-yellow-900/30 border-yellow-700 text-yellow-200' :
+                  'bg-blue-900/30 border-blue-700 text-blue-200'
+            }`}>
             <div className="whitespace-pre-line text-sm sm:text-base">{status}</div>
             {sendProgress.total > 0 && (
               <div className="mt-3">
@@ -5256,7 +5254,7 @@ const handleSendWhatsApp = async (contact) => {
                   <span>{sendProgress.current}/{sendProgress.total}</span>
                 </div>
                 <div className="w-full bg-gray-700 rounded-full h-2">
-                  <div 
+                  <div
                     className="bg-blue-500 h-2 rounded-full transition-all"
                     style={{ width: `${(sendProgress.current / sendProgress.total) * 100}%` }}
                   ></div>
@@ -5265,7 +5263,7 @@ const handleSendWhatsApp = async (contact) => {
             )}
           </div>
         )}
-        
+
         {/* DASHBOARD STATS */}
         {whatsappLinks.length > 0 && (
           <div className="mb-6 sm:mb-8">
@@ -5275,7 +5273,7 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">{whatsappLinks.length}</div>
                 <div className="text-xs text-blue-200 mt-1">contacts loaded</div>
               </div>
-              
+
               <div className="bg-gradient-to-br from-green-900/50 to-green-800/50 p-4 rounded-xl shadow border border-green-700/50 hover:border-green-600 transition">
                 <div className="text-xs text-green-300 font-semibold">✅ Replied</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
@@ -5285,7 +5283,7 @@ const handleSendWhatsApp = async (contact) => {
                   {Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}% reply rate
                 </div>
               </div>
-              
+
               {followUpStats.interestedLeads > 0 && (
                 <div
                   className="bg-gradient-to-br from-pink-900/50 to-pink-800/50 p-4 rounded-xl shadow border border-pink-700/50 hover:border-pink-600 transition cursor-pointer"
@@ -5315,7 +5313,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
                 <div className="text-xs text-yellow-200 mt-1">avg lead score</div>
               </div>
-              
+
               <div className="bg-gradient-to-br from-purple-900/50 to-purple-800/50 p-4 rounded-xl shadow border border-purple-700/50 hover:border-purple-600 transition">
                 <div className="text-xs text-purple-300 font-semibold">💰 Pipeline</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
@@ -5323,7 +5321,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
                 <div className="text-xs text-purple-200 mt-1">potential revenue</div>
               </div>
-              
+
               <div className="bg-gradient-to-br from-orange-900/50 to-orange-800/50 p-4 rounded-xl shadow border border-orange-700/50 hover:border-orange-600 transition">
                 <div className="text-xs text-orange-300 font-semibold">📈 Monthly</div>
                 <div className="text-2xl sm:text-3xl font-bold text-white mt-1">
@@ -5332,7 +5330,7 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="text-xs text-orange-200 mt-1">forecast (30d)</div>
               </div>
             </div>
-            
+
             {showAdvancedAnalytics && (
               <div className="mt-4 bg-gradient-to-br from-purple-900/20 via-indigo-900/20 to-blue-900/20 p-4 sm:p-6 rounded-xl border-2 border-purple-500/30">
                 <div className="flex justify-between items-center mb-4">
@@ -5346,7 +5344,7 @@ const handleSendWhatsApp = async (contact) => {
                     ✕
                   </button>
                 </div>
-                
+
                 {sendTimeOptimization && (
                   <div className="bg-gray-800/50 p-4 rounded-lg border border-purple-700 mb-4">
                     <h3 className="text-sm font-bold text-purple-300 mb-2">⏰ Optimal Send Time</h3>
@@ -5366,7 +5364,7 @@ const handleSendWhatsApp = async (contact) => {
             )}
           </div>
         )}
-        
+
         {/* MAIN GRID LAYOUT */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
           {/* LEFT COLUMN - UPLOAD & SETTINGS */}
@@ -5414,7 +5412,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               )}
               <p className="text-xs text-gray-400 mt-3">Auto-scores leads and binds fields</p>
-              
+
               <div className="mt-4">
                 <label className="block text-sm font-medium mb-2 text-gray-200">
                   Target Lead Quality
@@ -5432,7 +5430,7 @@ const handleSendWhatsApp = async (contact) => {
                   {validEmails} {leadQualityFilter} leads ready
                 </p>
               </div>
-              
+
               <div className="mt-4">
                 <label className="flex items-center text-sm text-gray-200 cursor-pointer">
                   <input
@@ -5445,7 +5443,7 @@ const handleSendWhatsApp = async (contact) => {
                 </label>
               </div>
             </div>
-            
+
             {/* Search & Filter */}
             {whatsappLinks.length > 0 && (
               <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
@@ -5457,7 +5455,7 @@ const handleSendWhatsApp = async (contact) => {
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full p-2 bg-gray-700 text-white border border-gray-600 rounded-lg mb-3 text-sm"
                 />
-                
+
                 <div className="flex flex-col sm:flex-row gap-2 mb-3">
                   <select
                     value={contactFilter}
@@ -5473,7 +5471,7 @@ const handleSendWhatsApp = async (contact) => {
                     <option value="hot-leads">🔥 Hot Leads</option>
                     <option value="warm-leads">🟡 Warm Leads</option>
                   </select>
-                  
+
                   <select
                     value={sortBy}
                     onChange={(e) => setSortBy(e.target.value)}
@@ -5484,7 +5482,7 @@ const handleSendWhatsApp = async (contact) => {
                     <option value="name">A-Z</option>
                     <option value="added">Added</option>
                   </select>
-                  
+
                   <button
                     onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
                     className="px-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs"
@@ -5492,13 +5490,13 @@ const handleSendWhatsApp = async (contact) => {
                     {sortOrder === 'desc' ? '↓' : '↑'}
                   </button>
                 </div>
-                
+
                 <div className="text-xs text-gray-400">
                   Showing {paginatedContacts.contacts.length} of {paginatedContacts.total} contacts
                 </div>
               </div>
             )}
-            
+
             {/* Field Mappings */}
             {csvHeaders.length > 0 && (
               <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700 max-h-96 overflow-y-auto">
@@ -5528,7 +5526,7 @@ const handleSendWhatsApp = async (contact) => {
               </div>
             )}
           </div>
-          
+
           {/* MIDDLE COLUMN - TEMPLATES & SEND */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             {/* Sender Info */}
@@ -5583,7 +5581,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               </div>
             </div>
-            
+
             {/* Email Template */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
@@ -5598,7 +5596,7 @@ const handleSendWhatsApp = async (contact) => {
                   A/B Testing
                 </label>
               </div>
-              
+
               {abTestMode ? (
                 <div className="grid grid-cols-1 gap-4">
                   <div className="border border-gray-700 rounded-lg p-3 bg-gray-750">
@@ -5654,17 +5652,16 @@ const handleSendWhatsApp = async (contact) => {
                   />
                 </div>
               )}
-              
+
               {abTestMode ? (
                 <div className="space-y-2 mt-4">
                   <button
                     onClick={() => handleSendEmails('A')}
                     disabled={Boolean(sendEmailsDisabledReason)}
-                    className={`w-full py-3 rounded-lg font-bold transition ${
-                      Boolean(sendEmailsDisabledReason)
+                    className={`w-full py-3 rounded-lg font-bold transition ${Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
-                    }`}
+                      }`}
                     title={sendEmailsDisabledReason || `Send template A to ${Math.ceil(validEmails / 2)} leads`}
                   >
                     📧 Send Template A (First {Math.ceil(validEmails / 2)} leads)
@@ -5672,11 +5669,10 @@ const handleSendWhatsApp = async (contact) => {
                   <button
                     onClick={() => handleSendEmails('B')}
                     disabled={Boolean(sendEmailsDisabledReason)}
-                    className={`w-full py-3 rounded-lg font-bold transition ${
-                      Boolean(sendEmailsDisabledReason)
+                    className={`w-full py-3 rounded-lg font-bold transition ${Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-blue-700 hover:bg-blue-600 text-white'
-                    }`}
+                      }`}
                     title={sendEmailsDisabledReason || `Send template B to ${Math.floor(validEmails / 2)} leads`}
                   >
                     📧 Send Template B (Last {Math.floor(validEmails / 2)} leads)
@@ -5690,11 +5686,10 @@ const handleSendWhatsApp = async (contact) => {
                   <button
                     onClick={() => handleSendEmails()}
                     disabled={Boolean(sendEmailsDisabledReason)}
-                    className={`w-full py-3 rounded-lg font-bold mt-4 transition ${
-                      Boolean(sendEmailsDisabledReason)
+                    className={`w-full py-3 rounded-lg font-bold mt-4 transition ${Boolean(sendEmailsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed'
                         : 'bg-green-700 hover:bg-green-600 text-white'
-                    }`}
+                      }`}
                     title={sendEmailsDisabledReason || `Send emails to ${validEmails} leads`}
                   >
                     📧 Send Emails ({validEmails})
@@ -5703,7 +5698,7 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="mt-2 text-xs text-yellow-300">⚠️ {sendEmailsDisabledReason}</div>
                   )}
 
-                  
+
                   {/* Debug Button */}
                   <button
                     onClick={handleDebugSystem}
@@ -5711,7 +5706,7 @@ const handleSendWhatsApp = async (contact) => {
                   >
                     🔍 Debug Email System
                   </button>
-                  
+
                   {/* Status Indicators */}
                   <div className="mt-3 p-3 bg-gray-800 rounded-lg text-xs">
                     <div className="grid grid-cols-2 gap-2">
@@ -5741,15 +5736,14 @@ const handleSendWhatsApp = async (contact) => {
                       </div>
                     </div>
                   </div>
-                  
+
                   <button
                     onClick={handleSendToNewLeads}
                     disabled={Boolean(newLeadsDisabledReason)}
-                    className={`w-full py-3 rounded-lg font-bold mt-3 transition ${
-                      Boolean(newLeadsDisabledReason)
+                    className={`w-full py-3 rounded-lg font-bold mt-3 transition ${Boolean(newLeadsDisabledReason)
                         ? 'bg-gray-600 cursor-not-allowed text-gray-400'
                         : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white shadow-lg'
-                    }`}
+                      }`}
                     title={newLeadsDisabledReason || `Send to ${newLeads.length} new leads`}
                   >
                     🚀 Smart New Lead Outreach ({newLeads.length} new leads)
@@ -5767,7 +5761,7 @@ const handleSendWhatsApp = async (contact) => {
                 </>
               )}
             </div>
-            
+
             {/* WhatsApp Template */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">5. WhatsApp Template</h2>
@@ -5779,7 +5773,7 @@ const handleSendWhatsApp = async (contact) => {
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-            
+
             {/* SMS Template */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">6. SMS Template</h2>
@@ -5791,7 +5785,7 @@ const handleSendWhatsApp = async (contact) => {
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-            
+
             {/* Follow-Up Sequences */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">7. Follow-Up Sequences</h2>
@@ -5887,7 +5881,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               ))}
             </div>
-            
+
             {/* Instagram Template */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">8. Instagram Template</h2>
@@ -5899,7 +5893,7 @@ const handleSendWhatsApp = async (contact) => {
                 placeholder="Hi {{business_name}}! ..."
               />
             </div>
-            
+
             {/* Twitter Template */}
             <div className="bg-gray-800/80 backdrop-blur-sm p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">9. Twitter Template</h2>
@@ -5912,7 +5906,7 @@ const handleSendWhatsApp = async (contact) => {
               />
             </div>
           </div>
-          
+
           {/* RIGHT COLUMN - ANALYTICS & MULTI-CHANNEL */}
           <div className="lg:col-span-1 space-y-4 sm:space-y-6">
             {whatsappLinks.length > 0 && (
@@ -5939,7 +5933,7 @@ const handleSendWhatsApp = async (contact) => {
                       <div className="text-xs text-purple-300">Quality Score</div>
                       <div className="text-xl sm:text-2xl font-bold text-yellow-400">
                         {Object.values(leadScores).length > 0
-                          ? Math.round(Object.values(leadScores).reduce((a,b) => a+b, 0) / Object.values(leadScores).length)
+                          ? Math.round(Object.values(leadScores).reduce((a, b) => a + b, 0) / Object.values(leadScores).length)
                           : 0}
                         <span className="text-sm text-yellow-300">/100</span>
                       </div>
@@ -5954,7 +5948,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Company Tracking */}
                 <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 p-4 rounded-xl border border-indigo-700/50">
                   <h3 className="text-sm font-bold text-indigo-300 mb-3">🏢 Company Tracking</h3>
@@ -5989,7 +5983,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Revenue Potential */}
                 <div className="bg-gradient-to-br from-green-900/30 to-green-800/30 p-4 rounded-xl border border-green-700/50">
                   <h3 className="text-sm font-bold text-green-300 mb-3">💰 Revenue Potential</h3>
@@ -6010,7 +6004,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Outreach Funnel */}
                 <div className="bg-gradient-to-br from-blue-900/30 to-blue-800/30 p-4 rounded-xl border border-blue-700/50">
                   <h3 className="text-sm font-bold text-blue-300 mb-3">🎯 Outreach Funnel</h3>
@@ -6019,7 +6013,7 @@ const handleSendWhatsApp = async (contact) => {
                       <span className="text-blue-200">📤 Sent</span>
                       <div className="flex items-center gap-2">
                         <div className="w-20 h-2 bg-blue-900 rounded-full overflow-hidden">
-                          <div className="h-full bg-blue-500" style={{width: '100%'}}></div>
+                          <div className="h-full bg-blue-500" style={{ width: '100%' }}></div>
                         </div>
                         <span className="font-bold text-blue-300 w-12">{whatsappLinks.length}</span>
                       </div>
@@ -6028,7 +6022,7 @@ const handleSendWhatsApp = async (contact) => {
                       <span className="text-green-200">✉️ No Reply Yet</span>
                       <div className="flex items-center gap-2">
                         <div className="w-20 h-2 bg-blue-900 rounded-full overflow-hidden">
-                          <div className="h-full bg-yellow-500" style={{width: `${Math.round((Math.max(0, whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length) / whatsappLinks.length) * 100)}%`}}></div>
+                          <div className="h-full bg-yellow-500" style={{ width: `${Math.round((Math.max(0, whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length) / whatsappLinks.length) * 100)}%` }}></div>
                         </div>
                         <span className="font-bold text-yellow-300 w-12">
                           {whatsappLinks.length - Object.values(repliedLeads).filter(Boolean).length}
@@ -6039,7 +6033,7 @@ const handleSendWhatsApp = async (contact) => {
                       <span className="text-green-200">✅ Replied</span>
                       <div className="flex items-center gap-2">
                         <div className="w-20 h-2 bg-blue-900 rounded-full overflow-hidden">
-                          <div className="h-full bg-green-500" style={{width: `${Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}%`}}></div>
+                          <div className="h-full bg-green-500" style={{ width: `${Math.round((Object.values(repliedLeads).filter(Boolean).length / Math.max(whatsappLinks.length, 1)) * 100)}%` }}></div>
                         </div>
                         <span className="font-bold text-green-300 w-12">
                           {Object.values(repliedLeads).filter(Boolean).length}
@@ -6050,7 +6044,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               </div>
             )}
-            
+
             {/* Interested Leads Section */}
             {interestedLeadsList.length > 0 && (
               <div id="interested-leads-section" className="bg-gradient-to-br from-pink-900/20 to-rose-900/20 p-4 sm:p-6 rounded-xl border border-pink-700/50 mb-6">
@@ -6076,11 +6070,10 @@ const handleSendWhatsApp = async (contact) => {
                               )}
                               <span className="text-pink-400">Score: {lead.interestScore}</span>
                               {predictiveScores[lead.email] && (
-                                <span className={`font-bold ${
-                                  predictiveScores[lead.email].predictiveScore >= 70 ? 'text-red-400' :
-                                  predictiveScores[lead.email].predictiveScore >= 50 ? 'text-yellow-400' :
-                                  'text-blue-400'
-                                }`}>
+                                <span className={`font-bold ${predictiveScores[lead.email].predictiveScore >= 70 ? 'text-red-400' :
+                                    predictiveScores[lead.email].predictiveScore >= 50 ? 'text-yellow-400' :
+                                      'text-blue-400'
+                                  }`}>
                                   🎯 ML: {predictiveScores[lead.email].predictiveScore}/100
                                 </span>
                               )}
@@ -6106,7 +6099,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               </div>
             )}
-            
+
             {/* Campaign Intelligence */}
             {whatsappLinks.length > 0 && (
               <div className="bg-gradient-to-br from-indigo-900/20 to-purple-900/20 p-4 sm:p-6 rounded-xl border border-indigo-700/50">
@@ -6168,7 +6161,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               </div>
             )}
-            
+
             {/* Email Preview */}
             <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
               <h2 className="text-lg sm:text-xl font-bold mb-3 text-white">10. Email Preview</h2>
@@ -6189,7 +6182,7 @@ const handleSendWhatsApp = async (contact) => {
                 </div>
               </div>
             </div>
-            
+
             {/* Multi-Channel Outreach - MOBILE RESPONSIVE */}
             {whatsappLinks.length > 0 && (
               <div className="bg-gray-800 p-4 sm:p-6 rounded-xl shadow border border-gray-700">
@@ -6218,15 +6211,14 @@ const handleSendWhatsApp = async (contact) => {
                     const isReplied = repliedLeads[link.email];
                     const isFollowUp = followUpLeads[link.email];
                     const isContacted = isContactedOnAnyChannel(link);
-                    
+
                     return (
-                      <div 
-                        key={link.id} 
-                        className={`p-3 rounded-lg border ${
-                          isContacted 
-                            ? 'bg-gray-800/50 border-gray-600 opacity-70' 
+                      <div
+                        key={link.id}
+                        className={`p-3 rounded-lg border ${isContacted
+                            ? 'bg-gray-800/50 border-gray-600 opacity-70'
                             : 'bg-gray-750 border-gray-600'
-                        }`}
+                          }`}
                       >
                         <div className="flex justify-between">
                           <div>
@@ -6368,11 +6360,10 @@ const handleSendWhatsApp = async (contact) => {
                             {/* ✅ Manual Contact Mark Button */}
                             <button
                               onClick={() => markContactManually(link, !isContacted, 'Manual update')}
-                              className={`text-xs px-2 py-1 rounded mt-1 w-full ${
-                                isContacted
+                              className={`text-xs px-2 py-1 rounded mt-1 w-full ${isContacted
                                   ? 'bg-gray-600 hover:bg-gray-500 text-white'
                                   : 'bg-green-600 hover:bg-green-500 text-white'
-                              }`}
+                                }`}
                             >
                               {isContacted ? '↩️ Mark Not Contacted' : '✅ Mark Contacted'}
                             </button>
@@ -6386,9 +6377,8 @@ const handleSendWhatsApp = async (contact) => {
                   <button
                     onClick={handleSendBulkSMS}
                     disabled={!smsConsent || isSending}
-                    className={`w-full py-2 rounded font-bold ${
-                      !smsConsent ? 'bg-gray-600 cursor-not-allowed' : 'bg-orange-700 hover:bg-orange-600 text-white'
-                    }`}
+                    className={`w-full py-2 rounded font-bold ${!smsConsent ? 'bg-gray-600 cursor-not-allowed' : 'bg-orange-700 hover:bg-orange-600 text-white'
+                      }`}
                   >
                     📲 Send SMS to All ({whatsappLinks.length})
                   </button>
@@ -6398,7 +6388,7 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       </main>
-      
+
       {/* FOLLOW-UP MODAL */}
       {showFollowUpModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -6484,18 +6474,17 @@ const handleSendWhatsApp = async (contact) => {
                     <span className="text-2xl">🎯</span>
                     <span>{safeFollowUpCandidates.length} leads ready for intelligent follow-up</span>
                   </div>
-                  
+
                   {/* MASS EMAIL BUTTON */}
                   {safeFollowUpCandidates.length > 0 && (
                     <div className="mb-6">
                       <button
                         onClick={handleMassEmailFollowUps}
                         disabled={isSending}
-                        className={`w-full relative group overflow-hidden rounded-xl transition-all duration-300 ${
-                          isSending 
-                            ? 'bg-gray-600 cursor-not-allowed opacity-60' 
+                        className={`w-full relative group overflow-hidden rounded-xl transition-all duration-300 ${isSending
+                            ? 'bg-gray-600 cursor-not-allowed opacity-60'
                             : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:via-purple-500 hover:to-pink-500 shadow-lg hover:shadow-xl transform hover:scale-[1.02]'
-                        }`}
+                          }`}
                       >
                         <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <div className="relative px-8 py-4 text-white font-bold text-lg">
@@ -6512,7 +6501,7 @@ const handleSendWhatsApp = async (contact) => {
                           {isSending && sendProgress.total > 0 && (
                             <div className="mt-3">
                               <div className="w-full bg-white/20 rounded-full h-2">
-                                <div 
+                                <div
                                   className="bg-white rounded-full h-2 transition-all duration-300"
                                   style={{ width: `${(sendProgress.current / sendProgress.total) * 100}%` }}
                                 ></div>
@@ -6524,14 +6513,14 @@ const handleSendWhatsApp = async (contact) => {
                           )}
                         </div>
                       </button>
-                      
+
                       {/* Status message during mass send */}
                       {isSending && status && (
                         <div className="mt-3 text-center text-sm text-indigo-300 bg-indigo-900/30 rounded-lg px-4 py-2">
                           {status}
                         </div>
                       )}
-                      
+
                       {/* Debug Info Button */}
                       {!isSending && (
                         <div className="mt-3 text-center space-y-2">
@@ -6544,21 +6533,21 @@ const handleSendWhatsApp = async (contact) => {
                               console.log('📈 Sent Leads:', sentLeads);
                               console.log('🔄 Follow-up History:', followUpHistory);
                               console.log('❌ Replied Leads:', repliedLeads);
-                              
+
                               alert(`Debug Info:\n\nSafe Candidates: ${safeFollowUpCandidates.length}\nUser ID: ${user?.uid ? '✅' : '❌'}\nSent Leads: ${sentLeads?.length || 0}\n\nCheck console for detailed info.`);
                             }}
                             className="text-xs text-gray-400 hover:text-indigo-300 underline"
                           >
                             🔍 Debug Info
                           </button>
-                          
+
                           <button
                             onClick={testFollowUpSend}
                             className="text-xs text-orange-400 hover:text-orange-300 underline block w-full"
                           >
                             🧪 Test Single Follow-Up
                           </button>
-                          
+
                           <button
                             onClick={testFollowUpBypassQuota}
                             className="text-xs text-red-400 hover:text-red-300 underline block w-full"
@@ -6627,11 +6616,10 @@ const handleSendWhatsApp = async (contact) => {
                               <span className="text-purple-400 font-medium">
                                 📨 Follow-up #{followUpCount + 1}
                               </span>
-                              <span className={`font-bold ${
-                                contact.safetyScore >= 80 ? 'text-green-400' : 
-                                contact.safetyScore >= 60 ? 'text-yellow-400' : 
-                                'text-orange-400'
-                              }`}>
+                              <span className={`font-bold ${contact.safetyScore >= 80 ? 'text-green-400' :
+                                  contact.safetyScore >= 60 ? 'text-yellow-400' :
+                                    'text-orange-400'
+                                }`}>
                                 ✓ {Math.round(contact.safetyScore)}% safe
                               </span>
                             </div>
@@ -6705,7 +6693,7 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       )}
-      
+
       {/* CALL HISTORY MODAL */}
       {showCallHistoryModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -6772,25 +6760,23 @@ const handleSendWhatsApp = async (contact) => {
                     return (
                       <div
                         key={call.id}
-                        className={`p-4 rounded-lg border-2 ${
-                          isCompleted
+                        className={`p-4 rounded-lg border-2 ${isCompleted
                             ? 'border-green-700 bg-green-900/10'
                             : call.status === 'failed'
-                            ? 'border-red-700 bg-red-900/10'
-                            : 'border-gray-700 bg-gray-800'
-                        }`}
+                              ? 'border-red-700 bg-red-900/10'
+                              : 'border-gray-700 bg-gray-800'
+                          }`}
                       >
                         <div className="flex justify-between items-start">
                           <div className="flex-1">
                             <div className="flex items-center space-x-2 mb-1">
                               <h3 className="font-bold text-white">{call.businessName}</h3>
-                              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                call.status === 'completed'
+                              <span className={`px-2 py-1 rounded text-xs font-medium ${call.status === 'completed'
                                   ? 'bg-green-900/30 text-green-300'
                                   : call.status === 'failed'
-                                  ? 'bg-red-900/30 text-red-300'
-                                  : 'bg-gray-700 text-gray-300'
-                              }`}>
+                                    ? 'bg-red-900/30 text-red-300'
+                                    : 'bg-gray-700 text-gray-300'
+                                }`}>
                                 {call.status === 'completed' ? 'Completed' : call.status === 'failed' ? 'Failed' : 'In Progress'}
                               </span>
                             </div>
@@ -6859,17 +6845,15 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       )}
-      
+
       {/* MULTI-CHANNEL OUTREACH MODAL - ✅ MOBILE RESPONSIVE */}
       {showMultiChannelModal && (
-        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${
-          isMultiChannelFullscreen ? '' : 'p-2 sm:p-4'
-        }`}>
-          <div className={`bg-gray-800 rounded-xl shadow-2xl ${
-            isMultiChannelFullscreen
+        <div className={`fixed inset-0 bg-black/70 flex items-center justify-center z-50 ${isMultiChannelFullscreen ? '' : 'p-2 sm:p-4'
+          }`}>
+          <div className={`bg-gray-800 rounded-xl shadow-2xl ${isMultiChannelFullscreen
               ? 'w-screen h-screen max-h-screen rounded-none'
               : 'w-full max-w-6xl max-h-[90vh]'
-          } overflow-hidden flex flex-col border border-gray-700`}>
+            } overflow-hidden flex flex-col border border-gray-700`}>
             <div className="p-3 sm:p-4 border-b border-gray-700 flex justify-between items-center bg-gradient-to-r from-indigo-900/20 to-blue-900/20">
               <div className="flex-1 min-w-0">
                 <h2 className="text-base sm:text-2xl font-bold text-white truncate">🌐 Multi-Channel Outreach Manager</h2>
@@ -6893,7 +6877,7 @@ const handleSendWhatsApp = async (contact) => {
                 </button>
               </div>
             </div>
-            
+
             {/* Stats Row - Mobile Responsive */}
             <div className="p-2 sm:p-4 bg-gray-800 border-b border-gray-700 grid grid-cols-3 sm:grid-cols-6 gap-1 sm:gap-3">
               <div className="text-center">
@@ -6931,7 +6915,7 @@ const handleSendWhatsApp = async (contact) => {
                 <div className="text-[10px] sm:text-xs text-gray-400">High Quality</div>
               </div>
             </div>
-            
+
             {/* Contact List - Mobile Responsive Grid */}
             <div className="flex-1 overflow-y-auto p-2 sm:p-4">
               {(() => {
@@ -6953,13 +6937,12 @@ const handleSendWhatsApp = async (contact) => {
                   return (
                     <div
                       key={link.id}
-                      className={`p-3 rounded-xl border-2 transition-all ${
-                        isReplied
+                      className={`p-3 rounded-xl border-2 transition-all ${isReplied
                           ? 'border-green-700 bg-green-900/15'
                           : isContacted
-                          ? 'border-gray-600 bg-gray-750'
-                          : 'border-gray-700 bg-gray-800'
-                      }`}
+                            ? 'border-gray-600 bg-gray-750'
+                            : 'border-gray-700 bg-gray-800'
+                        }`}
                     >
                       <div className="flex justify-between items-start gap-3 mb-3">
                         <div className="min-w-0">
@@ -7016,9 +6999,8 @@ const handleSendWhatsApp = async (contact) => {
                         )}
                         <div className="flex justify-between">
                           <span className="text-gray-400">Lead score</span>
-                          <span className={`font-semibold ${
-                            score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-orange-400'
-                          }`}>{score}/100</span>
+                          <span className={`font-semibold ${score >= 70 ? 'text-green-400' : score >= 50 ? 'text-yellow-400' : 'text-orange-400'
+                            }`}>{score}/100</span>
                         </div>
                       </div>
 
@@ -7057,11 +7039,10 @@ const handleSendWhatsApp = async (contact) => {
                         )}
                         <button
                           onClick={() => markContactManually(link, !isContacted, 'Manual update from modal')}
-                          className={`w-full text-[10px] sm:text-xs px-2 py-1 rounded font-medium ${
-                            isContacted
+                          className={`w-full text-[10px] sm:text-xs px-2 py-1 rounded font-medium ${isContacted
                               ? 'bg-gray-600 hover:bg-gray-500 text-white'
                               : 'bg-green-600 hover:bg-green-500 text-white'
-                          }`}
+                            }`}
                         >
                           {isContacted ? '↩️ Mark Not Contacted' : '✅ Mark Contacted'}
                         </button>
@@ -7075,21 +7056,19 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="flex flex-wrap gap-2">
                       <button
                         onClick={() => setMultiChannelPanel('not-contacted')}
-                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${
-                          multiChannelPanel === 'not-contacted'
+                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${multiChannelPanel === 'not-contacted'
                             ? 'bg-blue-600 text-white shadow-lg'
                             : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
-                        }`}
+                          }`}
                       >
                         🆕 Not Contacted ({notContactedLinks.length})
                       </button>
                       <button
                         onClick={() => setMultiChannelPanel('contacted')}
-                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${
-                          multiChannelPanel === 'contacted'
+                        className={`px-3 py-2 rounded-full text-sm font-semibold transition ${multiChannelPanel === 'contacted'
                             ? 'bg-green-600 text-white shadow-lg'
                             : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'
-                        }`}
+                          }`}
                       >
                         ✅ Contacted ({contactedLinks.length})
                       </button>
@@ -7130,7 +7109,7 @@ const handleSendWhatsApp = async (contact) => {
                 );
               })()}
             </div>
-            
+
             {/* Footer */}
             <div className="p-2 sm:p-4 border-t border-gray-700 bg-gray-800 flex justify-between items-center">
               <div className="text-[10px] sm:text-xs text-gray-500">
@@ -7146,7 +7125,7 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       )}
-      
+
       {/* AI RESEARCH MODAL */}
       {showResearchModal && researchingCompany && researchResults[researchingCompany] && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -7231,7 +7210,7 @@ const handleSendWhatsApp = async (contact) => {
           </div>
         </div>
       )}
-      
+
       {/* BUSINESS INTELLIGENCE DASHBOARD */}
       <div className="fixed bottom-4 right-4 z-40">
         <button
@@ -7242,7 +7221,7 @@ const handleSendWhatsApp = async (contact) => {
           📊
         </button>
       </div>
-      
+
       {analyticsTab !== 'hidden' && (
         <div className="fixed bottom-24 right-4 z-40 bg-gray-900 border-2 border-cyan-500/50 rounded-2xl shadow-2xl w-96 max-h-96 overflow-hidden">
           <div className="bg-gradient-to-r from-cyan-900 to-blue-900 p-4 border-b border-cyan-500/30 flex justify-between items-center">
@@ -7254,7 +7233,7 @@ const handleSendWhatsApp = async (contact) => {
               ✕
             </button>
           </div>
-          
+
           <div className="p-4 space-y-3 overflow-y-auto max-h-80">
             <div className="flex gap-2">
               <button
@@ -7276,7 +7255,7 @@ const handleSendWhatsApp = async (contact) => {
                 🔮 AI Predict
               </button>
             </div>
-            
+
             {analyticsTab === 'overview' && analyticsData && (
               <div className="space-y-3">
                 {analyticsData.roi && (
@@ -7290,7 +7269,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 )}
-                
+
                 {analyticsData.funnel && analyticsData.funnel.conversionRates && (
                   <div className="bg-purple-900/30 border border-purple-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-purple-400 mb-2">📊 Conversion Funnel</div>
@@ -7301,7 +7280,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 )}
-                
+
                 {analyticsData.channelPerformance && (
                   <div className="bg-orange-900/30 border border-orange-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-orange-400 mb-2">📱 Best Channel</div>
@@ -7314,11 +7293,11 @@ const handleSendWhatsApp = async (contact) => {
                     ))}
                   </div>
                 )}
-                
+
                 {loadingAnalytics && <div className="text-center text-sm text-gray-400">Loading analytics...</div>}
               </div>
             )}
-            
+
             {analyticsTab === 'pipeline' && pipelineData && (
               <div className="space-y-3">
                 {pipelineData.expectedRevenue && (
@@ -7328,7 +7307,7 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="text-xs text-cyan-400 mt-1">Expected Revenue</div>
                   </div>
                 )}
-                
+
                 {pipelineData.forecast && (
                   <div className="bg-blue-900/30 border border-blue-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-blue-400 mb-2">📈 Forecast (90d)</div>
@@ -7338,7 +7317,7 @@ const handleSendWhatsApp = async (contact) => {
                     </div>
                   </div>
                 )}
-                
+
                 {pipelineData.suggestions && pipelineData.suggestions.length > 0 && (
                   <div className="bg-yellow-900/30 border border-yellow-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-yellow-400 mb-2">💡 Next Steps</div>
@@ -7349,11 +7328,11 @@ const handleSendWhatsApp = async (contact) => {
                     ))}
                   </div>
                 )}
-                
+
                 {loadingPipeline && <div className="text-center text-sm text-gray-400">Loading pipeline...</div>}
               </div>
             )}
-            
+
             {analyticsTab === 'predict' && predictiveData && (
               <div className="space-y-3">
                 {predictiveData.closureProbability && (
@@ -7363,7 +7342,7 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="text-xs text-teal-400 mt-1">Likelihood to win</div>
                   </div>
                 )}
-                
+
                 {predictiveData.bestContactTime && (
                   <div className="bg-pink-900/30 border border-pink-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-pink-400 mb-2">⏰ Best Contact Time</div>
@@ -7371,7 +7350,7 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="text-xs text-pink-400 mt-1 capitalize">{predictiveData.bestContactTime.recommendedTime}</div>
                   </div>
                 )}
-                
+
                 {predictiveData.priceSensitivity && (
                   <div className="bg-indigo-900/30 border border-indigo-700/50 p-3 rounded">
                     <div className="text-xs font-bold text-indigo-400 mb-2">💵 Price Sensitivity</div>
@@ -7379,7 +7358,7 @@ const handleSendWhatsApp = async (contact) => {
                     <div className="text-xs text-indigo-400 mt-1">{predictiveData.priceSensitivity.recommendedStrategy.substring(0, 40)}...</div>
                   </div>
                 )}
-                
+
                 {loadingPredictive && <div className="text-center text-sm text-gray-400">Loading predictions...</div>}
               </div>
             )}
