@@ -332,6 +332,19 @@ const extractTemplateVariables = (text) => {
 };
 
 /**
+ * Parse multiple emails from a single string (split by , or ;)
+ */
+const parseMultipleEmails = (emailString) => {
+  if (!emailString || typeof emailString !== 'string') return [];
+  const emails = []
+    .concat(emailString.split(','))
+    .concat(emailString.split(';'))
+    .map(e => e.trim().toLowerCase())
+    .filter(e => isValidEmail(e));
+  return [...new Set(emails)]; // Remove duplicates
+};
+
+/**
  * Validate email address with strict rules
  */
 const isValidEmail = (email) => {
@@ -1986,14 +1999,15 @@ export default function Dashboard() {
   // ============================================================================
   const getNewLeads = useCallback(() => {
     if (!whatsappLinks || whatsappLinks.length === 0) return [];
-    
+
     const sentEmailsSet = new Set();
     sentLeads.forEach(lead => {
       if (lead.email) {
         sentEmailsSet.add(lead.email.toLowerCase().trim());
       }
     });
-    
+
+    // Filter new leads
     const newLeads = whatsappLinks
       .filter(contact => {
         if (!contact.email) return false;
@@ -2004,8 +2018,39 @@ export default function Dashboard() {
         ...contact,
         email: contact.email.toLowerCase().trim()
       }));
-    
-    return newLeads.sort((a, b) => {
+
+    // Group by rowGroupId to send multiple emails from same row with delays
+    const groupedLeads = [];
+    const processedGroups = new Set();
+
+    newLeads.forEach(lead => {
+      if (lead.rowGroupId && !processedGroups.has(lead.rowGroupId)) {
+        // Get all leads from this group
+        const groupLeads = newLeads.filter(l => l.rowGroupId === lead.rowGroupId);
+        if (groupLeads.length > 1) {
+          // Multiple emails from same row - add all as individual emails with delay metadata
+          groupLeads.forEach((groupLead, index) => {
+            groupedLeads.push({
+              ...groupLead,
+              isFromMultiEmailRow: true,
+              emailIndex: index,
+              totalEmailsInRow: groupLeads.length,
+              delayBeforeSend: index * 5000 // 5 second delay between each email from same row
+            });
+          });
+          processedGroups.add(lead.rowGroupId);
+        } else {
+          // Single email - add as normal
+          groupedLeads.push(lead);
+          processedGroups.add(lead.rowGroupId);
+        }
+      } else if (!lead.rowGroupId) {
+        // No row group - add as normal (backward compatibility)
+        groupedLeads.push(lead);
+      }
+    });
+
+    return groupedLeads.sort((a, b) => {
       const scoreA = leadScores[a.email] || 50;
       const scoreB = leadScores[b.email] || 50;
       return scoreB - scoreA;
@@ -3915,20 +3960,23 @@ const handleSendWhatsApp = async (contact) => {
           }
         }
         
-        // Validate email
+        // Validate email - handle multiple emails
         const emailCol = initialMappings.email || 'email';
-        const hasValidEmail = isValidEmail(row[emailCol]);
-        
+        const emailString = row[emailCol] || '';
+        const emails = parseMultipleEmails(emailString);
+        const hasValidEmail = emails.length > 0;
+
         if (hasValidEmail && includeEmail) {
           const score = calculateScore(row);
-          const email = row[emailCol].toLowerCase().trim();
-          newLeadScores[email] = score;
-          
+          emails.forEach(email => {
+            newLeadScores[email] = score;
+          });
+
           const quality = (row.lead_quality || '').trim().toUpperCase() || 'HOT';
           if (quality === 'HOT') {
-            hotEmails++;
+            hotEmails += emails.length;
           } else if (quality === 'WARM') {
-            warmEmails++;
+            warmEmails += emails.length;
           }
         }
         
@@ -3939,50 +3987,102 @@ const handleSendWhatsApp = async (contact) => {
         
         if (formattedPhone) {
           const businessCol = initialMappings.business_name || 'business_name';
-          const contactId = generateId();
-          
-          // Create normalized key for deduplication
-          const normalizedKey = hasValidEmail ? row[emailCol].toLowerCase().trim() : formattedPhone;
-          
-          // Skip if we already have this contact
-          if (contactMap.has(normalizedKey)) {
-            continue;
+          const rowGroupId = generateId(); // Group emails from same row
+
+          // Create separate contacts for each email
+          if (hasValidEmail) {
+            emails.forEach((email, index) => {
+              const contactId = generateId();
+
+              // Skip if we already have this email
+              if (contactMap.has(email)) {
+                return;
+              }
+
+              const contact = {
+                id: contactId,
+                rowGroupId, // Track which row this came from
+                business: row[businessCol] || 'Business',
+                address: row.address || '',
+                phone: formattedPhone,
+                email: email,
+                allEmails: emails, // Store all emails from this row
+                emailIndex: index, // Position in the email list
+                place_id: row.place_id || '',
+                website: row.website || '',
+                instagram: row.instagram || '',
+                twitter: row.twitter || '',
+                facebook: row.facebook || '',
+                youtube: row.youtube || '',
+                tiktok: row.tiktok || '',
+                linkedin_company: row.linkedin_company || '',
+                linkedin_ceo: row.linkedin_ceo || '',
+                linkedin_founder: row.linkedin_founder || '',
+                contact_page_found: row.contact_page_found || 'No',
+                social_media_score: row.social_media_score || '0',
+                email_primary: row.email_primary || email,
+                phone_primary: row.phone_primary || formattedPhone || '',
+                lead_quality_score: row.lead_quality_score || '0',
+                contact_confidence: row.contact_confidence || 'Low',
+                best_contact_method: row.best_contact_method || 'Email',
+                decision_maker_found: row.decision_maker_found || 'No',
+                tech_stack_detected: row.tech_stack_detected || '',
+                company_size_indicator: row.company_size_indicator || 'unknown',
+                lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
+                rating: row.rating || '0',
+                review_count: row.review_count || '0',
+                createdAt: new Date().toISOString()
+              };
+
+              validPhoneContacts.push(contact);
+              contactMap.set(email, contact);
+            });
+          } else {
+            // No valid emails, create contact with phone only
+            const contactId = generateId();
+
+            // Skip if we already have this phone
+            if (contactMap.has(formattedPhone)) {
+              continue;
+            }
+
+            const contact = {
+              id: contactId,
+              rowGroupId,
+              business: row[businessCol] || 'Business',
+              address: row.address || '',
+              phone: formattedPhone,
+              email: null,
+              allEmails: [],
+              place_id: row.place_id || '',
+              website: row.website || '',
+              instagram: row.instagram || '',
+              twitter: row.twitter || '',
+              facebook: row.facebook || '',
+              youtube: row.youtube || '',
+              tiktok: row.tiktok || '',
+              linkedin_company: row.linkedin_company || '',
+              linkedin_ceo: row.linkedin_ceo || '',
+              linkedin_founder: row.linkedin_founder || '',
+              contact_page_found: row.contact_page_found || 'No',
+              social_media_score: row.social_media_score || '0',
+              email_primary: row.email_primary || '',
+              phone_primary: row.phone_primary || formattedPhone || '',
+              lead_quality_score: row.lead_quality_score || '0',
+              contact_confidence: row.contact_confidence || 'Low',
+              best_contact_method: row.best_contact_method || 'Email',
+              decision_maker_found: row.decision_maker_found || 'No',
+              tech_stack_detected: row.tech_stack_detected || '',
+              company_size_indicator: row.company_size_indicator || 'unknown',
+              lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
+              rating: row.rating || '0',
+              review_count: row.review_count || '0',
+              createdAt: new Date().toISOString()
+            };
+
+            validPhoneContacts.push(contact);
+            contactMap.set(formattedPhone, contact);
           }
-          
-          const contact = {
-            id: contactId,
-            business: row[businessCol] || 'Business',
-            address: row.address || '',
-            phone: formattedPhone,
-            email: hasValidEmail ? row[emailCol].toLowerCase().trim() : null,
-            place_id: row.place_id || '',
-            website: row.website || '',
-            instagram: row.instagram || '',
-            twitter: row.twitter || '',
-            facebook: row.facebook || '',
-            youtube: row.youtube || '',
-            tiktok: row.tiktok || '',
-            linkedin_company: row.linkedin_company || '',
-            linkedin_ceo: row.linkedin_ceo || '',
-            linkedin_founder: row.linkedin_founder || '',
-            contact_page_found: row.contact_page_found || 'No',
-            social_media_score: row.social_media_score || '0',
-            email_primary: row.email_primary || row[emailCol] || '',
-            phone_primary: row.phone_primary || formattedPhone || '',
-            lead_quality_score: row.lead_quality_score || '0',
-            contact_confidence: row.contact_confidence || 'Low',
-            best_contact_method: row.best_contact_method || 'Email',
-            decision_maker_found: row.decision_maker_found || 'No',
-            tech_stack_detected: row.tech_stack_detected || '',
-            company_size_indicator: row.company_size_indicator || 'unknown',
-            lead_quality: (row.lead_quality || '').trim().toUpperCase() || 'HOT',
-            rating: row.rating || '0',
-            review_count: row.review_count || '0',
-            createdAt: new Date().toISOString()
-          };
-          
-          validPhoneContacts.push(contact);
-          contactMap.set(normalizedKey, contact);
         }
       }
       
@@ -4447,23 +4547,60 @@ const handleSendWhatsApp = async (contact) => {
         });
         
         const emailValue = row[emailColumnName] || '';
-        const normalizedEmail = emailValue.trim().toLowerCase();
-        
-        if (!isValidEmail(normalizedEmail)) {
+        const emails = parseMultipleEmails(emailValue);
+
+        if (emails.length === 0) {
           continue;
         }
-        
+
+        // Create separate recipient entries for each email
+        emails.forEach((email, index) => {
+          const normalizedEmail = email.trim().toLowerCase();
+          const normalizedRow = { ...row, email: normalizedEmail };
+          // Add metadata for delay handling
+          if (emails.length > 1) {
+            normalizedRow.isFromMultiEmailRow = true;
+            normalizedRow.emailIndex = index;
+            normalizedRow.totalEmailsInRow = emails.length;
+            normalizedRow.rowGroupId = generateId();
+          }
+          validRecipients.push(normalizedRow);
+        });
+
         const hasQualityColumn = headers.includes(qualityColumnName);
         const quality = hasQualityColumn ? (row[qualityColumnName] || '').trim().toUpperCase() || 'HOT' : 'HOT';
-        
+
         if (leadQualityFilter !== 'all' && quality !== leadQualityFilter) {
           continue;
         }
-        
-        const normalizedRow = { ...row, email: normalizedEmail };
-        validRecipients.push(normalizedRow);
       }
-      
+
+      // Sort recipients to group emails from same row together
+      validRecipients.sort((a, b) => {
+        // If both are from multi-email rows, sort by rowGroupId then by emailIndex
+        if (a.rowGroupId && b.rowGroupId) {
+          if (a.rowGroupId !== b.rowGroupId) {
+            return a.rowGroupId.localeCompare(b.rowGroupId);
+          }
+          return (a.emailIndex || 0) - (b.emailIndex || 0);
+        }
+        // Multi-email rows come first
+        if (a.rowGroupId) return -1;
+        if (b.rowGroupId) return 1;
+        return 0;
+      });
+
+      // Check for multi-email rows and notify user
+      const multiEmailRowCount = validRecipients.filter(r => r.isFromMultiEmailRow).length;
+      if (multiEmailRowCount > 0) {
+        const uniqueRows = new Set(validRecipients.filter(r => r.rowGroupId).map(r => r.rowGroupId)).size;
+        addNotification(
+          `📧 Found ${uniqueRows} row(s) with multiple emails. These will be sent individually with built-in delays to avoid spam detection.`,
+          'info',
+          5000
+        );
+      }
+
       let recipientsToSend = [];
       
       if (abTestMode && templateToSend) {
