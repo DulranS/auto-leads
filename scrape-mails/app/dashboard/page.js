@@ -2154,7 +2154,24 @@ export default function Dashboard() {
     
     return () => unsubscribe();
   }, [auth, addNotification]);
-  
+
+  // ============================================================================
+  // PERIODICALLY CHECK FOR EMAIL REPLIES
+  // ============================================================================
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    // Check for replies immediately on mount
+    checkForReplies();
+
+    // Then check every 5 minutes
+    const interval = setInterval(() => {
+      checkForReplies();
+    }, 5 * 60 * 1000); // 5 minutes
+
+    return () => clearInterval(interval);
+  }, [user?.uid, checkForReplies]);
+
   // ============================================================================
   // LOAD MANUAL CONTACT STATUS FROM FIREBASE
   // ============================================================================
@@ -2462,7 +2479,91 @@ export default function Dashboard() {
       console.warn('Replied/Follow-up load failed:', e);
     }
   }, [user?.uid]);
-  
+
+  // ============================================================================
+  // CHECK FOR EMAIL REPLIES
+  // ============================================================================
+  const checkForReplies = useCallback(async () => {
+    if (!user?.uid || !db) return;
+
+    try {
+      const accessToken = await requestGmailToken();
+      if (!accessToken) return;
+
+      // Get sent emails that haven't been replied to yet
+      const q = query(
+        collection(db, 'sent_emails'),
+        where('userId', '==', user.uid),
+        where('replied', '==', false)
+      );
+      const snapshot = await getDocs(q);
+
+      if (snapshot.empty) return;
+
+      // Set up Gmail API
+      const oauth2Client = new google.auth.OAuth2(
+        process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID,
+        process.env.NEXT_PUBLIC_GOOGLE_CLIENT_SECRET,
+        process.env.NEXT_PUBLIC_GOOGLE_REDIRECT_URI
+      );
+
+      oauth2Client.setCredentials({ access_token: accessToken });
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+      let replyCount = 0;
+
+      // Check each sent email for replies
+      for (const doc of snapshot.docs) {
+        const sentEmail = doc.data();
+        const toEmail = sentEmail.to;
+        const subject = sentEmail.subject;
+
+        // Search for replies in Gmail
+        const searchQuery = `to:${senderEmail} from:${toEmail} in:inbox "${subject}"`;
+        const response = await gmail.users.messages.list({
+          userId: 'me',
+          q: searchQuery,
+          maxResults: 1
+        });
+
+        if (response.data.messages && response.data.messages.length > 0) {
+          // Found a reply - update Firebase
+          await updateDoc(doc.ref, {
+            replied: true,
+            repliedAt: new Date().toISOString(),
+            followUpAt: null // Cancel scheduled follow-ups
+          });
+
+          replyCount++;
+          console.log(`✅ Reply detected from ${toEmail}`);
+
+          // Track company reply
+          try {
+            await fetch('/api/mark-replied', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                userId: user.uid,
+                email: toEmail
+              })
+            });
+          } catch (trackError) {
+            console.warn('Failed to track reply:', trackError);
+          }
+        }
+      }
+
+      if (replyCount > 0) {
+        addNotification(`📬 Detected ${replyCount} new reply/replies!`, 'success', 5000);
+        // Refresh replied leads
+        await loadRepliedAndFollowUp();
+      }
+    } catch (error) {
+      console.error('Error checking for replies:', error);
+      // Don't show notification for this error as it runs periodically
+    }
+  }, [user?.uid, db, senderEmail, requestGmailToken, loadRepliedAndFollowUp]);
+
   // ============================================================================
   // LOAD DAILY EMAIL COUNT FROM API WITH ERROR HANDLING
   // ============================================================================
@@ -5174,7 +5275,16 @@ const handleSendWhatsApp = async (contact) => {
                 <span>🔥</span>
                 <span className="hidden sm:inline">Scrape</span>
               </button>
-              
+
+              <button
+                onClick={() => checkForReplies()}
+                className="text-xs sm:text-sm bg-blue-700 hover:bg-blue-600 text-white px-3 py-2 rounded-lg transition flex items-center gap-2"
+                title="Check for new email replies"
+              >
+                <span>📬</span>
+                <span className="hidden sm:inline">Check Replies</span>
+              </button>
+
               <button
                 onClick={() => setShowSettingsModal(true)}
                 className="text-xs sm:text-sm bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg transition"
