@@ -346,11 +346,13 @@ process.on('SIGTERM', async () => {
   isRunning = false;
   
   try {
-    await supabaseAdmin.from('scheduler_logs').insert({
-      action: 'shutdown',
-      status: 'inactive',
-      timestamp: new Date().toISOString()
-    });
+    if (supabaseAdmin) {
+      await supabaseAdmin.from('scheduler_logs').insert({
+        action: 'shutdown',
+        status: 'inactive',
+        timestamp: new Date().toISOString()
+      });
+    }
   } catch (error) {
     console.error('[SAAS Scheduler] Error logging shutdown:', error);
   }
@@ -366,11 +368,13 @@ process.on('SIGINT', async () => {
   isRunning = false;
   
   try {
-    await supabaseAdmin.from('scheduler_logs').insert({
-      action: 'shutdown',
-      status: 'inactive',
-      timestamp: new Date().toISOString()
-    });
+    if (supabaseAdmin) {
+      await supabaseAdmin.from('scheduler_logs').insert({
+        action: 'shutdown',
+        status: 'inactive',
+        timestamp: new Date().toISOString()
+      });
+    }
   } catch (error) {
     console.error('[SAAS Scheduler] Error logging shutdown:', error);
   }
