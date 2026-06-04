@@ -2500,6 +2500,9 @@ export default function Dashboard() {
   // ============================================================================
   // PERIODICALLY CHECK FOR EMAIL REPLIES
   // ============================================================================
+  // Temporarily disabled to avoid initialization issues
+  // Users can manually check for replies using the "Check Replies" button
+  /*
   useEffect(() => {
     if (!user?.uid) return;
 
@@ -2512,7 +2515,8 @@ export default function Dashboard() {
     }, 5 * 60 * 1000); // 5 minutes
 
     return () => clearInterval(interval);
-  }, [user?.uid, checkForReplies]);
+  }, [user?.uid]);
+  */
 
   // ============================================================================
   // LOAD DAILY EMAIL COUNT FROM API WITH ERROR HANDLING
