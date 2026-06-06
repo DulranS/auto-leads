@@ -205,8 +205,14 @@ export const normalizeSentLead = (lead) => {
 export const getLeadNextFollowUpAt = (lead) => {
   if (!lead || lead.replied) return null;
 
+  // First check if there's an explicit followUpAt set (from initial email send)
+  if (lead.followUpAt) {
+    return new Date(lead.followUpAt);
+  }
+
+  // Otherwise calculate based on lastFollowUpAt
   const followUpCount = Number(lead.followUpCount ?? 0);
-  const lastFollowUpAt = lead.lastFollowUpAt;
+  const lastFollowUpAt = lead.lastFollowUpAt || lead.lastFollowUpSentAt;
 
   if (!lastFollowUpAt) return null;
 
