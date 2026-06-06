@@ -451,6 +451,14 @@ export default function Dashboard() {
     const followUpAt = safeParseDate(lead.followUpAt);
     const lastFollowUpAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt);
 
+    console.log(`🔧 Normalizing lead ${email}:`, {
+      originalFollowUpAt: lead.followUpAt,
+      parsedFollowUpAt: followUpAt,
+      sentAt,
+      lastFollowUpAt,
+      followUpCount: lead.followUpCount ?? lead.followUpSentCount ?? 0
+    });
+
     return {
       ...lead,
       email,
@@ -915,6 +923,7 @@ export default function Dashboard() {
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
     console.log(`📋 Found ${candidates.length} safe candidates`);
+    console.log('📋 Safe candidates:', candidates);
     return candidates;
   }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
 
@@ -1838,6 +1847,7 @@ export default function Dashboard() {
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
 
+    console.log('📧 Loading sent leads for user:', user.uid);
     setLoadingSentLeads(true);
 
     try {
@@ -1846,6 +1856,8 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
+
+      console.log('📧 API response status:', res.status);
 
       // Handle 404 gracefully
       if (res.status === 404) {
@@ -1870,12 +1882,15 @@ export default function Dashboard() {
       }
 
       const data = await res.json();
+      console.log('📧 API response data:', data);
 
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
+        console.log('📧 Normalized leads:', normalizedLeads.length);
+        console.log('📧 Sample lead:', normalizedLeads[0]);
         setSentLeads(normalizedLeads);
 
         const history = {};
