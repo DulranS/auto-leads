@@ -2275,16 +2275,6 @@ export default function Dashboard() {
           'success'
         );
 
-        setFollowUpHistory(prev => ({
-          ...prev,
-          [email]: {
-            count: data.followUpCount || (prev[email]?.count || 0) + 1,
-            lastFollowUpAt: new Date().toISOString(),
-            dates: [...(prev[email]?.dates || []), new Date().toISOString()],
-            loopClosed: isFinalFollowUp
-          }
-        }));
-
         await loadSentLeads();
         await loadRepliedAndFollowUp();
         await loadDeals();
@@ -2295,7 +2285,7 @@ export default function Dashboard() {
       console.error('Follow-up send error:', err);
       addNotification(`❌ Error: ${err.message}`, 'error');
     }
-  }, [user, repliedLeads, followUpHistory, sentLeads, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
+  }, [user, repliedLeads, sentLeads, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
 
   // ============================================================================
   // AI AUTO-REPLY PROCESSOR
@@ -2451,7 +2441,7 @@ export default function Dashboard() {
               continue;
             }
 
-            const followUpCount = followUpHistory[contact.email]?.count || contact.followUpCount || 0;
+            const followUpCount = contact.followUpCount || 0;
             if (followUpCount >= 3) {
               console.log(`⏭️ Skipping ${contact.email} - max follow-ups reached`);
               skipCount++;
@@ -2504,17 +2494,6 @@ export default function Dashboard() {
                 followUpCount: data.followUpCount,
                 loopClosed: data.followUpCount >= 3
               });
-
-              // Update local state immediately
-              setFollowUpHistory(prev => ({
-                ...prev,
-                [contact.email]: {
-                  count: data.followUpCount || (prev[contact.email]?.count || 0) + 1,
-                  lastFollowUpAt: new Date().toISOString(),
-                  dates: [...(prev[contact.email]?.dates || []), new Date().toISOString()],
-                  loopClosed: data.followUpCount >= 3
-                }
-              }));
 
               // Update quota
               incrementQuota('email', 1);
@@ -2588,8 +2567,7 @@ export default function Dashboard() {
     loadSentLeads,
     loadRepliedAndFollowUp,
     loadDeals,
-    repliedLeads,
-    followUpHistory
+    repliedLeads
   ]);
 
   console.log('✅ Mass email follow-up handler defined');
