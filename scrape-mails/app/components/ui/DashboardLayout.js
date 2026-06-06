@@ -35,6 +35,12 @@ export const DashboardLayout = ({ children, title, subtitle }) => {
       label: 'CRM',
     },
     {
+      href: '/ai-tools',
+      icon: '🤖',
+      label: 'AI Tools',
+      badge: { text: 'New', variant: 'success' },
+    },
+    {
       href: '/settings',
       icon: '⚙️',
       label: 'Settings',
