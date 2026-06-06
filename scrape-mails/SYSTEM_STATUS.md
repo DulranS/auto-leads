@@ -86,6 +86,16 @@ Advanced AI capabilities for production use:
 - `app/components/CodeAutomationPanel.js` - Code automation UI
 - Status: ✅ Complete and functional
 
+### Follow-Up System
+Automated follow-up management with intelligent cleanup:
+- Fixed `getLeadNextFollowUpAt` to use explicit `followUpAt` field
+- Follow-ups now appear correctly in Reply & Follow-Up Center
+- Automatic cleanup of old records (30+ days, loop closed)
+- `app/api/list-sent-leads/route.js` - Enhanced with auto-cleanup
+- `app/api/cleanup-old-records/route.js` - Dedicated cleanup endpoint
+- `lib/firebase-operations.js` - Fixed follow-up date calculation
+- Status: ✅ Complete and functional
+
 ## Current Status
 All components are fully functional and properly integrated.
 

@@ -48,6 +48,7 @@ try {
 // ============================================================================
 const CAMPAIGN_WINDOW_DAYS = 30;
 const MAX_FOLLOW_UPS = 3;
+const AUTO_CLEANUP_DAYS = 30; // Auto-delete records older than this
 
 // ============================================================================
 // POST HANDLER
@@ -182,14 +183,51 @@ export async function POST(request) {
       }
     });
     
-    // Sort by sentAt (newest first)
-    leads.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    // ============================================================================
+    // AUTOMATIC CLEANUP OF OLD RECORDS
+    // ============================================================================
+    const cutoffDate = new Date(now);
+    cutoffDate.setDate(cutoffDate.getDate() - AUTO_CLEANUP_DAYS);
     
-    console.log(`✅ Successfully loaded ${leads.length} sent leads for user ${userId}`);
+    const oldRecords = leads.filter(lead => {
+      const sentAt = new Date(lead.sentAt);
+      return sentAt < cutoffDate && lead.loopClosed;
+    });
+    
+    if (oldRecords.length > 0) {
+      console.log(`🧹 Found ${oldRecords.length} old records to clean up (older than ${AUTO_CLEANUP_DAYS} days)`);
+      
+      // Delete old records in batches to avoid overwhelming the database
+      const deletePromises = oldRecords.map(async (lead) => {
+        try {
+          await deleteDoc(doc(db, 'sent_emails', lead.id));
+          console.log(`🗑️ Deleted old record: ${lead.email} (${lead.id})`);
+          deletedCount++;
+          return { success: true, id: lead.id };
+        } catch (deleteError) {
+          console.error(`❌ Failed to delete record ${lead.id}:`, deleteError);
+          return { success: false, id: lead.id, error: deleteError.message };
+        }
+      });
+      
+      await Promise.allSettled(deletePromises);
+      console.log(`✅ Cleanup complete: ${deletedCount} records deleted`);
+    }
+    
+    // Remove deleted records from the returned leads
+    const activeLeads = leads.filter(lead => {
+      const sentAt = new Date(lead.sentAt);
+      return !(sentAt < cutoffDate && lead.loopClosed);
+    });
+    
+    // Sort by sentAt (newest first)
+    activeLeads.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
+    
+    console.log(`✅ Successfully loaded ${activeLeads.length} sent leads for user ${userId} (${deletedCount} old records deleted)`);
     
     return NextResponse.json({
-      leads,
-      total: leads.length,
+      leads: activeLeads,
+      total: activeLeads.length,
       deletedCount
     }, { headers });
     

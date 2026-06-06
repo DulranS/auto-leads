@@ -451,14 +451,6 @@ export default function Dashboard() {
     const followUpAt = safeParseDate(lead.followUpAt);
     const lastFollowUpAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt);
 
-    console.log(`🔧 Normalizing lead ${email}:`, {
-      originalFollowUpAt: lead.followUpAt,
-      parsedFollowUpAt: followUpAt,
-      sentAt,
-      lastFollowUpAt,
-      followUpCount: lead.followUpCount ?? lead.followUpSentCount ?? 0
-    });
-
     return {
       ...lead,
       email,
@@ -471,13 +463,6 @@ export default function Dashboard() {
 
   const getLeadNextFollowUpAt = useCallback((lead) => {
     const explicitFollowUpAt = safeParseDate(lead.followUpAt);
-    console.log(`🔍 getLeadNextFollowUpAt for ${lead.email}:`, {
-      followUpAt: lead.followUpAt,
-      explicitFollowUpAt,
-      lastFollowUpAt: lead.lastFollowUpAt,
-      lastFollowUpSentAt: lead.lastFollowUpSentAt,
-      sentAt: lead.sentAt
-    });
     if (explicitFollowUpAt) return explicitFollowUpAt;
 
     const lastAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt) || safeParseDate(lead.sentAt);
@@ -865,12 +850,7 @@ export default function Dashboard() {
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
   // ============================================================================
   const getSafeFollowUpCandidates = useCallback(() => {
-    console.log('🔍 Getting safe follow-up candidates...');
-    console.log('📊 Sent leads:', sentLeads);
-    console.log('📈 Follow-up history:', followUpHistory);
-
     if (!sentLeads || sentLeads.length === 0) {
-      console.log('⚠️ No sent leads available');
       return [];
     }
 
@@ -879,31 +859,25 @@ export default function Dashboard() {
       .map(normalizeSentLead)
       .filter(lead => {
         if (!lead || !lead.email) {
-          console.log('❌ Invalid lead:', lead);
           return false;
         }
         if (lead.replied) {
-          console.log(`⏭️ Skipping ${lead.email} - already replied`);
           return false;
         }
 
         const followUpAt = getLeadNextFollowUpAt(lead);
         if (!followUpAt) {
-          console.log(`⏭️ Skipping ${lead.email} - missing follow-up schedule`);
           return false;
         }
         if (followUpAt > now) {
-          console.log(`⏭️ Skipping ${lead.email} - not ready yet (${followUpAt} > ${now})`);
           return false;
         }
 
         const followUpCount = followUpHistory[lead.email]?.count ?? lead.followUpCount ?? lead.followUpSentCount ?? 0;
         if (followUpCount >= 3) {
-          console.log(`⏭️ Skipping ${lead.email} - max follow-ups reached (${followUpCount})`);
           return false;
         }
 
-        console.log(`✅ ${lead.email} is safe for follow-up`);
         return true;
       })
       .map(lead => {
@@ -922,8 +896,6 @@ export default function Dashboard() {
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
-    console.log(`📋 Found ${candidates.length} safe candidates`);
-    console.log('📋 Safe candidates:', candidates);
     return candidates;
   }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
 
@@ -1847,7 +1819,6 @@ export default function Dashboard() {
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
 
-    console.log('📧 Loading sent leads for user:', user.uid);
     setLoadingSentLeads(true);
 
     try {
@@ -1856,8 +1827,6 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.uid })
       });
-
-      console.log('📧 API response status:', res.status);
 
       // Handle 404 gracefully
       if (res.status === 404) {
@@ -1882,15 +1851,12 @@ export default function Dashboard() {
       }
 
       const data = await res.json();
-      console.log('📧 API response data:', data);
 
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
-        console.log('📧 Normalized leads:', normalizedLeads.length);
-        console.log('📧 Sample lead:', normalizedLeads[0]);
         setSentLeads(normalizedLeads);
 
         const history = {};
