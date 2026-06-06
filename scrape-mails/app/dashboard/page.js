@@ -2241,13 +2241,26 @@ export default function Dashboard() {
     }
 
     try {
-      const res = await fetch('/api/send-followup', {
+      // Find the lead data
+      const lead = sentLeads.find(l => l.email === email);
+      if (!lead) {
+        addNotification(`❌ Lead not found: ${email}`, 'error');
+        return;
+      }
+
+      // Create minimal CSV content for follow-up
+      const csvContent = `email,firstName,lastName,company\n${email},${lead.firstName || ''},${lead.lastName || ''},${lead.businessName || ''}`;
+
+      const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email,
-          accessToken,
+          contact: lead,
+          followUpCount: followUpCount + 1,
           userId: user.uid,
+          accessToken,
+          csvContent,
+          templateToSend: 'followup',
           senderName
         })
       });
@@ -2282,7 +2295,7 @@ export default function Dashboard() {
       console.error('Follow-up send error:', err);
       addNotification(`❌ Error: ${err.message}`, 'error');
     }
-  }, [user, repliedLeads, followUpHistory, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
+  }, [user, repliedLeads, followUpHistory, sentLeads, addNotification, loadSentLeads, loadRepliedAndFollowUp, loadDeals]);
 
   // ============================================================================
   // AI AUTO-REPLY PROCESSOR
@@ -2446,11 +2459,30 @@ export default function Dashboard() {
               continue;
             }
 
+            // Get Gmail token
+            const accessToken = await requestGmailToken();
+            if (!accessToken) {
+              console.log(`⏭️ Skipping ${contact.email} - no access token`);
+              skipCount++;
+              results.push({ email: contact.email, status: 'skipped', reason: 'No access token' });
+              continue;
+            }
+
+            // Create minimal CSV content for follow-up
+            const csvContent = `email,firstName,lastName,company\n${contact.email},${contact.firstName || ''},${contact.lastName || ''},${contact.businessName || ''}`;
+
             // Send email
             const res = await fetch('/api/send-email', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ contact, followUpCount: followUpCount + 1 })
+              body: JSON.stringify({
+                contact,
+                followUpCount: followUpCount + 1,
+                userId: user.uid,
+                accessToken,
+                csvContent,
+                templateToSend: 'followup'
+              })
             });
 
             const data = await res.json();
