@@ -7,13 +7,27 @@ import { useNotifications } from '../components/ui/NotificationProvider';
 
 // Import Firebase functions
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, updateDoc, doc, addDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, updateDoc, doc, addDoc, query, where } from 'firebase/firestore';
 
 const firebaseConfig = {
-  // Your Firebase config
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  measurementId: process.env.FIREBASE_MEASUREMENT_ID
 };
 
-const db = getFirestore(initializeApp(firebaseConfig));
+// Initialize Firebase with error handling
+let app;
+let db;
+try {
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+}
 
 export default function CRMPage() {
   const { addNotification } = useNotifications();
@@ -33,9 +47,28 @@ export default function CRMPage() {
   const loadCRMData = async () => {
     try {
       // Load leads
-      const leadsRef = collection(db, 'leads');
+      const leadsRef = collection(db, 'sent_emails');
       const leadsSnapshot = await getDocs(leadsRef);
-      const leads = leadsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const leads = leadsSnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          email: data.recipientEmail,
+          business: data.recipientName || data.business_name || 'Unknown',
+          company: data.business_name || 'Unknown',
+          phone: data.recipientPhone || null,
+          website: data.recipientWebsite || null,
+          industry: data.industry || null,
+          sentAt: data.sentAt,
+          replied: data.replied || false,
+          repliedAt: data.repliedAt || null,
+          followUpAt: data.followUpAt || null,
+          status: data.replied ? 'replied' : 'sent',
+          notes: data.notes || [],
+          nextFollowUp: data.followUpAt || null,
+          ...data
+        };
+      });
 
       // Load contacts
       const contactsRef = collection(db, 'contacts');
@@ -91,13 +124,13 @@ export default function CRMPage() {
   const handleUpdateLead = async (email, updates) => {
     try {
       // Find the lead document
-      const leadsRef = collection(db, 'leads');
+      const leadsRef = collection(db, 'sent_emails');
       const q = query(leadsRef, where('email', '==', email));
       const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
         const leadDoc = querySnapshot.docs[0];
-        await updateDoc(doc(db, 'leads', leadDoc.id), updates);
+        await updateDoc(doc(db, 'sent_emails', leadDoc.id), updates);
 
         // Update local state
         setData(prev => ({
@@ -128,7 +161,7 @@ export default function CRMPage() {
       };
 
       // Find the lead and update notes
-      const leadsRef = collection(db, 'leads');
+      const leadsRef = collection(db, 'sent_emails');
       const q = query(leadsRef, where('email', '==', email));
       const querySnapshot = await getDocs(q);
 
@@ -163,7 +196,7 @@ export default function CRMPage() {
       followUpDate.setDate(followUpDate.getDate() + 3); // 3 days from now
 
       // Find the lead and update next follow-up
-      const leadsRef = collection(db, 'leads');
+      const leadsRef = collection(db, 'sent_emails');
       const q = query(leadsRef, where('email', '==', email));
       const querySnapshot = await getDocs(q);
 
