@@ -463,6 +463,13 @@ export default function Dashboard() {
 
   const getLeadNextFollowUpAt = useCallback((lead) => {
     const explicitFollowUpAt = safeParseDate(lead.followUpAt);
+    console.log(`🔍 getLeadNextFollowUpAt for ${lead.email}:`, {
+      followUpAt: lead.followUpAt,
+      explicitFollowUpAt,
+      lastFollowUpAt: lead.lastFollowUpAt,
+      lastFollowUpSentAt: lead.lastFollowUpSentAt,
+      sentAt: lead.sentAt
+    });
     if (explicitFollowUpAt) return explicitFollowUpAt;
 
     const lastAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt) || safeParseDate(lead.sentAt);
