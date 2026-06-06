@@ -1,48 +1,46 @@
 // app/api/list-sent-leads/route.js
 import { NextResponse } from 'next/server';
-import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
-import { getFirestore, collection, query, where, getDocs, orderBy, deleteDoc, doc } from 'firebase-admin/firestore';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore, collection, query, where, getDocs, orderBy, deleteDoc, doc } from 'firebase/firestore';
 
 // ============================================================================
-// FIREBASE ADMIN CONFIGURATION
+// FIREBASE CONFIGURATION WITH ERROR HANDLING
 // ============================================================================
-const getFirebaseAdminConfig = () => {
+const getFirebaseConfig = () => {
   const requiredEnvVars = [
-    'FIREBASE_PROJECT_ID',
-    'FIREBASE_CLIENT_EMAIL',
-    'FIREBASE_PRIVATE_KEY'
+    'NEXT_PUBLIC_FIREBASE_API_KEY',
+    'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
+    'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
+    'NEXT_PUBLIC_FIREBASE_APP_ID'
   ];
 
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
   if (missingVars.length > 0) {
-    console.warn('Missing Firebase Admin environment variables:', missingVars.join(', '));
-    return null;
+    throw new Error(`Missing required Firebase environment variables: ${missingVars.join(', ')}`);
   }
 
   return {
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    measurementId: process.env.FIREBASE_MEASUREMENT_ID
   };
 };
 
-let adminApp;
-let adminDb;
+let app;
+let db;
 
 try {
-  const adminConfig = getFirebaseAdminConfig();
-  if (adminConfig) {
-    adminApp = !getApps().length ? initializeApp({
-      credential: cert(adminConfig)
-    }) : getApp();
-    adminDb = getFirestore(adminApp);
-    console.log('✅ Firebase Admin initialized successfully');
-  } else {
-    console.warn('⚠️ Firebase Admin not configured');
-  }
+  const firebaseConfig = getFirebaseConfig();
+  app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+  console.log('✅ Firebase client initialized successfully');
 } catch (configError) {
-  console.error('Firebase Admin configuration error:', configError);
+  console.error('Firebase configuration error:', configError);
 }
 
 // ============================================================================
@@ -60,11 +58,11 @@ export async function POST(request) {
     'Content-Type': 'application/json',
     'Cache-Control': 'no-cache, no-store, must-revalidate'
   };
-
+  
   try {
-    // Check Firebase Admin configuration
-    if (!adminDb) {
-      console.warn('Firebase Admin not configured, returning empty leads list');
+    // Check Firebase configuration
+    if (!db) {
+      console.warn('Firebase not configured, returning empty leads list');
       return NextResponse.json(
         {
           success: false,
@@ -77,24 +75,28 @@ export async function POST(request) {
     }
 
     const { userId } = await request.json();
-
+    
     if (!userId) {
       return NextResponse.json(
         { error: 'userId is required', leads: [] },
         { status: 400, headers }
       );
     }
-
+    
+    console.log(`📧 Querying sent_emails for userId: ${userId}`);
+    
     // Get all sent emails for user
     const q = query(
-      collection(adminDb, 'sent_emails'),
+      collection(db, 'sent_emails'),
       where('userId', '==', userId)
     );
-
+    
     const snapshot = await getDocs(q);
     const leads = [];
     let deletedCount = 0;
-
+    
+    console.log(`📧 Found ${snapshot.docs.length} documents in sent_emails`);
+    
     // Helper function to safely convert timestamp to Date
     const safeToDate = (timestamp) => {
       if (!timestamp) return new Date();
@@ -128,9 +130,9 @@ export async function POST(request) {
     const getLastFollowUpAt = (data) => {
       return data.lastFollowUpAt ?? data.lastFollowUpSentAt ?? null;
     };
-
+    
     const now = new Date();
-
+    
     snapshot.forEach(docSnapshot => {
       const data = docSnapshot.data();
       try {
@@ -142,12 +144,12 @@ export async function POST(request) {
 
         const sentAt = safeToDate(data.sentAt);
         const daysSinceSent = (now - sentAt) / (1000 * 60 * 60 * 24);
-
+        
         // Check if loop should be closed (30 days or 3 follow-ups)
-        const shouldCloseLoop = daysSinceSent > CAMPAIGN_WINDOW_DAYS ||
-          (data.followUpCount || 0) >= MAX_FOLLOW_UPS ||
-          data.replied === true;
-
+        const shouldCloseLoop = daysSinceSent > CAMPAIGN_WINDOW_DAYS || 
+                               (data.followUpCount || 0) >= MAX_FOLLOW_UPS ||
+                               data.replied === true;
+        
         leads.push({
           id: docSnapshot.id,
           email,
@@ -159,8 +161,8 @@ export async function POST(request) {
           clicked: data.clicked || false,
           clickCount: data.clickCount || 0,
           followUpCount: getFollowUpCount(data),
-          followUpAt: data.followUpAt ?
-            safeToDate(data.followUpAt).toISOString() :
+          followUpAt: data.followUpAt ? 
+            safeToDate(data.followUpAt).toISOString() : 
             null,
           lastFollowUpAt: getLastFollowUpAt(data) ?
             safeToDate(getLastFollowUpAt(data)).toISOString() :
@@ -179,22 +181,22 @@ export async function POST(request) {
         return;
       }
     });
-
+    
     // Sort by sentAt (newest first)
     leads.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
-
+    
     console.log(`✅ Successfully loaded ${leads.length} sent leads for user ${userId}`);
-
+    
     return NextResponse.json({
       leads,
       total: leads.length,
       deletedCount
     }, { headers });
-
+    
   } catch (error) {
     console.error('List sent leads error:', error);
     return NextResponse.json(
-      {
+      { 
         error: 'Failed to list sent leads',
         details: error.message,
         leads: []
@@ -209,14 +211,14 @@ export async function POST(request) {
 // ============================================================================
 function calculateInterestScore(data) {
   let score = 0;
-
+  
   if (data.opened) score += 20;
   score += Math.min(30, (data.openedCount || 0) * 5);
-
+  
   if (data.clicked) score += 30;
   score += Math.min(50, (data.clickCount || 0) * 10);
-
+  
   if (data.replied) score += 100;
-
+  
   return Math.min(100, score);
 }
