@@ -84,19 +84,31 @@ export async function POST(request) {
       );
     }
     
-    console.log(`📧 Querying sent_emails for userId: ${userId}`);
-    
+    console.log(`📧 list-sent-leads API - Querying for userId: ${userId}`);
+
     // Get all sent emails for user
     const q = query(
       collection(db, 'sent_emails'),
       where('userId', '==', userId)
     );
-    
+
     const snapshot = await getDocs(q);
     const leads = [];
     let deletedCount = 0;
-    
-    console.log(`📧 Found ${snapshot.docs.length} documents in sent_emails`);
+
+    console.log(`📧 list-sent-leads API - Found ${snapshot.docs.length} documents in sent_emails`);
+
+    if (snapshot.docs.length === 0) {
+      console.log('⚠️ list-sent-leads API - No documents found, returning empty list');
+      return NextResponse.json(
+        {
+          success: true,
+          leads: [],
+          message: 'No sent emails found for this user'
+        },
+        { status: 200, headers }
+      );
+    }
     
     // Helper function to safely convert timestamp to Date
     const safeToDate = (timestamp) => {
@@ -222,9 +234,14 @@ export async function POST(request) {
     
     // Sort by sentAt (newest first)
     activeLeads.sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt));
-    
-    console.log(`✅ Successfully loaded ${activeLeads.length} sent leads for user ${userId} (${deletedCount} old records deleted)`);
-    
+
+    console.log(`✅ list-sent-leads API - Successfully loaded ${activeLeads.length} sent leads for user ${userId} (${deletedCount} old records deleted)`);
+    console.log('📧 list-sent-leads API - Sample lead:', activeLeads[0]);
+    console.log('📧 list-sent-leads API - Returning data:', {
+      leadsCount: activeLeads.length,
+      sampleLead: activeLeads[0]
+    });
+
     return NextResponse.json({
       leads: activeLeads,
       total: activeLeads.length,

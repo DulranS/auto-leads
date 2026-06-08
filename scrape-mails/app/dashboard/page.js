@@ -851,22 +851,55 @@ export default function Dashboard() {
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
   // ============================================================================
   const getSafeFollowUpCandidates = useCallback(() => {
+    console.log('🔍 getSafeFollowUpCandidates - Called');
+    console.log('🔍 getSafeFollowUpCandidates - Sent leads:', sentLeads);
+    console.log('🔍 getSafeFollowUpCandidates - Sent leads length:', sentLeads?.length);
+
     if (!sentLeads || sentLeads.length === 0) {
+      console.log('⚠️ getSafeFollowUpCandidates - No sent leads available');
       return [];
     }
 
     const now = new Date();
+    console.log('🔍 getSafeFollowUpCandidates - Current time:', now);
+
     const candidates = sentLeads
       .map(normalizeSentLead)
       .filter(lead => {
-        if (!lead || !lead.email || lead.replied) return false;
+        console.log('🔍 getSafeFollowUpCandidates - Filtering lead:', lead.email);
+
+        if (!lead || !lead.email) {
+          console.log('⏭️ Skipping - Invalid lead');
+          return false;
+        }
+
+        if (lead.replied) {
+          console.log(`⏭️ Skipping ${lead.email} - Already replied`);
+          return false;
+        }
 
         const followUpAt = getLeadNextFollowUpAt(lead);
-        if (!followUpAt || followUpAt > now) return false;
+        console.log(`🔍 getSafeFollowUpCandidates - ${lead.email} followUpAt:`, followUpAt);
+
+        if (!followUpAt) {
+          console.log(`⏭️ Skipping ${lead.email} - No follow-up schedule`);
+          return false;
+        }
+
+        if (followUpAt > now) {
+          console.log(`⏭️ Skipping ${lead.email} - Not ready yet (${followUpAt} > ${now})`);
+          return false;
+        }
 
         const followUpCount = lead.followUpCount ?? lead.followUpSentCount ?? 0;
-        if (followUpCount >= 3) return false;
+        console.log(`🔍 getSafeFollowUpCandidates - ${lead.email} followUpCount:`, followUpCount);
 
+        if (followUpCount >= 3) {
+          console.log(`⏭️ Skipping ${lead.email} - Max follow-ups reached`);
+          return false;
+        }
+
+        console.log(`✅ ${lead.email} - Safe for follow-up`);
         return true;
       })
       .map(lead => {
@@ -885,6 +918,8 @@ export default function Dashboard() {
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
+    console.log(`🔍 getSafeFollowUpCandidates - Found ${candidates.length} candidates`);
+    console.log('🔍 getSafeFollowUpCandidates - Candidates:', candidates);
     return candidates;
   }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
 
@@ -1808,6 +1843,7 @@ export default function Dashboard() {
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
 
+    console.log('🔍 loadSentLeads - User ID:', user.uid);
     setLoadingSentLeads(true);
 
     try {
@@ -1817,8 +1853,11 @@ export default function Dashboard() {
         body: JSON.stringify({ userId: user.uid })
       });
 
+      console.log('🔍 loadSentLeads - Response status:', res.status);
+
       // Handle 404 gracefully
       if (res.status === 404) {
+        console.warn('⚠️ loadSentLeads - API not found (404)');
         setSentLeads([]);
         setFollowUpStats({
           totalSent: 0,
@@ -1835,16 +1874,20 @@ export default function Dashboard() {
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
+        console.error('❌ loadSentLeads - Response is not JSON:', contentType);
         throw new Error('Response is not JSON');
       }
 
       const data = await res.json();
+      console.log('🔍 loadSentLeads - API response data:', data);
 
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
+        console.log('🔍 loadSentLeads - Normalized leads count:', normalizedLeads.length);
+        console.log('🔍 loadSentLeads - Sample lead:', normalizedLeads[0]);
         setSentLeads(normalizedLeads);
 
         const history = {};
