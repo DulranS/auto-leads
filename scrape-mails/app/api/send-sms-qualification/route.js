@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
-import { generateQualificationSMS, parseQualificationResponse, formatQualificationSummary, shouldArchiveLead, shouldStopFollowUp } from '../../lib/sms-qualifier';
+import { generateQualificationSMS, parseQualificationResponse, formatQualificationSummary, shouldArchiveLead, shouldStopFollowUp } from '../../../lib/sms-qualifier';
 
 // Firebase Config
 const getFirebaseConfig = () => {
