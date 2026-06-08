@@ -1,12 +1,10 @@
 // app/api/send-email/route.js
 import { NextResponse } from 'next/server';
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, doc, setDoc, updateDoc, increment, query, where, getDocs } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
 import { google } from 'googleapis';
 
-// ============================================================================
-// FIREBASE CONFIGURATION
-// ============================================================================
+// Firebase Config
 const getFirebaseConfig = () => {
   const requiredEnvVars = [
     'NEXT_PUBLIC_FIREBASE_API_KEY',
@@ -16,9 +14,8 @@ const getFirebaseConfig = () => {
   ];
 
   const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
   if (missingVars.length > 0) {
-    throw new Error(`Missing required Firebase environment variables: ${missingVars.join(', ')}`);
+    throw new Error(`Missing Firebase env vars: ${missingVars.join(', ')}`);
   }
 
   return {
@@ -32,29 +29,22 @@ const getFirebaseConfig = () => {
   };
 };
 
-let app;
-let db;
-
+let app, db;
 try {
   const firebaseConfig = getFirebaseConfig();
   app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
   db = getFirestore(app);
 } catch (configError) {
-  console.error('Firebase configuration error:', configError);
+  console.error('Firebase config error:', configError);
 }
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+// Config
 const CONFIG = {
   MAX_DAILY_EMAILS: 500,
-  RATE_LIMIT_DELAY_MS: 200,
-  MAX_IMAGES_PER_EMAIL: 3
+  RATE_LIMIT_DELAY_MS: 200
 };
 
-// ============================================================================
-// PARSE CSV
-// ============================================================================
+// Helpers
 const parseCsvRow = (str) => {
   const result = [];
   let current = '';
@@ -82,15 +72,6 @@ const parseCsvRow = (str) => {
   return result.map(field => field.replace(/[\r\n]/g, '').trim());
 };
 
-// ============================================================================
-// EXTRACT DOMAIN FROM EMAIL
-// ============================================================================
-const extractDomainFromEmail = (email) => {
-  if (!email || typeof email !== 'string') return null;
-  const parts = email.trim().toLowerCase().split('@');
-  return parts.length === 2 ? parts[1] : null;
-};
-
 const isValidEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
   const cleaned = email.trim().toLowerCase();
@@ -99,34 +80,25 @@ const isValidEmail = (email) => {
   return emailRegex.test(cleaned);
 };
 
-// ============================================================================
-// CREATE MIME MESSAGE
-// ============================================================================
 const createMimeMessage = (to, subject, body, senderEmail, senderName, replyTo = null) => {
   const boundary = 'boundary_' + Math.random().toString(36).substring(7);
   
   let message = `From: ${senderName ? `${senderName} <${senderEmail}>` : senderEmail}\r\n`;
   message += `To: ${to}\r\n`;
-  if (replyTo) {
-    message += `Reply-To: ${replyTo}\r\n`;
-  }
+  if (replyTo) message += `Reply-To: ${replyTo}\r\n`;
   message += `Subject: ${subject}\r\n`;
   message += `MIME-Version: 1.0\r\n`;
   message += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
   
-  // Add text body
   message += `--${boundary}\r\n`;
   message += `Content-Type: text/plain; charset=utf-8\r\n\r\n`;
   message += `${body}\r\n`;
   
   message += `--${boundary}--\r\n`;
-  
   return message;
 };
 
-// ============================================================================
-// POST HANDLER
-// ============================================================================
+// POST Handler
 export async function POST(request) {
   try {
     const requestData = await request.json();
@@ -139,7 +111,6 @@ export async function POST(request) {
       templateA,
       templateB,
       templateToSend,
-      leadQualityFilter,
       emailImages = [],
       emailAttachments = [],
       userId,
@@ -148,19 +119,17 @@ export async function POST(request) {
       followUpCount
     } = requestData;
 
-    // Handle follow-up requests (single email)
+    // Handle follow-up requests
     if (contact && followUpCount !== undefined) {
       return await handleFollowUpSend(contact, followUpCount, userId, accessToken, requestData);
     }
 
-    // Original CSV-based email sending logic
+    // CSV-based email sending
     if (!userId || !accessToken || !csvContent) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
+    // Check daily quota
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const emailQuery = query(
@@ -173,61 +142,44 @@ export async function POST(request) {
     try {
       emailSnapshot = await getDocs(emailQuery);
     } catch (firebaseError) {
-      console.error('Failed to query sent emails:', firebaseError);
       emailSnapshot = { size: 0 };
     }
     
     if (emailSnapshot.size >= CONFIG.MAX_DAILY_EMAILS) {
       return NextResponse.json(
-        {
-          error: 'Daily email limit reached',
-          dailyCount: emailSnapshot.size,
-          limit: CONFIG.MAX_DAILY_EMAILS
-        },
+        { error: 'Daily email limit reached', dailyCount: emailSnapshot.size, limit: CONFIG.MAX_DAILY_EMAILS },
         { status: 429 }
       );
     }
     
+    // Parse CSV
     const lines = csvContent.split('\n').filter(line => line.trim() !== '');
     if (lines.length < 2) {
-      return NextResponse.json(
-        { error: 'CSV content must have at least a header row and one data row' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'CSV must have header + data rows' }, { status: 400 });
     }
     
     const headers = parseCsvRow(lines[0]);
     const dataRows = lines.slice(1);
-    
     const emailColumn = fieldMappings?.email || fieldMappings?.Email || 'email';
     const emailIndex = headers.findIndex(h => h.toLowerCase() === emailColumn.toLowerCase());
     
     if (emailIndex === -1) {
-      return NextResponse.json(
-        { error: `Email column '${emailColumn}' not found in CSV headers` },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: `Email column '${emailColumn}' not found` }, { status: 400 });
     }
     
+    // Setup Gmail
     const oauth2Client = new google.auth.OAuth2(
       process.env.GMAIL_CLIENT_ID,
       process.env.GMAIL_CLIENT_SECRET,
       'https://developers.google.com/oauthplayground'
     );
-    
-    oauth2Client.setCredentials({
-      access_token: accessToken,
-      refresh_token: refreshToken
-    });
-    
+    oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     const senderEmail = process.env.GMAIL_SENDER_EMAIL || oauth2Client.credentials.email;
     const senderName = fieldMappings?.sender_name || fieldMappings?.senderName || '';
     const replyToEmail = fieldMappings?.reply_to || fieldMappings?.replyTo || null;
     
-    let successCount = 0;
-    let failCount = 0;
-    let skipCount = 0;
+    let successCount = 0, failCount = 0, skipCount = 0;
     const results = [];
     
     for (const row of dataRows) {
@@ -235,13 +187,12 @@ export async function POST(request) {
       const email = values[emailIndex]?.trim();
       
       if (!isValidEmail(email)) {
-        console.warn(`Invalid email format: ${email}`);
         failCount++;
-        results.push({ email, status: 'failed', reason: 'Invalid email format' });
+        results.push({ email, status: 'failed', reason: 'Invalid email' });
         continue;
       }
       
-      // Check for duplicates
+      // Check duplicates
       const duplicateQuery = query(
         collection(db, 'sent_emails'),
         where('userId', '==', userId),
@@ -252,45 +203,29 @@ export async function POST(request) {
       try {
         const duplicateSnapshot = await getDocs(duplicateQuery);
         isDuplicate = !duplicateSnapshot.empty;
-      } catch (error) {
-        console.error('Duplicate check error:', error);
-      }
+      } catch (error) {}
       
       if (isDuplicate) {
-        console.log(`Skipping duplicate email: ${email}`);
         skipCount++;
         results.push({ email, status: 'skipped', reason: 'Already sent' });
         continue;
       }
       
+      // Build email
       const recipient = {};
-      headers.forEach((header, index) => {
-        recipient[header] = values[index] || '';
-      });
+      headers.forEach((header, index) => { recipient[header] = values[index] || ''; });
       
       const businessName = recipient[fieldMappings?.company || fieldMappings?.business_name || fieldMappings?.businessName || ''];
       const firstName = recipient[fieldMappings?.first_name || fieldMappings?.firstName || ''];
       const lastName = recipient[fieldMappings?.last_name || fieldMappings?.lastName || ''];
       
-      let template;
-      if (abTestMode && templateA && templateB) {
-        template = templateToSend === 'A' ? templateA : templateB;
-      } else {
-        template = templateA || templateB || '';
-      }
+      let template = abTestMode && templateA && templateB ? (templateToSend === 'A' ? templateA : templateB) : templateA || templateB || '';
       
       let subject = template.subject || '';
       let body = template.body || '';
       
-      subject = subject.replace(/\{\{first_name\}\}/gi, firstName)
-                      .replace(/\{\{last_name\}\}/gi, lastName)
-                      .replace(/\{\{company\}\}/gi, businessName)
-                      .replace(/\{\{company_name\}\}/gi, businessName);
-      
-      body = body.replace(/\{\{first_name\}\}/gi, firstName)
-                 .replace(/\{\{last_name\}\}/gi, lastName)
-                 .replace(/\{\{company\}\}/gi, businessName)
-                 .replace(/\{\{company_name\}\}/gi, businessName);
+      subject = subject.replace(/\{\{first_name\}\}/gi, firstName).replace(/\{\{last_name\}\}/gi, lastName).replace(/\{\{company\}\}/gi, businessName);
+      body = body.replace(/\{\{first_name\}\}/gi, firstName).replace(/\{\{last_name\}\}/gi, lastName).replace(/\{\{company\}\}/gi, businessName);
       
       try {
         const rawMessage = createMimeMessage(email, subject, body, senderEmail, senderName, replyToEmail);
@@ -301,7 +236,7 @@ export async function POST(request) {
           requestBody: { raw: encoded }
         });
         
-        const now = new Date().toISOString();
+        // Save to Firebase AFTER successful send
         const emailData = {
           userId,
           to: email.toLowerCase(),
@@ -309,7 +244,7 @@ export async function POST(request) {
           subject,
           body,
           template: abTestMode ? templateToSend : 'A',
-          sentAt: now,
+          sentAt: new Date().toISOString(),
           opened: false,
           openedCount: 0,
           clicked: false,
@@ -317,7 +252,7 @@ export async function POST(request) {
           replied: false,
           followUpCount: 0,
           followUpSentCount: 0,
-          followUpAt: new Date(new Date().getTime() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+          followUpAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
           lastFollowUpAt: null,
           lastFollowUpSentAt: null,
           followUpDates: [],
@@ -334,7 +269,6 @@ export async function POST(request) {
         await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
         
       } catch (sendError) {
-        console.error(`Failed to send to ${email}:`, sendError);
         failCount++;
         results.push({ email, status: 'failed', reason: sendError.message });
       }
@@ -351,32 +285,21 @@ export async function POST(request) {
     
   } catch (error) {
     console.error('Send email error:', error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-// ============================================================================
-// HANDLE FOLLOW-UP SEND
-// ============================================================================
+// Follow-up Handler
 async function handleFollowUpSend(contact, followUpCount, userId, accessToken, requestData) {
   if (!userId || !accessToken) {
-    return NextResponse.json(
-      { error: 'Missing required fields for follow-up' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
   const { senderName, templateToSend } = requestData;
   const email = contact.email || contact.to;
   
   if (!isValidEmail(email)) {
-    return NextResponse.json(
-      { error: 'Invalid email format' },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: 'Invalid email' }, { status: 400 });
   }
 
   const oauth2Client = new google.auth.OAuth2(
@@ -384,14 +307,12 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
     process.env.GMAIL_CLIENT_SECRET,
     'https://developers.google.com/oauthplayground'
   );
-  
   oauth2Client.setCredentials({ access_token: accessToken });
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
   const senderEmail = process.env.GMAIL_SENDER_EMAIL || oauth2Client.credentials.email;
   
   const businessName = contact.businessName || '';
   const firstName = contact.firstName || '';
-  const lastName = contact.lastName || '';
   
   // Simple follow-up template
   let subject = `Following up - ${businessName}`;
@@ -408,7 +329,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
     
     const now = new Date().toISOString();
     
-    // Find and update existing record
+    // Update existing record AFTER successful send
     const q = query(
       collection(db, 'sent_emails'),
       where('userId', '==', userId),
@@ -429,7 +350,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
       const nextFollowUpDate = new Date();
       nextFollowUpDate.setDate(nextFollowUpDate.getDate() + daysToAdd);
 
-      const updateData = {
+      await updateDoc(docRef, {
         ...existingData,
         subject,
         body,
@@ -442,10 +363,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         followUpAt: newFollowUpCount < 3 ? nextFollowUpDate.toISOString() : null,
         messageId: response.data.id,
         threadId: response.data.threadId
-      };
-
-      await updateDoc(docRef, updateData);
-      console.log(`✅ Updated follow-up record for ${email}: follow-up #${newFollowUpCount}`);
+      });
       
       return NextResponse.json({
         success: true,
@@ -454,8 +372,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         messageId: response.data.id
       });
     } else {
-      // Fallback: create new record if existing not found
-      console.warn(`⚠️ Existing record not found for ${email}, creating new one`);
+      // Fallback: create new record
       const emailData = {
         userId,
         to: email.toLowerCase(),
@@ -471,7 +388,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         replied: false,
         followUpCount: 1,
         followUpSentCount: 1,
-        followUpAt: new Date(new Date().getTime() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        followUpAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
         lastFollowUpAt: now,
         lastFollowUpSentAt: now,
         followUpDates: [now],
@@ -491,10 +408,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
     }
     
   } catch (sendError) {
-    console.error(`Failed to send follow-up to ${email}:`, sendError);
-    return NextResponse.json(
-      { error: sendError.message },
-      { status: 500 }
-    );
+    console.error(`Follow-up send error for ${email}:`, sendError);
+    return NextResponse.json({ error: sendError.message }, { status: 500 });
   }
 }

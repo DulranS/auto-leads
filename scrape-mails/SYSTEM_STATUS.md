@@ -87,14 +87,29 @@ Advanced AI capabilities for production use:
 - Status: ✅ Complete and functional
 
 ### Follow-Up System
-Automated follow-up management with intelligent cleanup:
-- Fixed `getLeadNextFollowUpAt` to use explicit `followUpAt` field
-- Follow-ups now appear correctly in Reply & Follow-Up Center
-- Automatic cleanup of old records (30+ days, loop closed)
-- `app/api/list-sent-leads/route.js` - Enhanced with auto-cleanup
-- `app/api/cleanup-old-records/route.js` - Dedicated cleanup endpoint
-- `lib/firebase-operations.js` - Fixed follow-up date calculation
+Simplified, business-focused automated follow-up management:
+- **Core Logic**: Find leads ready for follow-up → Send via Gmail → Update database
+- **State Integrity**: Database only updates after successful Gmail API transmission
+- **No Duplicates**: Follow-ups UPDATE existing records instead of creating new ones
+- **Smart Scheduling**: Follow-up #1 (3 days), #2 (7 days), #3 (14 days)
+- **Automatic Cleanup**: Old records (30+ days, loop closed) deleted automatically
+- `app/api/send-email/route.js` - Simplified API with follow-up handler
+- `app/api/list-sent-leads/route.js` - Auto-cleanup during lead loading
+- `app/api/cleanup-old-records/route.js` - Manual cleanup endpoint
+- `app/dashboard/page.js` - Clean, production-ready follow-up logic
 - Status: ✅ Complete and functional
+
+### SMS Sales Qualification
+Aggressive but polite SMS qualification to filter time-wasters:
+- **Qualification Message**: Asks for budget, timeframe, and preferred contact method
+- **Response Parsing**: Intelligent extraction of key information
+- **Auto-Archive**: Negative/vague responses automatically archived
+- **Qualified Leads**: Clean summary format, continue follow-ups
+- `lib/sms-qualifier.js` - Qualification logic and response parsing
+- `app/api/send-sms-qualification/route.js` - Send qualification SMS
+- `app/api/handle-sms-reply/route.js` - Process SMS replies
+- `app/dashboard/page.js` - SMS qualification UI button
+- Status: ✅ Complete and functional (requires SMS provider integration)
 
 ## Current Status
 All components are fully functional and properly integrated.

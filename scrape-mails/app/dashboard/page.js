@@ -37,6 +37,7 @@ import { useRouter } from 'next/navigation';
 
 // Import from new modules
 import { CONFIG, generateId } from '../../lib/dashboard-config.js';
+import { generateQualificationSMS, parseQualificationResponse, formatQualificationSummary } from '../../lib/sms-qualifier';
 import {
   formatForDialing,
   formatPhoneForDisplay,
@@ -850,12 +851,7 @@ export default function Dashboard() {
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
   // ============================================================================
   const getSafeFollowUpCandidates = useCallback(() => {
-    console.log('🔍 Getting safe follow-up candidates...');
-    console.log('📊 Sent leads:', sentLeads);
-    console.log('📈 Follow-up history:', followUpHistory);
-
     if (!sentLeads || sentLeads.length === 0) {
-      console.log('⚠️ No sent leads available');
       return [];
     }
 
@@ -863,32 +859,14 @@ export default function Dashboard() {
     const candidates = sentLeads
       .map(normalizeSentLead)
       .filter(lead => {
-        if (!lead || !lead.email) {
-          console.log('❌ Invalid lead:', lead);
-          return false;
-        }
-        if (lead.replied) {
-          console.log(`⏭️ Skipping ${lead.email} - already replied`);
-          return false;
-        }
+        if (!lead || !lead.email || lead.replied) return false;
 
         const followUpAt = getLeadNextFollowUpAt(lead);
-        if (!followUpAt) {
-          console.log(`⏭️ Skipping ${lead.email} - missing follow-up schedule`);
-          return false;
-        }
-        if (followUpAt > now) {
-          console.log(`⏭️ Skipping ${lead.email} - not ready yet (${followUpAt} > ${now})`);
-          return false;
-        }
+        if (!followUpAt || followUpAt > now) return false;
 
         const followUpCount = lead.followUpCount ?? lead.followUpSentCount ?? 0;
-        if (followUpCount >= 3) {
-          console.log(`⏭️ Skipping ${lead.email} - max follow-ups reached (${followUpCount})`);
-          return false;
-        }
+        if (followUpCount >= 3) return false;
 
-        console.log(`✅ ${lead.email} is safe for follow-up`);
         return true;
       })
       .map(lead => {
@@ -907,8 +885,6 @@ export default function Dashboard() {
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
-    console.log(`📋 Found ${candidates.length} safe candidates`);
-    console.log('📋 Safe candidates:', candidates);
     return candidates;
   }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
 
@@ -1832,7 +1808,6 @@ export default function Dashboard() {
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
 
-    console.log('📧 Loading sent leads for user:', user.uid);
     setLoadingSentLeads(true);
 
     try {
@@ -1842,11 +1817,8 @@ export default function Dashboard() {
         body: JSON.stringify({ userId: user.uid })
       });
 
-      console.log('📧 API response status:', res.status);
-
       // Handle 404 gracefully
       if (res.status === 404) {
-        console.warn('Sent leads API not found, using empty state');
         setSentLeads([]);
         setFollowUpStats({
           totalSent: 0,
@@ -1867,15 +1839,12 @@ export default function Dashboard() {
       }
 
       const data = await res.json();
-      console.log('📧 API response data:', data);
 
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
-        console.log('📧 Normalized leads count:', normalizedLeads.length);
-        console.log('📧 Sample lead:', normalizedLeads[0]);
         setSentLeads(normalizedLeads);
 
         const history = {};
@@ -2382,49 +2351,36 @@ export default function Dashboard() {
   // MASS EMAIL FOLLOW-UP TO ALL SAFE LEADS
   // ============================================================================
   const handleMassEmailFollowUps = useCallback(async () => {
-    console.log('🚀 Mass email follow-up initiated');
-
     if (!user?.uid) {
-      console.error('❌ No user UID found');
       addNotification('Please sign in first', 'error');
       return;
     }
 
-    console.log('📊 Getting safe candidates...');
-    console.log(`📋 Found ${safeFollowUpCandidates.length} safe candidates:`, safeFollowUpCandidates);
-
     if (safeFollowUpCandidates.length === 0) {
-      console.warn('⚠️ No safe leads available');
       addNotification('No safe leads available for follow-up', 'warning');
       return;
     }
 
-    console.log('📧 Checking email quota...');
     // Check email quota
     const quotaCheck = canUse('email', safeFollowUpCandidates.length);
-    console.log('💳 Quota check result:', quotaCheck);
 
     if (!quotaCheck.available) {
-      console.error('❌ Insufficient quota:', quotaCheck.reason);
       addNotification(`⚠️ ${quotaCheck.reason}`, 'warning');
       return;
     }
 
     const confirmed = window.confirm(
-      `📧 Send follow-up emails to ${safeFollowUpCandidates.length} safe leads?\n\n` +
+      `Send follow-up emails to ${safeFollowUpCandidates.length} leads?\n\n` +
       `This will use ${safeFollowUpCandidates.length} of your daily email quota.\n\n` +
-      `Each lead will receive their next scheduled follow-up.\n\n` +
-      `Continue with mass send?`
+      `Continue?`
     );
 
     if (!confirmed) {
-      console.log('👤 User cancelled mass email');
       return;
     }
 
-    console.log('✅ User confirmed, starting mass send...');
     setIsSending(true);
-    setStatus('📧 Initiating mass follow-up send...');
+    setStatus('Sending follow-ups...');
     setSendProgress({ current: 0, total: safeFollowUpCandidates.length });
 
     let successCount = 0;
@@ -2433,28 +2389,21 @@ export default function Dashboard() {
     const results = [];
 
     try {
-      console.log('🔐 Requesting Gmail token...');
       // Get Gmail token once for all sends
       const accessToken = await requestGmailToken();
-      console.log('✅ Gmail token obtained');
 
-      setStatus(`📧 Sending follow-ups to ${safeFollowUpCandidates.length} leads...`);
+      setStatus(`Sending follow-ups to ${safeFollowUpCandidates.length} leads...`);
 
-      // Process leads in batches to avoid overwhelming the API
+      // Process leads in batches
       const batchSize = Math.min(10, safeFollowUpCandidates.length);
-      console.log(`📦 Processing in batches of ${batchSize}`);
 
       for (let i = 0; i < safeFollowUpCandidates.length; i += batchSize) {
         const batch = safeFollowUpCandidates.slice(i, i + batchSize);
-        console.log(`🔄 Processing batch ${Math.floor(i / batchSize) + 1} with ${batch.length} leads`);
 
         for (const contact of batch) {
           try {
-            console.log(`📤 Processing lead: ${contact.email}`);
-
             // Double-check safety before sending
             if (repliedLeads[contact.email]) {
-              console.log(`⏭️ Skipping ${contact.email} - already replied`);
               skipCount++;
               results.push({ email: contact.email, status: 'skipped', reason: 'Already replied' });
               continue;
@@ -2462,7 +2411,6 @@ export default function Dashboard() {
 
             const followUpCount = contact.followUpCount || 0;
             if (followUpCount >= 3) {
-              console.log(`⏭️ Skipping ${contact.email} - max follow-ups reached`);
               skipCount++;
               results.push({ email: contact.email, status: 'skipped', reason: 'Max follow-ups reached' });
               continue;
@@ -2471,7 +2419,6 @@ export default function Dashboard() {
             // Get Gmail token
             const accessToken = await requestGmailToken();
             if (!accessToken) {
-              console.log(`⏭️ Skipping ${contact.email} - no access token`);
               skipCount++;
               results.push({ email: contact.email, status: 'skipped', reason: 'No access token' });
               continue;
@@ -2495,12 +2442,10 @@ export default function Dashboard() {
             });
 
             const data = await res.json();
-            console.log(`📬 Response for ${contact.email}:`, data);
 
             if (res.ok) {
               // Check if email was skipped due to duplicate
               if (data.skipped && data.skipped > 0) {
-                console.log(`⏭️ Duplicate detected and skipped for ${contact.email}`);
                 skipCount++;
                 results.push({ email: contact.email, status: 'skipped', reason: 'Already sent' });
                 continue;
@@ -2518,13 +2463,11 @@ export default function Dashboard() {
               incrementQuota('email', 1);
 
             } else {
-              console.error(`❌ Failed to send to ${contact.email}:`, data.error);
               failCount++;
               results.push({ email: contact.email, status: 'failed', reason: data.error || 'API error' });
             }
 
           } catch (error) {
-            console.error(`💥 Error processing ${contact.email}:`, error);
             failCount++;
             results.push({ email: contact.email, status: 'failed', reason: error.message });
           }
@@ -2532,7 +2475,6 @@ export default function Dashboard() {
           // Update progress
           const currentProgress = i + batch.indexOf(contact) + 1;
           setSendProgress({ current: currentProgress, total: safeFollowUpCandidates.length });
-          console.log(`📈 Progress: ${currentProgress}/${safeFollowUpCandidates.length}`);
 
           // Small delay between sends to avoid rate limiting
           await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
@@ -2540,20 +2482,17 @@ export default function Dashboard() {
 
         // Brief pause between batches
         if (i + batchSize < safeFollowUpCandidates.length) {
-          console.log('⏸️ Pausing between batches...');
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
 
-      console.log('🔄 Refreshing data after mass send...');
       // Refresh data after all sends complete
       await loadSentLeads();
       await loadRepliedAndFollowUp();
       await loadDeals();
 
-      console.log('📊 Generating completion report...');
       // Show comprehensive results
-      const message = `📊 Mass Follow-Up Complete!\n\n` +
+      const message = `Mass Follow-Up Complete!\n\n` +
         `✅ Success: ${successCount}\n` +
         `❌ Failed: ${failCount}\n` +
         `⏭️ Skipped: ${skipCount}\n` +
@@ -2570,8 +2509,7 @@ export default function Dashboard() {
       }
 
     } catch (error) {
-      console.error('💥 Error in mass follow-up:', error);
-      addNotification(`❌ Mass follow-up failed: ${error.message}`, 'error');
+      addNotification(`Mass follow-up failed: ${error.message}`, 'error');
     } finally {
       setIsSending(false);
       setSendProgress(null);
@@ -2588,8 +2526,6 @@ export default function Dashboard() {
     loadDeals,
     repliedLeads
   ]);
-
-  console.log('✅ Mass email follow-up handler defined');
 
   // ============================================================================
   // WHATSAPP SEND WITH TRACKING & DUPLICATE PREVENTION
@@ -2663,6 +2599,94 @@ export default function Dashboard() {
     } catch (error) {
       console.error('WhatsApp send error:', error);
       addNotification(`❌ Failed to open WhatsApp: ${error.message}`, 'error');
+    }
+  };
+
+  // ============================================================================
+  // SMS SALES QUALIFICATION
+  // ============================================================================
+  const handleSMSQualification = async (leads) => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+
+    if (!leads || leads.length === 0) {
+      addNotification('No leads selected for qualification', 'warning');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Send qualification SMS to ${leads.length} leads?\n\n` +
+      `This will ask for their budget, timeframe, and preferred contact method.\n\n` +
+      `Continue?`
+    );
+
+    if (!confirmed) return;
+
+    setStatus('Sending qualification SMS...');
+    setIsSending(true);
+
+    try {
+      const response = await fetch('/api/send-sms-qualification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          leads,
+          userId: user.uid
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        addNotification(
+          `Qualification SMS sent: ${data.successCount} success, ${data.failCount} failed`,
+          data.failCount > 0 ? 'warning' : 'success'
+        );
+      } else {
+        addNotification(`Failed to send qualification SMS: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      addNotification(`SMS qualification error: ${error.message}`, 'error');
+    } finally {
+      setIsSending(false);
+      setStatus('');
+    }
+  };
+
+  const handleSMSReply = async (phone, response) => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/handle-sms-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone,
+          response,
+          userId: user.uid
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        if (data.qualified) {
+          addNotification(`✅ Lead qualified! ${data.summary}`, 'success');
+        } else {
+          addNotification(`❌ Lead archived: ${data.summary}`, 'warning');
+        }
+        
+        await loadSentLeads();
+      } else {
+        addNotification(`Failed to handle SMS reply: ${data.error}`, 'error');
+      }
+    } catch (error) {
+      addNotification(`SMS reply error: ${error.message}`, 'error');
     }
   };
 
@@ -5793,6 +5817,30 @@ export default function Dashboard() {
                           {status}
                         </div>
                       )}
+
+                      {/* SMS QUALIFICATION BUTTON */}
+                      <button
+                        onClick={() => handleSMSQualification(safeFollowUpCandidates)}
+                        disabled={isSending}
+                        className={`w-full relative group overflow-hidden rounded-xl transition-all duration-300 mt-4 ${isSending
+                            ? 'bg-gray-600 cursor-not-allowed opacity-60'
+                            : 'bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 hover:from-green-500 hover:via-emerald-500 hover:to-teal-500 shadow-lg hover:shadow-xl transform hover:scale-[1.02]'
+                          }`}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <div className="relative px-8 py-4 text-white font-bold text-lg">
+                          <div className="flex items-center justify-center gap-3">
+                            <span className="text-2xl">📱</span>
+                            <span>{isSending ? 'Sending...' : `SMS Qualify All Leads (${safeFollowUpCandidates.length})`}</span>
+                            {!isSending && <span className="text-lg">→</span>}
+                          </div>
+                          {!isSending && (
+                            <div className="text-sm font-normal text-green-100 mt-1 text-center">
+                              Send aggressive qualification SMS to filter time-wasters
+                            </div>
+                          )}
+                        </div>
+                      </button>
 
                       {/* Debug Info Button */}
                       {!isSending && (
