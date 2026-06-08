@@ -80,6 +80,48 @@ const isValidEmail = (email) => {
   return emailRegex.test(cleaned);
 };
 
+// Helper function to replace template variables
+const replaceTemplateVariables = (text, firstName, lastName, businessName) => {
+  if (!text) return '';
+  
+  // Define all common variable name variations
+  const replacements = {
+    '{{first_name}}': firstName,
+    '{{firstName}}': firstName,
+    '{{First Name}}': firstName,
+    '{{first name}}': firstName,
+    '{{last_name}}': lastName,
+    '{{lastName}}': lastName,
+    '{{Last Name}}': lastName,
+    '{{last name}}': lastName,
+    '{{company}}': businessName,
+    '{{Company}}': businessName,
+    '{{business_name}}': businessName,
+    '{{businessName}}': businessName,
+    '{{Business Name}}': businessName,
+    '{{business name}}': businessName,
+    '{{business}}': businessName,
+    '{{Business}}': businessName
+  };
+  
+  // Apply exact replacements first
+  let result = text;
+  for (const [placeholder, value] of Object.entries(replacements)) {
+    result = result.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'gi'), value || '');
+  }
+  
+  // Handle any remaining {{variable}} patterns with fuzzy matching
+  result = result.replace(/\{\{([^}]+)\}\}/gi, (match, variable) => {
+    const varName = variable.toLowerCase().replace(/[_\s]/g, '');
+    if (varName.includes('firstname')) return firstName || '';
+    if (varName.includes('lastname')) return lastName || '';
+    if (varName.includes('company') || varName.includes('business')) return businessName || '';
+    return match; // Keep original if not recognized
+  });
+  
+  return result;
+};
+
 const createMimeMessage = (to, subject, body, senderEmail, senderName, replyTo = null, attachments = []) => {
   const boundary = 'boundary_' + Math.random().toString(36).substring(7);
   
@@ -247,8 +289,9 @@ export async function POST(request) {
       let subject = template.subject || '';
       let body = template.body || '';
       
-      subject = subject.replace(/\{\{first_name\}\}/gi, firstName).replace(/\{\{last_name\}\}/gi, lastName).replace(/\{\{company\}\}/gi, businessName);
-      body = body.replace(/\{\{first_name\}\}/gi, firstName).replace(/\{\{last_name\}\}/gi, lastName).replace(/\{\{company\}\}/gi, businessName);
+      // Apply template variable substitution
+      subject = replaceTemplateVariables(subject, firstName, lastName, businessName);
+      body = replaceTemplateVariables(body, firstName, lastName, businessName);
       
       try {
         const rawMessage = createMimeMessage(email, subject, body, senderEmail, senderName, replyToEmail, emailAttachments);
@@ -337,9 +380,24 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
   const businessName = contact.businessName || '';
   const firstName = contact.firstName || '';
   
-  // Simple follow-up template
-  let subject = `Following up - ${businessName}`;
-  let body = `Hi ${firstName},\n\nI wanted to follow up on my previous email. Are you still interested in discussing how we can help ${businessName}?\n\nBest regards,\n${senderName}`;
+  // Use template from request or default follow-up template
+  let template = requestData.templateToSend === 'followup' ? requestData.template : null;
+  
+  let subject, body;
+  
+  if (template && template.subject && template.body) {
+    // Use custom template with variable substitution
+    subject = template.subject || `Following up - ${businessName}`;
+    body = template.body || `Hi ${firstName},\n\nI wanted to follow up on my previous email. Are you still interested in discussing how we can help ${businessName}?\n\nBest regards,\n${senderName}`;
+    
+    // Apply template variable substitution
+    subject = replaceTemplateVariables(subject, firstName, '', businessName);
+    body = replaceTemplateVariables(body, firstName, '', businessName);
+  } else {
+    // Default follow-up template
+    subject = `Following up - ${businessName}`;
+    body = `Hi ${firstName},\n\nI wanted to follow up on my previous email. Are you still interested in discussing how we can help ${businessName}?\n\nBest regards,\n${senderName}`;
+  }
   
   // Check if follow-up was already sent recently (within 1 hour)
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);

@@ -115,9 +115,10 @@ Aggressive but polite SMS qualification to filter time-wasters:
 Fixed critical email sending issues:
 - **Duplicate Prevention**: Time-based checking (24-hour window for initial emails, 1-hour for follow-ups)
 - **Attachment Support**: Multiple attachments per email with proper MIME encoding
+- **Template Variables**: Comprehensive substitution (15+ variable name variations)
 - **Error Messages**: Clear feedback when duplicates detected
 - **Backward Compatible**: Works with or without attachments
-- `app/api/send-email/route.js` - Enhanced duplicate checking and attachment handling
+- `app/api/send-email/route.js` - Enhanced duplicate checking, attachment handling, and template substitution
 - `DUPLICATE_PREVENTION_FIX.md` - Complete documentation
 - Status: ✅ Complete and functional
 

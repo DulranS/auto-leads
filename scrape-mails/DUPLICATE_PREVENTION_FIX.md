@@ -20,6 +20,19 @@
 - Proper MIME multipart/mixed encoding
 - Passes `emailAttachments` parameter through the entire chain
 
+### 3. Template Variable Substitution
+**Problem**: Template variables like `{{business_name}}` were not being replaced with actual data, appearing as literal text in emails.
+
+**Solution**: Implemented comprehensive variable substitution:
+- Created `replaceTemplateVariables()` helper function
+- Supports all common variable name variations:
+  - `{{first_name}}`, `{{firstName}}`, `{{First Name}}`, `{{first name}}`
+  - `{{last_name}}`, `{{lastName}}`, `{{Last Name}}`, `{{last name}}`
+  - `{{company}}`, `{{Company}}`, `{{business_name}}`, `{{businessName}}`, `{{Business Name}}`, `{{business name}}`, `{{business}}`, `{{Business}}`
+- Fuzzy matching for unrecognized patterns
+- Applied to both CSV email sending and follow-up sending
+- Case-insensitive replacement
+
 ## Technical Details
 
 ### Duplicate Prevention Logic
@@ -116,6 +129,59 @@ const rawMessage = createMimeMessage(
 );
 ```
 
+### Template Variable Substitution Logic
+
+#### Helper Function
+```javascript
+const replaceTemplateVariables = (text, firstName, lastName, businessName) => {
+  if (!text) return '';
+  
+  // Define all common variable name variations
+  const replacements = {
+    '{{first_name}}': firstName,
+    '{{firstName}}': firstName,
+    '{{First Name}}': firstName,
+    '{{first name}}': firstName,
+    '{{last_name}}': lastName,
+    '{{lastName}}': lastName,
+    '{{Last Name}}': lastName,
+    '{{last name}}': lastName,
+    '{{company}}': businessName,
+    '{{Company}}': businessName,
+    '{{business_name}}': businessName,
+    '{{businessName}}': businessName,
+    '{{Business Name}}': businessName,
+    '{{business name}}': businessName,
+    '{{business}}': businessName,
+    '{{Business}}': businessName
+  };
+  
+  // Apply exact replacements first
+  let result = text;
+  for (const [placeholder, value] of Object.entries(replacements)) {
+    result = result.replace(new RegExp(placeholder.replace(/[{}]/g, '\\$&'), 'gi'), value || '');
+  }
+  
+  // Handle any remaining {{variable}} patterns with fuzzy matching
+  result = result.replace(/\{\{([^}]+)\}\}/gi, (match, variable) => {
+    const varName = variable.toLowerCase().replace(/[_\s]/g, '');
+    if (varName.includes('firstname')) return firstName || '';
+    if (varName.includes('lastname')) return lastName || '';
+    if (varName.includes('company') || varName.includes('business')) return businessName || '';
+    return match; // Keep original if not recognized
+  });
+  
+  return result;
+};
+```
+
+#### Usage in Email Sending
+```javascript
+// Apply template variable substitution
+subject = replaceTemplateVariables(subject, firstName, lastName, businessName);
+body = replaceTemplateVariables(body, firstName, lastName, businessName);
+```
+
 ## API Changes
 
 ### POST /api/send-email
@@ -188,6 +254,28 @@ if (res.ok) {
    - Send email without `emailAttachments` parameter
    - Expected: Simple text email sent
 
+### Test Template Variables
+
+1. **With Variables:**
+   ```javascript
+   const template = {
+     subject: "Hello {{first_name}} from {{business_name}}",
+     body: "Hi {{first_name}},\n\nI noticed {{business_name}}..."
+   };
+   
+   await fetch('/api/send-email', {
+     method: 'POST',
+     body: JSON.stringify({
+       // ... other fields
+       template
+     })
+   });
+   ```
+
+2. **Expected Output:**
+   - Subject: "Hello John from Acme Corp"
+   - Body: "Hi John,\n\nI noticed Acme Corp..."
+
 ## Configuration
 
 ### Adjust Duplicate Time Windows
@@ -231,12 +319,16 @@ message += `Content-Type: ${getContentType(filename)}\r\n`;
 - ❌ Spam risk from repeated sends
 - ❌ Wasted quota on duplicates
 - ❌ Attachments not working
+- ❌ Template variables appearing as literal text ({{business_name}})
+- ❌ Unprofessional email appearance
 - ❌ Dynamic templates incomplete
 
 ### After Fixes
 - ✅ No duplicate emails (24-hour window)
 - ✅ No duplicate follow-ups (1-hour window)
 - ✅ Attachments work correctly
+- ✅ Template variables properly replaced with actual data
+- ✅ Professional, personalized emails
 - ✅ Dynamic templates fully functional
 - ✅ Clear error messages
 - ✅ Better user experience
@@ -260,4 +352,12 @@ message += `Content-Type: ${getContentType(filename)}\r\n`;
 - Proper encoding
 - Backward compatible (works without attachments)
 
-**Both issues now resolved.**
+**Template Variable Substitution:**
+- Comprehensive variable name support (15+ variations)
+- Fuzzy matching for unrecognized patterns
+- Helper function for maintainability
+- Applied to both CSV and follow-up sending
+- Case-insensitive replacement
+- Professional, personalized emails
+
+**All three issues now resolved.**
