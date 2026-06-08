@@ -80,7 +80,7 @@ const isValidEmail = (email) => {
   return emailRegex.test(cleaned);
 };
 
-const createMimeMessage = (to, subject, body, senderEmail, senderName, replyTo = null) => {
+const createMimeMessage = (to, subject, body, senderEmail, senderName, replyTo = null, attachments = []) => {
   const boundary = 'boundary_' + Math.random().toString(36).substring(7);
   
   let message = `From: ${senderName ? `${senderName} <${senderEmail}>` : senderEmail}\r\n`;
@@ -88,13 +88,34 @@ const createMimeMessage = (to, subject, body, senderEmail, senderName, replyTo =
   if (replyTo) message += `Reply-To: ${replyTo}\r\n`;
   message += `Subject: ${subject}\r\n`;
   message += `MIME-Version: 1.0\r\n`;
-  message += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
   
-  message += `--${boundary}\r\n`;
-  message += `Content-Type: text/plain; charset=utf-8\r\n\r\n`;
-  message += `${body}\r\n`;
+  if (attachments.length > 0) {
+    message += `Content-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`;
+    
+    // Add text body
+    message += `--${boundary}\r\n`;
+    message += `Content-Type: text/plain; charset=utf-8\r\n\r\n`;
+    message += `${body}\r\n`;
+    
+    // Add attachments
+    attachments.forEach(attachment => {
+      const filename = attachment.filename || 'attachment';
+      const content = attachment.content || attachment.data;
+      
+      message += `--${boundary}\r\n`;
+      message += `Content-Type: application/octet-stream\r\n`;
+      message += `Content-Disposition: attachment; filename="${filename}"\r\n`;
+      message += `Content-Transfer-Encoding: base64\r\n\r\n`;
+      message += `${content}\r\n`;
+    });
+    
+    message += `--${boundary}--\r\n`;
+  } else {
+    // Simple text message without attachments
+    message += `Content-Type: text/plain; charset=utf-8\r\n\r\n`;
+    message += `${body}\r\n`;
+  }
   
-  message += `--${boundary}--\r\n`;
   return message;
 };
 
@@ -192,11 +213,13 @@ export async function POST(request) {
         continue;
       }
       
-      // Check duplicates
+      // Check duplicates - prevent sending to same email within 24 hours
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const duplicateQuery = query(
         collection(db, 'sent_emails'),
         where('userId', '==', userId),
-        where('to', '==', email.toLowerCase())
+        where('to', '==', email.toLowerCase()),
+        where('sentAt', '>=', twentyFourHoursAgo.toISOString())
       );
       
       let isDuplicate = false;
@@ -207,7 +230,7 @@ export async function POST(request) {
       
       if (isDuplicate) {
         skipCount++;
-        results.push({ email, status: 'skipped', reason: 'Already sent' });
+        results.push({ email, status: 'skipped', reason: 'Already sent (within 24 hours)' });
         continue;
       }
       
@@ -228,7 +251,7 @@ export async function POST(request) {
       body = body.replace(/\{\{first_name\}\}/gi, firstName).replace(/\{\{last_name\}\}/gi, lastName).replace(/\{\{company\}\}/gi, businessName);
       
       try {
-        const rawMessage = createMimeMessage(email, subject, body, senderEmail, senderName, replyToEmail);
+        const rawMessage = createMimeMessage(email, subject, body, senderEmail, senderName, replyToEmail, emailAttachments);
         const encoded = Buffer.from(rawMessage).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         
         const response = await gmail.users.messages.send({
@@ -317,6 +340,29 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
   // Simple follow-up template
   let subject = `Following up - ${businessName}`;
   let body = `Hi ${firstName},\n\nI wanted to follow up on my previous email. Are you still interested in discussing how we can help ${businessName}?\n\nBest regards,\n${senderName}`;
+  
+  // Check if follow-up was already sent recently (within 1 hour)
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const recentFollowUpQuery = query(
+    collection(db, 'sent_emails'),
+    where('userId', '==', userId),
+    where('to', '==', email.toLowerCase()),
+    where('lastFollowUpSentAt', '>=', oneHourAgo.toISOString())
+  );
+  
+  let recentFollowUp = false;
+  try {
+    const recentSnapshot = await getDocs(recentFollowUpQuery);
+    recentFollowUp = !recentSnapshot.empty;
+  } catch (error) {}
+  
+  if (recentFollowUp) {
+    return NextResponse.json({
+      success: false,
+      error: 'Follow-up already sent within the last hour',
+      email
+    }, { status: 429 });
+  }
   
   try {
     const rawMessage = createMimeMessage(email, subject, body, senderEmail, senderName);
