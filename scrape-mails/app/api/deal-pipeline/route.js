@@ -1,6 +1,7 @@
 // app/api/deal-pipeline/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { db } from '../../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 /**
  * DEAL PIPELINE MANAGEMENT ENGINE
@@ -180,28 +181,24 @@ const suggestNextActions = (deals) => {
 export async function POST(request) {
   try {
     const { userId, action, data = {} } = await request.json();
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'userId required' },
         { status: 400 }
       );
     }
-    
-    // Fetch deals from leads table
-    const { data: deals, error: dealsError } = await supabaseAdmin
-      .from('leads')
-      .select('*')
-      .eq('user_id', userId)
-      .not('deal_value', 'is', null);
-    
-    if (dealsError) {
-      console.error('Error fetching deals:', dealsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch deals' },
-        { status: 500 }
-      );
-    }
+
+    // Fetch deals from deals collection
+    const dealsQuery = query(
+      collection(db, 'deals'),
+      where('userId', '==', userId)
+    );
+    const dealsSnapshot = await getDocs(dealsQuery);
+    const deals = dealsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
     
     let response = {};
     

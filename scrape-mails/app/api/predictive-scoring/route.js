@@ -1,6 +1,7 @@
 // app/api/predictive-scoring/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { db } from '../../lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 
 /**
  * PREDICTIVE SCORING ENGINE
@@ -267,25 +268,21 @@ const estimatePriceSensitivity = (lead, historicalData = {}) => {
 export async function POST(request) {
   try {
     const { userId, leadId, action, data = {} } = await request.json();
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'userId required' },
         { status: 400 }
       );
     }
-    
+
     // Fetch lead data
     let lead = null;
     if (leadId) {
-      const { data: leadData, error } = await supabaseAdmin
-        .from('leads')
-        .select('*')
-        .eq('id', leadId)
-        .eq('user_id', userId)
-        .single();
-      
-      if (!error) lead = leadData;
+      const leadDoc = await getDoc(doc(db, 'deals', leadId));
+      if (leadDoc.exists()) {
+        lead = { id: leadDoc.id, ...leadDoc.data() };
+      }
     } else if (data.lead) {
       lead = data.lead;
     }

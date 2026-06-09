@@ -1,6 +1,7 @@
 // app/api/analytics-engine/route.js
 import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '../../../lib/supabaseClient';
+import { db } from '../../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 /**
  * ADVANCED ANALYTICS ENGINE
@@ -187,28 +188,24 @@ const calculatePipelineHealth = (data) => {
 export async function POST(request) {
   try {
     const { userId, action, timeframe = '30d', data = {} } = await request.json();
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'userId required' },
         { status: 400 }
       );
     }
-    
-    // Fetch user's lead and contact data
-    const { data: leads, error: leadsError } = await supabaseAdmin
-      .from('leads')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('created_at', new Date(Date.now() - (parseInt(timeframe) * 24 * 60 * 60 * 1000)).toISOString());
-    
-    if (leadsError) {
-      console.error('Error fetching leads:', leadsError);
-      return NextResponse.json(
-        { error: 'Failed to fetch leads' },
-        { status: 500 }
-      );
-    }
+
+    // Fetch user's lead and contact data from sent_emails collection
+    const leadsQuery = query(
+      collection(db, 'sent_emails'),
+      where('userId', '==', userId)
+    );
+    const leadsSnapshot = await getDocs(leadsQuery);
+    const leads = leadsSnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
     
     // Aggregate statistics
     const stats = {
