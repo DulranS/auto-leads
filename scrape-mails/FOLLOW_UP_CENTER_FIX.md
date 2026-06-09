@@ -180,5 +180,16 @@ const daysToAdd = newFollowUpCount === 1 ? X : newFollowUpCount === 2 ? Y : Z;
 5. Displaying business names for context
 6. Updating UI messages for clarity
 7. Providing full pipeline visibility
+8. **NEW**: Added "New Replies" section with hot lead detection
+9. **NEW**: Added quick action buttons (Create Deal, Send Email)
+10. **NEW**: Enhanced stats with potential revenue calculation
+11. **NEW**: Priority placement for replied leads at top
 
-**Follow-up center now shows accurate lead status, timing information, and allows viewing all pending and ready leads with "View More" buttons.**
+**Follow-up center now maximizes business value by:**
+- Showing new replies prominently at the top
+- Identifying hot leads (≤7 days) with visual badges
+- Providing quick actions to convert replies into deals
+- Displaying potential revenue from replied leads
+- Offering complete visibility into all lead states
+
+**See BUSINESS_VALUE_ENHANCEMENT.md for detailed reply management features.**

@@ -480,6 +480,7 @@ export default function Dashboard() {
   const [followupSchedulerStatus, setFollowupSchedulerStatus] = useState('Idle');
   const [showAllPendingLeads, setShowAllPendingLeads] = useState(false);
   const [showAllReadyLeads, setShowAllReadyLeads] = useState(false);
+  const [showAllRepliedLeads, setShowAllRepliedLeads] = useState(false);
 
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
@@ -935,6 +936,46 @@ export default function Dashboard() {
   }, [sentLeads, normalizeSentLead, getLeadNextFollowUpAt, safeParseDate]);
 
   const pendingLeads = useMemo(() => getPendingLeads(), [getPendingLeads]);
+
+  // Get replied leads with details
+  const getRepliedLeads = useCallback(() => {
+    if (!sentLeads || sentLeads.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const replied = sentLeads
+      .map(normalizeSentLead)
+      .filter(lead => {
+        if (!lead || !lead.email) return false;
+        return lead.replied === true;
+      })
+      .map(lead => {
+        const sentAtDate = safeParseDate(lead.sentAt);
+        const daysSinceSent = sentAtDate ?
+          (now - sentAtDate) / (1000 * 60 * 60 * 24) : 999;
+        const repliedAtDate = safeParseDate(lead.repliedAt);
+        const daysSinceReply = repliedAtDate ?
+          (now - repliedAtDate) / (1000 * 60 * 60 * 24) : 0;
+        return {
+          ...lead,
+          daysSinceSent,
+          daysSinceReply,
+          repliedAt: lead.repliedAt || lead.sentAt,
+          isHotLead: daysSinceReply <= 7 // Hot if replied within 7 days
+        };
+      })
+      .sort((a, b) => {
+        // Sort by most recent reply first
+        const dateA = new Date(a.repliedAt || a.sentAt);
+        const dateB = new Date(b.repliedAt || b.sentAt);
+        return dateB - dateA;
+      });
+
+    return replied;
+  }, [sentLeads, normalizeSentLead, safeParseDate]);
+
+  const repliedLeadsList = useMemo(() => getRepliedLeads(), [getRepliedLeads]);
 
   // ============================================================================
   // ✅ HANDLE SEND BULK SMS (DEFINED BEFORE JSX - FIXES REFERENCE ERROR)
@@ -5753,7 +5794,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="p-6 bg-gradient-to-br from-gray-800/50 to-gray-900/50 border-b border-gray-700/50">
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <div className="relative group">
                   <div className="absolute inset-0 bg-gradient-to-br from-blue-500/20 to-blue-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
                   <div className="relative bg-gradient-to-br from-blue-900/40 to-blue-800/40 p-5 rounded-xl border border-blue-500/30 hover:border-blue-400/50 transition-all">
@@ -5765,9 +5806,9 @@ export default function Dashboard() {
                 <div className="relative group">
                   <div className="absolute inset-0 bg-gradient-to-br from-green-500/20 to-emerald-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
                   <div className="relative bg-gradient-to-br from-green-900/40 to-emerald-800/40 p-5 rounded-xl border border-green-500/30 hover:border-green-400/50 transition-all">
-                    <div className="text-4xl font-bold text-green-400">{followUpStats.totalReplied}</div>
+                    <div className="text-4xl font-bold text-green-400">{repliedLeadsList.length}</div>
                     <div className="text-sm text-green-200 mt-2 font-medium">
-                      Replied ({Math.round((followUpStats.totalReplied / Math.max(followUpStats.totalSent, 1)) * 100)}%)
+                      Replied ({Math.round((repliedLeadsList.length / Math.max(followUpStats.totalSent, 1)) * 100)}%)
                     </div>
                     <div className="absolute top-3 right-3 text-2xl opacity-20">✅</div>
                   </div>
@@ -5792,7 +5833,7 @@ export default function Dashboard() {
                   <div className="absolute inset-0 bg-gradient-to-br from-purple-500/20 to-pink-600/20 rounded-xl blur-xl group-hover:blur-2xl transition-all"></div>
                   <div className="relative bg-gradient-to-br from-purple-900/40 to-pink-800/40 p-5 rounded-xl border border-purple-500/30 hover:border-purple-400/50 transition-all">
                     <div className="text-4xl font-bold text-purple-400">
-                      ${Math.round((safeFollowUpCandidates.length * 0.25 * 5000) / 1000)}k
+                      ${Math.round((repliedLeadsList.length * 0.25 * 5000) / 1000)}k
                     </div>
                     <div className="text-sm text-purple-200 mt-2 font-medium">Potential Revenue</div>
                     <div className="absolute top-3 right-3 text-2xl opacity-20">💰</div>
@@ -5801,6 +5842,95 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-900/30 to-gray-800/30">
+              {/* NEW REPLIES SECTION - PRIORITY */}
+              {repliedLeadsList.length > 0 && (
+                <div className="mb-6">
+                  <div className="text-lg font-bold text-green-300 mb-4 flex items-center gap-3">
+                    <span className="text-2xl">🎉</span>
+                    <span>{repliedLeadsList.length} New Replies - Take Action!</span>
+                  </div>
+                  <div className="space-y-3">
+                    {repliedLeadsList.slice(0, showAllRepliedLeads ? repliedLeadsList.length : 5).map((lead, idx) => (
+                      <div key={idx} className="group relative">
+                        <div className={`absolute inset-0 bg-gradient-to-r ${lead.isHotLead ? 'from-green-500/20 to-emerald-500/20' : 'from-blue-500/10 to-purple-500/10'} rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all`}></div>
+                        <div className={`relative p-4 rounded-xl ${lead.isHotLead ? 'bg-gradient-to-br from-green-900/40 to-emerald-900/40 border-green-500/40' : 'bg-gradient-to-br from-gray-800/80 to-gray-900/80 border-gray-700'} border hover:border-indigo-500/50 transition-all`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-1">
+                                {lead.isHotLead && <span className="text-xs bg-green-500/30 text-green-300 px-2 py-1 rounded-full font-bold">🔥 HOT</span>}
+                                <div className="font-bold text-white">{lead.email}</div>
+                              </div>
+                              <div className="text-xs text-gray-400 mb-2">{lead.businessName || 'No company'}</div>
+                              <div className="flex gap-4 text-sm">
+                                <span className="text-indigo-400">
+                                  📅 Replied {Math.ceil(lead.daysSinceReply)} days ago
+                                </span>
+                                <span className="text-purple-400">
+                                  📨 Sent {Math.ceil(lead.daysSinceSent)} days ago
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex gap-2 ml-4">
+                              <button
+                                onClick={async () => {
+                                  const confirmed = confirm(`Create deal for ${lead.email}?`);
+                                  if (!confirmed) return;
+                                  try {
+                                    const res = await fetch('/api/create-deal', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        userId: user.uid,
+                                        email: lead.email,
+                                        businessName: lead.businessName,
+                                        stage: 'qualified'
+                                      })
+                                    });
+                                    if (res.ok) {
+                                      addNotification(`✅ Deal created for ${lead.email}`, 'success');
+                                      await loadDeals();
+                                    } else {
+                                      addNotification('Failed to create deal', 'error');
+                                    }
+                                  } catch (err) {
+                                    addNotification('Error creating deal', 'error');
+                                  }
+                                }}
+                                className="relative group/btn overflow-hidden"
+                                title="Create Deal"
+                              >
+                                <div className="absolute inset-0 bg-gradient-to-r from-green-600 to-emerald-600 group-hover/btn:from-green-500 group-hover/btn:to-emerald-500 transition-all"></div>
+                                <div className="relative px-4 py-2 text-white font-bold text-sm rounded-lg">
+                                  💼 Deal
+                                </div>
+                              </button>
+                              <button
+                                onClick={() => window.open(`mailto:${lead.email}`, '_blank')}
+                                className="relative group/btn overflow-hidden"
+                                title="Send Email"
+                              >
+                                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 group-hover/btn:from-blue-500 group-hover/btn:to-indigo-500 transition-all"></div>
+                                <div className="relative px-4 py-2 text-white font-bold text-sm rounded-lg">
+                                  📧 Email
+                                </div>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {repliedLeadsList.length > 5 && (
+                      <button
+                        onClick={() => setShowAllRepliedLeads(!showAllRepliedLeads)}
+                        className="w-full mt-3 py-2 px-4 bg-green-600/30 hover:bg-green-600/50 text-green-300 rounded-lg text-sm font-medium transition-all"
+                      >
+                        {showAllRepliedLeads ? `Show Less (5)` : `View All ${repliedLeadsList.length} Replies`}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {safeFollowUpCandidates.length === 0 ? (
                 <div className="text-center py-16">
                   {pendingLeads.length > 0 ? (
