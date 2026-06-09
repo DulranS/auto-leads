@@ -478,6 +478,8 @@ export default function Dashboard() {
   const [autoFollowupSchedulerEnabled, setAutoFollowupSchedulerEnabled] = useState(true);
   const [aiProcessorStatus, setAiProcessorStatus] = useState('Idle');
   const [followupSchedulerStatus, setFollowupSchedulerStatus] = useState('Idle');
+  const [showAllPendingLeads, setShowAllPendingLeads] = useState(false);
+  const [showAllReadyLeads, setShowAllReadyLeads] = useState(false);
 
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
@@ -5806,17 +5808,31 @@ export default function Dashboard() {
                       <div className="text-6xl mb-4">⏳</div>
                       <div className="text-2xl text-gray-200 font-bold mb-2">Pending Follow-Ups</div>
                       <div className="text-gray-400 mb-4">{pendingLeads.length} leads waiting for follow-up window</div>
-                      <div className="max-w-md mx-auto bg-gray-800/50 rounded-lg p-4 text-left">
+                      <div className="max-w-2xl mx-auto bg-gray-800/50 rounded-lg p-4 text-left">
                         <div className="text-sm text-gray-300 mb-2">Next available follow-ups:</div>
-                        {pendingLeads.slice(0, 3).map((lead, idx) => (
-                          <div key={idx} className="text-sm text-gray-400 py-1 border-b border-gray-700 last:border-0">
-                            {lead.email} - Ready in {lead.hoursUntilFollowUp} hours
+                        {pendingLeads.slice(0, showAllPendingLeads ? pendingLeads.length : 3).map((lead, idx) => (
+                          <div key={idx} className="text-sm text-gray-400 py-2 border-b border-gray-700 last:border-0 flex justify-between items-center">
+                            <div>
+                              <div className="font-medium text-gray-300">{lead.email}</div>
+                              <div className="text-xs text-gray-500">{lead.businessName || 'No company'}</div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`font-bold ${lead.hoursUntilFollowUp <= 24 ? 'text-green-400' : lead.hoursUntilFollowUp <= 48 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                                {lead.hoursUntilFollowUp <= 24 ? 'Ready soon' : `${lead.hoursUntilFollowUp}h`}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {new Date(lead.followUpAt).toLocaleDateString()}
+                              </div>
+                            </div>
                           </div>
                         ))}
                         {pendingLeads.length > 3 && (
-                          <div className="text-sm text-gray-500 py-1">
-                            ... and {pendingLeads.length - 3} more
-                          </div>
+                          <button
+                            onClick={() => setShowAllPendingLeads(!showAllPendingLeads)}
+                            className="w-full mt-3 py-2 px-4 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 rounded-lg text-sm font-medium transition-all"
+                          >
+                            {showAllPendingLeads ? `Show Less` : `View All ${pendingLeads.length} Pending Leads`}
+                          </button>
                         )}
                       </div>
                       <div className="text-sm text-gray-500 mt-3 bg-gray-800/50 inline-block px-4 py-2 rounded-lg">
@@ -5991,20 +6007,26 @@ export default function Dashboard() {
                       </div>
                     </div>
                   )}
-                  {safeFollowUpCandidates.map((contact) => {
+                  {safeFollowUpCandidates.slice(0, showAllReadyLeads ? safeFollowUpCandidates.length : 10).map((contact) => {
                     const followUpCount = contact.followUpCount;
+                    const followUpAt = new Date(contact.followUpAt);
+                    const hoursOverdue = Math.floor((new Date() - followUpAt) / (1000 * 60 * 60));
                     return (
                       <div key={contact.email} className="group relative">
                         <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-xl blur-lg opacity-0 group-hover:opacity-100 transition-all"></div>
                         <div className="relative p-5 rounded-xl bg-gradient-to-br from-gray-800/80 to-gray-900/80 border border-gray-700 hover:border-indigo-500/50 transition-all flex items-center justify-between">
                           <div className="flex-1">
-                            <div className="font-bold text-white text-lg mb-2">{contact.email}</div>
-                            <div className="flex gap-4 text-sm">
+                            <div className="font-bold text-white text-lg mb-1">{contact.email}</div>
+                            <div className="text-xs text-gray-400 mb-2">{contact.businessName || 'No company'}</div>
+                            <div className="flex gap-4 text-sm flex-wrap">
                               <span className="text-indigo-400 font-medium">
                                 📅 {Math.ceil(contact.daysSinceSent)} days ago
                               </span>
                               <span className="text-purple-400 font-medium">
                                 📨 Follow-up #{followUpCount + 1}
+                              </span>
+                              <span className={`font-bold ${hoursOverdue > 24 ? 'text-red-400' : hoursOverdue > 0 ? 'text-yellow-400' : 'text-green-400'}`}>
+                                ⏰ {hoursOverdue > 0 ? `${hoursOverdue}h overdue` : 'Ready now'}
                               </span>
                               <span className={`font-bold ${contact.safetyScore >= 80 ? 'text-green-400' :
                                   contact.safetyScore >= 60 ? 'text-yellow-400' :
@@ -6067,6 +6089,14 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
+                  {safeFollowUpCandidates.length > 10 && (
+                    <button
+                      onClick={() => setShowAllReadyLeads(!showAllReadyLeads)}
+                      className="w-full mt-4 py-3 px-4 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 rounded-lg text-sm font-medium transition-all"
+                    >
+                      {showAllReadyLeads ? `Show Less (10)` : `View All ${safeFollowUpCandidates.length} Ready Leads`}
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -28,9 +28,18 @@ When no leads are ready for immediate follow-up, the UI now shows:
 - "Pending Follow-Ups" section
 - Count of leads waiting for follow-up window
 - List of next 3 pending leads with time until ready
+- "View More" button to see all pending leads
 - Clear message about when follow-ups become available
 
-### 3. Updated UI Messages
+### 3. Enhanced Ready Leads Display
+When leads are ready for follow-up, the UI now shows:
+- First 10 ready leads by default
+- "View More" button to see all ready leads
+- Overdue timing (hours overdue vs "Ready now")
+- Color-coded urgency (red > 24h, yellow > 0h, green = ready)
+- Business name displayed for each lead
+
+### 4. Updated UI Messages
 - Changed "Follow-ups become available 2+ days after initial send" to "1+ day"
 - Added distinction between "All Caught Up" (no leads at all) vs "Pending" (leads waiting)
 
@@ -43,10 +52,42 @@ When no leads are ready for immediate follow-up, the UI now shows:
 ### `app/dashboard/page.js`
 - Updated `getLeadNextFollowUpAt` to use 1-day default instead of 2 days
 - Added `getPendingLeads` function to track leads not yet ready
-- Updated UI to show pending leads when no immediate follow-ups available
+- Added `showAllPendingLeads` state for expanding pending leads view
+- Added `showAllReadyLeads` state for expanding ready leads view
+- Updated UI to show pending leads with "View More" button
+- Enhanced ready leads display with timing info and "View More" button
+- Added business name display and color-coded urgency
 - Updated delay messages from "2+ days" to "1+ day"
 
 ## Technical Details
+
+### UI State Management
+```javascript
+// State for expanding views
+const [showAllPendingLeads, setShowAllPendingLeads] = useState(false);
+const [showAllReadyLeads, setShowAllReadyLeads] = useState(false);
+
+// Pending leads display
+{pendingLeads.slice(0, showAllPendingLeads ? pendingLeads.length : 3).map((lead, idx) => (
+  // Lead card with timing info
+))}
+{pendingLeads.length > 3 && (
+  <button onClick={() => setShowAllPendingLeads(!showAllPendingLeads)}>
+    {showAllPendingLeads ? 'Show Less' : `View All ${pendingLeads.length} Pending Leads`}
+  </button>
+)}
+
+// Ready leads display
+{safeFollowUpCandidates.slice(0, showAllReadyLeads ? safeFollowUpCandidates.length : 10).map((contact) => {
+  const hoursOverdue = Math.floor((new Date() - new Date(contact.followUpAt)) / (1000 * 60 * 60));
+  // Lead card with overdue timing
+})}
+{safeFollowUpCandidates.length > 10 && (
+  <button onClick={() => setShowAllReadyLeads(!showAllReadyLeads)}>
+    {showAllReadyLeads ? 'Show Less (10)' : `View All ${safeFollowUpCandidates.length} Ready Leads`}
+  </button>
+)}
+```
 
 ### Follow-Up Schedule Calculation
 ```javascript
@@ -86,13 +127,19 @@ const getPendingLeads = useCallback(() => {
 - ❌ User couldn't see pending leads
 - ❌ "All Caught Up" message misleading
 - ❌ Too conservative follow-up timing
+- ❌ No visibility into overdue leads
+- ❌ Limited view of ready leads
 
 ### After
 - ✅ Leads visible after 1 day
-- ✅ Pending leads clearly displayed
+- ✅ Pending leads clearly displayed with "View More"
 - ✅ Accurate status messages
 - ✅ More aggressive follow-up schedule
 - ✅ Better visibility into pipeline
+- ✅ Overdue timing with color-coded urgency
+- ✅ Business names displayed for context
+- ✅ "View More" for both pending and ready leads
+- ✅ Full visibility into all follow-up opportunities
 
 ## Testing
 
@@ -127,8 +174,11 @@ const daysToAdd = newFollowUpCount === 1 ? X : newFollowUpCount === 2 ? Y : Z;
 
 **Fixed follow-up center visibility by:**
 1. Reducing delays from 2/3/7/14 days to 1/1/3/7 days
-2. Adding pending leads display
-3. Updating UI messages for clarity
-4. Providing better pipeline visibility
+2. Adding pending leads display with "View More" button
+3. Enhanced ready leads display with timing info and "View More" button
+4. Adding overdue timing with color-coded urgency
+5. Displaying business names for context
+6. Updating UI messages for clarity
+7. Providing full pipeline visibility
 
-**Follow-up center now shows accurate lead status and allows more aggressive follow-up timing.**
+**Follow-up center now shows accurate lead status, timing information, and allows viewing all pending and ready leads with "View More" buttons.**
