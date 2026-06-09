@@ -470,7 +470,7 @@ export default function Dashboard() {
     if (!lastAt) return null;
 
     const next = new Date(lastAt);
-    next.setDate(next.getDate() + 2);
+    next.setDate(next.getDate() + 1); // Changed from 2 days to 1 day
     return next;
   }, [safeParseDate]);
 
@@ -851,55 +851,25 @@ export default function Dashboard() {
   // ✅ GET SAFE FOLLOW-UP CANDIDATES (DEFINED BEFORE JSX)
   // ============================================================================
   const getSafeFollowUpCandidates = useCallback(() => {
-    console.log('🔍 getSafeFollowUpCandidates - Called');
-    console.log('🔍 getSafeFollowUpCandidates - Sent leads:', sentLeads);
-    console.log('🔍 getSafeFollowUpCandidates - Sent leads length:', sentLeads?.length);
-
     if (!sentLeads || sentLeads.length === 0) {
-      console.log('⚠️ getSafeFollowUpCandidates - No sent leads available');
       return [];
     }
 
     const now = new Date();
-    console.log('🔍 getSafeFollowUpCandidates - Current time:', now);
 
     const candidates = sentLeads
       .map(normalizeSentLead)
       .filter(lead => {
-        console.log('🔍 getSafeFollowUpCandidates - Filtering lead:', lead.email);
-
-        if (!lead || !lead.email) {
-          console.log('⏭️ Skipping - Invalid lead');
-          return false;
-        }
-
-        if (lead.replied) {
-          console.log(`⏭️ Skipping ${lead.email} - Already replied`);
-          return false;
-        }
+        if (!lead || !lead.email) return false;
+        if (lead.replied) return false;
 
         const followUpAt = getLeadNextFollowUpAt(lead);
-        console.log(`🔍 getSafeFollowUpCandidates - ${lead.email} followUpAt:`, followUpAt);
-
-        if (!followUpAt) {
-          console.log(`⏭️ Skipping ${lead.email} - No follow-up schedule`);
-          return false;
-        }
-
-        if (followUpAt > now) {
-          console.log(`⏭️ Skipping ${lead.email} - Not ready yet (${followUpAt} > ${now})`);
-          return false;
-        }
+        if (!followUpAt) return false;
+        if (followUpAt > now) return false;
 
         const followUpCount = lead.followUpCount ?? lead.followUpSentCount ?? 0;
-        console.log(`🔍 getSafeFollowUpCandidates - ${lead.email} followUpCount:`, followUpCount);
+        if (followUpCount >= 3) return false;
 
-        if (followUpCount >= 3) {
-          console.log(`⏭️ Skipping ${lead.email} - Max follow-ups reached`);
-          return false;
-        }
-
-        console.log(`✅ ${lead.email} - Safe for follow-up`);
         return true;
       })
       .map(lead => {
@@ -918,13 +888,51 @@ export default function Dashboard() {
       })
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
-    console.log(`🔍 getSafeFollowUpCandidates - Found ${candidates.length} candidates`);
-    console.log('🔍 getSafeFollowUpCandidates - Candidates:', candidates);
     return candidates;
   }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
 
   // Memoize the result to prevent recalculation on every render
   const safeFollowUpCandidates = useMemo(() => getSafeFollowUpCandidates(), [getSafeFollowUpCandidates]);
+
+  // Get pending leads (un-replied but not yet ready for follow-up)
+  const getPendingLeads = useCallback(() => {
+    if (!sentLeads || sentLeads.length === 0) {
+      return [];
+    }
+
+    const now = new Date();
+    const pending = sentLeads
+      .map(normalizeSentLead)
+      .filter(lead => {
+        if (!lead || !lead.email) return false;
+        if (lead.replied) return false;
+
+        const followUpAt = getLeadNextFollowUpAt(lead);
+        if (!followUpAt) return false;
+
+        // Include if follow-up is in the future (not ready yet)
+        return followUpAt > now;
+      })
+      .map(lead => {
+        const followUpAt = getLeadNextFollowUpAt(lead);
+        const sentAtDate = safeParseDate(lead.sentAt);
+        const daysSinceSent = sentAtDate ?
+          (now - sentAtDate) / (1000 * 60 * 60 * 24) : 999;
+        const hoursUntilFollowUp = followUpAt ?
+          (followUpAt - now) / (1000 * 60 * 60) : 0;
+        return {
+          ...lead,
+          followUpAt: followUpAt?.toISOString() || lead.followUpAt,
+          daysSinceSent,
+          hoursUntilFollowUp: Math.round(hoursUntilFollowUp)
+        };
+      })
+      .sort((a, b) => a.hoursUntilFollowUp - b.hoursUntilFollowUp);
+
+    return pending;
+  }, [sentLeads, normalizeSentLead, getLeadNextFollowUpAt, safeParseDate]);
+
+  const pendingLeads = useMemo(() => getPendingLeads(), [getPendingLeads]);
 
   // ============================================================================
   // ✅ HANDLE SEND BULK SMS (DEFINED BEFORE JSX - FIXES REFERENCE ERROR)
@@ -1843,7 +1851,6 @@ export default function Dashboard() {
   const loadSentLeads = useCallback(async () => {
     if (!user?.uid) return;
 
-    console.log('🔍 loadSentLeads - User ID:', user.uid);
     setLoadingSentLeads(true);
 
     try {
@@ -1853,11 +1860,8 @@ export default function Dashboard() {
         body: JSON.stringify({ userId: user.uid })
       });
 
-      console.log('🔍 loadSentLeads - Response status:', res.status);
-
       // Handle 404 gracefully
       if (res.status === 404) {
-        console.warn('⚠️ loadSentLeads - API not found (404)');
         setSentLeads([]);
         setFollowUpStats({
           totalSent: 0,
@@ -1874,20 +1878,16 @@ export default function Dashboard() {
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
-        console.error('❌ loadSentLeads - Response is not JSON:', contentType);
         throw new Error('Response is not JSON');
       }
 
       const data = await res.json();
-      console.log('🔍 loadSentLeads - API response data:', data);
 
       if (res.ok) {
         const normalizedLeads = (data.leads || [])
           .map(normalizeSentLead)
           .filter(lead => lead.email);
 
-        console.log('🔍 loadSentLeads - Normalized leads count:', normalizedLeads.length);
-        console.log('🔍 loadSentLeads - Sample lead:', normalizedLeads[0]);
         setSentLeads(normalizedLeads);
 
         const history = {};
@@ -5801,12 +5801,38 @@ export default function Dashboard() {
             <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-gray-900/30 to-gray-800/30">
               {safeFollowUpCandidates.length === 0 ? (
                 <div className="text-center py-16">
-                  <div className="text-6xl mb-4">✅</div>
-                  <div className="text-2xl text-gray-200 font-bold mb-2">All Caught Up!</div>
-                  <div className="text-gray-400">All leads are either replied or too soon to follow up</div>
-                  <div className="text-sm text-gray-500 mt-3 bg-gray-800/50 inline-block px-4 py-2 rounded-lg">
-                    Follow-ups become available 2+ days after initial send
-                  </div>
+                  {pendingLeads.length > 0 ? (
+                    <>
+                      <div className="text-6xl mb-4">⏳</div>
+                      <div className="text-2xl text-gray-200 font-bold mb-2">Pending Follow-Ups</div>
+                      <div className="text-gray-400 mb-4">{pendingLeads.length} leads waiting for follow-up window</div>
+                      <div className="max-w-md mx-auto bg-gray-800/50 rounded-lg p-4 text-left">
+                        <div className="text-sm text-gray-300 mb-2">Next available follow-ups:</div>
+                        {pendingLeads.slice(0, 3).map((lead, idx) => (
+                          <div key={idx} className="text-sm text-gray-400 py-1 border-b border-gray-700 last:border-0">
+                            {lead.email} - Ready in {lead.hoursUntilFollowUp} hours
+                          </div>
+                        ))}
+                        {pendingLeads.length > 3 && (
+                          <div className="text-sm text-gray-500 py-1">
+                            ... and {pendingLeads.length - 3} more
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-sm text-gray-500 mt-3 bg-gray-800/50 inline-block px-4 py-2 rounded-lg">
+                        Follow-ups become available 1+ day after initial send
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-6xl mb-4">✅</div>
+                      <div className="text-2xl text-gray-200 font-bold mb-2">All Caught Up!</div>
+                      <div className="text-gray-400">All leads have been replied to or maxed out follow-ups</div>
+                      <div className="text-sm text-gray-500 mt-3 bg-gray-800/50 inline-block px-4 py-2 rounded-lg">
+                        Follow-ups become available 1+ day after initial send
+                      </div>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">

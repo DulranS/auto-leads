@@ -122,6 +122,17 @@ Fixed critical email sending issues:
 - `DUPLICATE_PREVENTION_FIX.md` - Complete documentation
 - Status: ✅ Complete and functional
 
+### Follow-Up Center Visibility
+Fixed follow-up center showing "All Caught Up" when leads needed follow-up:
+- **Reduced Delays**: Initial email 1 day (was 2), follow-ups 1/3/7 days (was 3/7/14)
+- **Pending Leads Display**: Shows leads waiting for follow-up window with time until ready
+- **Accurate Status Messages**: Distinguishes between "All Caught Up" and "Pending"
+- **Better Pipeline Visibility**: Users can see all un-replied leads, not just ready ones
+- `app/api/send-email/route.js` - Updated follow-up scheduling delays
+- `app/dashboard/page.js` - Added pending leads tracking and UI display
+- `FOLLOW_UP_CENTER_FIX.md` - Complete documentation
+- Status: ✅ Complete and functional
+
 ## Current Status
 All components are fully functional and properly integrated.
 
