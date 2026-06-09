@@ -481,6 +481,9 @@ export default function Dashboard() {
   const [showAllPendingLeads, setShowAllPendingLeads] = useState(false);
   const [showAllReadyLeads, setShowAllReadyLeads] = useState(false);
   const [showAllRepliedLeads, setShowAllRepliedLeads] = useState(false);
+  const [conversationThread, setConversationThread] = useState(null);
+  const [showConversationModal, setShowConversationModal] = useState(false);
+  const [loadingConversation, setLoadingConversation] = useState(false);
 
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
@@ -2985,6 +2988,51 @@ export default function Dashboard() {
         window.open(`https://wa.me/${dialNumber}`, '_blank');
         addNotification('Desktop detected - opened WhatsApp instead', 'info');
       }
+    }
+  };
+
+  // ============================================================================
+  // HANDLE VIEW CONVERSATION
+  // ============================================================================
+  const handleViewConversation = async (lead) => {
+    if (!user?.uid) {
+      addNotification('Please sign in first', 'error');
+      return;
+    }
+
+    setLoadingConversation(true);
+    setShowConversationModal(true);
+
+    try {
+      const response = await fetch('/api/get-thread', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.uid,
+          email: lead.email,
+          messageId: lead.messageId,
+          threadId: lead.threadId
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setConversationThread({
+          ...data,
+          leadEmail: lead.email,
+          leadBusiness: lead.businessName
+        });
+      } else {
+        addNotification(data.error || 'Failed to load conversation', 'error');
+        setShowConversationModal(false);
+      }
+    } catch (error) {
+      console.error('View conversation error:', error);
+      addNotification('Failed to load conversation', 'error');
+      setShowConversationModal(false);
+    } finally {
+      setLoadingConversation(false);
     }
   };
 
@@ -5872,6 +5920,16 @@ export default function Dashboard() {
                             </div>
                             <div className="flex gap-2 ml-4">
                               <button
+                                onClick={() => handleViewConversation(lead)}
+                                className="relative group/btn overflow-hidden"
+                                title="View Conversation"
+                              >
+                                <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600 group-hover/btn:from-purple-500 group-hover/btn:to-pink-500 transition-all"></div>
+                                <div className="relative px-4 py-2 text-white font-bold text-sm rounded-lg">
+                                  💬 Thread
+                                </div>
+                              </button>
+                              <button
                                 onClick={async () => {
                                   const confirmed = confirm(`Create deal for ${lead.email}?`);
                                   if (!confirmed) return;
@@ -6391,6 +6449,90 @@ export default function Dashboard() {
                   })}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONVERSATION THREAD MODAL */}
+      {showConversationModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col border-2 border-purple-500/30">
+            <div className="relative p-6 border-b border-gray-700/50 bg-gradient-to-r from-purple-900/40 via-pink-900/40 to-indigo-900/40">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-600/10 to-pink-600/10 backdrop-blur-xl"></div>
+              <div className="relative flex justify-between items-center">
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                    <span className="text-3xl">💬</span>
+                    <span>Email Conversation</span>
+                  </h2>
+                  <p className="text-sm text-purple-200 mt-2">
+                    {conversationThread?.leadEmail} • {conversationThread?.leadBusiness || 'No company'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowConversationModal(false)}
+                  className="text-gray-400 hover:text-white hover:bg-red-500/20 transition-all duration-200 text-3xl w-12 h-12 rounded-full flex items-center justify-center"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {loadingConversation ? (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4 animate-spin">⏳</div>
+                  <div className="text-lg text-gray-300">Loading conversation...</div>
+                </div>
+              ) : conversationThread?.messages ? (
+                <div className="space-y-4">
+                  {conversationThread.messages.map((message, idx) => {
+                    const isFromUser = message.from.includes(user?.email || process.env.GMAIL_SENDER_EMAIL);
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${isFromUser ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[80%] rounded-2xl p-4 ${
+                          isFromUser
+                            ? 'bg-gradient-to-br from-blue-600 to-indigo-600 text-white'
+                            : 'bg-gradient-to-br from-gray-700 to-gray-800 text-gray-100 border border-gray-600'
+                        }`}>
+                          <div className="text-xs opacity-75 mb-2">
+                            {isFromUser ? '📤 You' : '📥 ' + message.from.split('<')[0].trim()}
+                          </div>
+                          <div className="font-medium mb-2 text-sm">
+                            {message.subject}
+                          </div>
+                          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {message.body || message.snippet}
+                          </div>
+                          <div className="text-xs opacity-60 mt-2 text-right">
+                            {new Date(message.date).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">📭</div>
+                  <div className="text-xl font-medium mb-2 text-gray-300">No conversation found</div>
+                  <div className="text-gray-500">Unable to load email thread</div>
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-700/50 bg-gray-900/50">
+              <div className="flex justify-between items-center text-sm text-gray-400">
+                <span>{conversationThread?.totalMessages || 0} messages</span>
+                <button
+                  onClick={() => window.open(`mailto:${conversationThread?.leadEmail}`, '_blank')}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-medium transition"
+                >
+                  📧 Reply via Email
+                </button>
+              </div>
             </div>
           </div>
         </div>
