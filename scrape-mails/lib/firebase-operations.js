@@ -237,14 +237,15 @@ export const getLeadNextFollowUpAt = (lead) => {
     return new Date(lead.followUpAt);
   }
 
-  // Otherwise calculate based on lastFollowUpAt
+  // Otherwise calculate based on lastFollowUpAt and follow-up count
+  // Delays match the follow-up templates: 2 days for first, 5 days for second, 10 days for third
   const followUpCount = Number(lead.followUpCount ?? 0);
   const lastFollowUpAt = lead.lastFollowUpAt || lead.lastFollowUpSentAt;
 
   if (!lastFollowUpAt) return null;
 
   const lastDate = new Date(lastFollowUpAt);
-  const daysToAdd = followUpCount === 0 ? 3 : followUpCount === 1 ? 7 : 14;
+  const daysToAdd = followUpCount === 0 ? 2 : followUpCount === 1 ? 5 : 10;
   const nextDate = new Date(lastDate);
   nextDate.setDate(nextDate.getDate() + daysToAdd);
 

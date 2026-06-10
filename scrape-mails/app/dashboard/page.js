@@ -467,17 +467,6 @@ export default function Dashboard() {
     };
   }, [normalizeLeadEmail, safeParseDate]);
 
-  const getLeadNextFollowUpAt = useCallback((lead) => {
-    const explicitFollowUpAt = safeParseDate(lead.followUpAt);
-    if (explicitFollowUpAt) return explicitFollowUpAt;
-
-    const lastAt = safeParseDate(lead.lastFollowUpAt) || safeParseDate(lead.lastFollowUpSentAt) || safeParseDate(lead.sentAt);
-    if (!lastAt) return null;
-
-    const next = new Date(lastAt);
-    next.setDate(next.getDate() + 1); // Changed from 2 days to 1 day
-    return next;
-  }, [safeParseDate]);
 
   const [autoReplyProcessorEnabled, setAutoReplyProcessorEnabled] = useState(true);
   const [autoFollowupSchedulerEnabled, setAutoFollowupSchedulerEnabled] = useState(true);
