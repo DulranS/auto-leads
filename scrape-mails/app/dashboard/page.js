@@ -70,6 +70,7 @@ import {
   normalizeSentLead,
   getLeadNextFollowUpAt
 } from '../../lib/firebase-operations.js';
+import { invalidateCache } from '../../lib/firebase-cache.js';
 
 // ============================================================================
 // FIREBASE INITIALIZATION WITH ERROR HANDLING
@@ -2420,6 +2421,10 @@ export default function Dashboard() {
           'success'
         );
 
+        // Invalidate cache to ensure fresh data
+        invalidateCache('sent_emails');
+        invalidateCache('replied_followup');
+
         await loadSentLeads();
         await loadRepliedAndFollowUp();
         await loadDeals();
@@ -2639,6 +2644,10 @@ export default function Dashboard() {
       }
 
       // Refresh data after all sends complete
+      // Invalidate cache to ensure fresh data
+      invalidateCache('sent_emails');
+      invalidateCache('replied_followup');
+
       await loadSentLeads();
       await loadRepliedAndFollowUp();
       await loadDeals();
