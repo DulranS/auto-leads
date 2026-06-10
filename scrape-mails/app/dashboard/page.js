@@ -30,7 +30,8 @@ import {
   onAuthStateChanged,
   signOut,
   updateProfile,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  browserLocalPersistence
 } from 'firebase/auth';
 import Head from 'next/head';
 import { useRouter } from 'next/navigation';
@@ -87,9 +88,13 @@ const initializeFirebase = () => {
   try {
     if (typeof window === 'undefined') return null;
     const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    const auth = getAuth(app);
+    auth.setPersistence(browserLocalPersistence).catch((error) => {
+      console.error('Firebase auth persistence error:', error);
+    });
     return {
       db: getFirestore(app),
-      auth: getAuth(app),
+      auth,
       app
     };
   } catch (error) {
@@ -2174,8 +2179,7 @@ export default function Dashboard() {
         error_callback: (err) => {
           reject(err.message || 'OAuth error');
         },
-        ...(senderEmail ? { login_hint: senderEmail, prompt: 'consent' } : {}),
-        prompt: 'consent' // Force consent screen to ensure proper permissions
+        ...(senderEmail ? { login_hint: senderEmail } : {})
       });
 
       client.requestAccessToken();

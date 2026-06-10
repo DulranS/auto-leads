@@ -8,7 +8,7 @@ import { useNotifications } from '../components/ui/NotificationProvider';
 // Import Firebase functions
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, updateDoc, doc, addDoc, query, where, getDoc, setDoc } from 'firebase/firestore';
-import { getAuth, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, browserLocalPersistence } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -28,6 +28,11 @@ try {
   app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
   db = getFirestore(app);
   auth = getAuth(app);
+  if (typeof window !== 'undefined') {
+    auth.setPersistence(browserLocalPersistence).catch((error) => {
+      console.error('Firebase auth persistence error:', error);
+    });
+  }
 } catch (error) {
   console.error('Firebase initialization error:', error);
 }

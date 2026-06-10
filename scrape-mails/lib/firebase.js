@@ -18,6 +18,11 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Firebase services
 export const auth = getAuth(app);
+if (typeof window !== 'undefined') {
+  auth.setPersistence(browserLocalPersistence).catch((error) => {
+    console.error('Firebase auth persistence error:', error);
+  });
+}
 export const db = getFirestore(app);
 
 // Configure Google provider
