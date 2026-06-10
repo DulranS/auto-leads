@@ -318,7 +318,7 @@ export async function POST(request) {
           replied: false,
           followUpCount: 0,
           followUpSentCount: 0,
-          followUpAt: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(), // Reduced from 2 days to 1 day
+          followUpAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // First follow-up at 2 days (matches template)
           lastFollowUpAt: null,
           lastFollowUpSentAt: null,
           followUpDates: [],
@@ -449,8 +449,8 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
       const currentFollowUpCount = Number(existingData.followUpCount ?? existingData.followUpSentCount ?? 0);
       const newFollowUpCount = currentFollowUpCount + 1;
       
-      // Calculate next follow-up date (more aggressive: 1, 3, 7 days)
-      const daysToAdd = newFollowUpCount === 1 ? 1 : newFollowUpCount === 2 ? 3 : 7;
+      // Calculate next follow-up date based on template delays (2, 5, 10 days)
+      const daysToAdd = newFollowUpCount === 1 ? 2 : newFollowUpCount === 2 ? 5 : 10;
       const nextFollowUpDate = new Date();
       nextFollowUpDate.setDate(nextFollowUpDate.getDate() + daysToAdd);
 
@@ -492,7 +492,7 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         replied: false,
         followUpCount: 1,
         followUpSentCount: 1,
-        followUpAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
+        followUpAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
         lastFollowUpAt: now,
         lastFollowUpSentAt: now,
         followUpDates: [now],
