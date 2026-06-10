@@ -484,6 +484,7 @@ export default function Dashboard() {
   const [conversationThread, setConversationThread] = useState(null);
   const [showConversationModal, setShowConversationModal] = useState(false);
   const [loadingConversation, setLoadingConversation] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   // ============================================================================
   // AI & ADVANCED FEATURES STATES
@@ -861,7 +862,7 @@ export default function Dashboard() {
       return [];
     }
 
-    const now = new Date();
+    const now = currentTime;
 
     const candidates = sentLeads
       .map(normalizeSentLead)
@@ -895,10 +896,10 @@ export default function Dashboard() {
       .sort((a, b) => b.urgencyScore - a.urgencyScore);
 
     return candidates;
-  }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt]);
+  }, [sentLeads, followUpHistory, normalizeSentLead, getLeadNextFollowUpAt, currentTime]);
 
   // Memoize the result to prevent recalculation on every render
-  const safeFollowUpCandidates = useMemo(() => getSafeFollowUpCandidates(), [getSafeFollowUpCandidates]);
+  const safeFollowUpCandidates = useMemo(() => getSafeFollowUpCandidates(), [getSafeFollowUpCandidates, currentTime]);
 
   // Get pending leads (un-replied but not yet ready for follow-up)
   const getPendingLeads = useCallback(() => {
@@ -906,7 +907,7 @@ export default function Dashboard() {
       return [];
     }
 
-    const now = new Date();
+    const now = currentTime;
     const pending = sentLeads
       .map(normalizeSentLead)
       .filter(lead => {
@@ -924,21 +925,26 @@ export default function Dashboard() {
         const sentAtDate = safeParseDate(lead.sentAt);
         const daysSinceSent = sentAtDate ?
           (now - sentAtDate) / (1000 * 60 * 60 * 24) : 999;
-        const hoursUntilFollowUp = followUpAt ?
-          (followUpAt - now) / (1000 * 60 * 60) : 0;
+        const timeUntilFollowUp = followUpAt ? (followUpAt - now) : 0;
+        const hoursUntilFollowUp = Math.floor(timeUntilFollowUp / (1000 * 60 * 60));
+        const minutesUntilFollowUp = Math.floor((timeUntilFollowUp % (1000 * 60 * 60)) / (1000 * 60));
+        const secondsUntilFollowUp = Math.floor((timeUntilFollowUp % (1000 * 60)) / 1000);
         return {
           ...lead,
           followUpAt: followUpAt?.toISOString() || lead.followUpAt,
           daysSinceSent,
-          hoursUntilFollowUp: Math.round(hoursUntilFollowUp)
+          hoursUntilFollowUp,
+          minutesUntilFollowUp,
+          secondsUntilFollowUp,
+          timeUntilFollowUp
         };
       })
-      .sort((a, b) => a.hoursUntilFollowUp - b.hoursUntilFollowUp);
+      .sort((a, b) => a.timeUntilFollowUp - b.timeUntilFollowUp);
 
     return pending;
-  }, [sentLeads, normalizeSentLead, getLeadNextFollowUpAt, safeParseDate]);
+  }, [sentLeads, normalizeSentLead, getLeadNextFollowUpAt, safeParseDate, currentTime]);
 
-  const pendingLeads = useMemo(() => getPendingLeads(), [getPendingLeads]);
+  const pendingLeads = useMemo(() => getPendingLeads(), [getPendingLeads, currentTime]);
 
   // Get replied leads with details
   const getRepliedLeads = useCallback(() => {
@@ -1478,6 +1484,17 @@ export default function Dashboard() {
   }, [auth, addNotification]);
 
   // ============================================================================
+  // REAL-TIME COUNTDOWN TIMER FOR FOLLOW-UP UNLOCK TIMES
+  // ============================================================================
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000); // Update every second
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // ============================================================================
   // LOAD MANUAL CONTACT STATUS FROM FIREBASE
   // ============================================================================
   const loadManualContactStatus = async (userId) => {
@@ -1506,7 +1523,7 @@ export default function Dashboard() {
   };
 
   // ============================================================================
-  // AUTO-SAVE SETTINGS
+  // AUTO-SAVE SETTINGS WITH LOCALSTORAGE CACHING
   // ============================================================================
   const saveSettings = useCallback(async () => {
     if (!user?.uid || !db || !userPreferences.autoSaveEnabled) return;
@@ -1530,6 +1547,26 @@ export default function Dashboard() {
         userPreferences,
         lastSaved: new Date().toISOString()
       }, { merge: true });
+
+      // Also save to localStorage for persistence
+      const settingsToCache = {
+        senderName,
+        senderEmail,
+        templateA,
+        templateB,
+        whatsappTemplate,
+        smsTemplate,
+        instagramTemplate,
+        twitterTemplate,
+        linkedinTemplate,
+        followUpTemplates,
+        fieldMappings,
+        abTestMode,
+        smsConsent,
+        userPreferences,
+        cachedAt: new Date().toISOString()
+      };
+      localStorage.setItem(`autoleads_settings_${user.uid}`, JSON.stringify(settingsToCache));
 
       addNotification('Settings auto-saved', 'success', 2000);
     } catch (error) {
@@ -1618,10 +1655,38 @@ export default function Dashboard() {
   }, [leadQualityFilter, csvContent, fieldMappings]);
 
   // ============================================================================
-  // LOAD SETTINGS FROM FIREBASE
+  // LOAD SETTINGS FROM FIREBASE WITH LOCALSTORAGE CACHING
   // ============================================================================
   const loadSettings = async (userId) => {
-    if (!userId || !db) return;
+    if (!userId) return;
+
+    // Try to load from localStorage cache first
+    const cachedSettings = localStorage.getItem(`autoleads_settings_${userId}`);
+    if (cachedSettings) {
+      try {
+        const cached = JSON.parse(cachedSettings);
+        setSenderName(cached.senderName || '');
+        setSenderEmail(cached.senderEmail || '');
+        setTemplateA(cached.templateA || DEFAULT_TEMPLATE_A);
+        setTemplateB(cached.templateB || DEFAULT_TEMPLATE_B);
+        setWhatsappTemplate(cached.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE);
+        setSmsTemplate(cached.smsTemplate || DEFAULT_SMS_TEMPLATE);
+        setInstagramTemplate(cached.instagramTemplate || DEFAULT_INSTAGRAM_TEMPLATE);
+        setTwitterTemplate(cached.twitterTemplate || DEFAULT_TWITTER_TEMPLATE);
+        setLinkedinTemplate(cached.linkedinTemplate || DEFAULT_LINKEDIN_TEMPLATE);
+        setFollowUpTemplates(cached.followUpTemplates || DEFAULT_FOLLOW_UP_TEMPLATES);
+        setFieldMappings(cached.fieldMappings || {});
+        setAbTestMode(cached.abTestMode || false);
+        setSmsConsent(cached.smsConsent !== undefined ? cached.smsConsent : true);
+        setUserPreferences(cached.userPreferences || userPreferences);
+        console.log('✅ Settings loaded from localStorage cache');
+      } catch (e) {
+        console.warn('Failed to parse cached settings:', e);
+      }
+    }
+
+    // Then load from Firebase and update cache
+    if (!db) return;
 
     try {
       const docRef = doc(db, 'users', userId, 'settings', 'templates');
@@ -1644,11 +1709,33 @@ export default function Dashboard() {
         setSmsConsent(data.smsConsent !== undefined ? data.smsConsent : true);
         setUserPreferences(data.userPreferences || userPreferences);
 
+        // Cache to localStorage
+        const settingsToCache = {
+          senderName: data.senderName || '',
+          senderEmail: data.senderEmail || '',
+          templateA: data.templateA || DEFAULT_TEMPLATE_A,
+          templateB: data.templateB || DEFAULT_TEMPLATE_B,
+          whatsappTemplate: data.whatsappTemplate || DEFAULT_WHATSAPP_TEMPLATE,
+          smsTemplate: data.smsTemplate || DEFAULT_SMS_TEMPLATE,
+          instagramTemplate: data.instagramTemplate || DEFAULT_INSTAGRAM_TEMPLATE,
+          twitterTemplate: data.twitterTemplate || DEFAULT_TWITTER_TEMPLATE,
+          linkedinTemplate: data.linkedinTemplate || DEFAULT_LINKEDIN_TEMPLATE,
+          followUpTemplates: data.followUpTemplates || DEFAULT_FOLLOW_UP_TEMPLATES,
+          fieldMappings: data.fieldMappings || {},
+          abTestMode: data.abTestMode || false,
+          smsConsent: data.smsConsent !== undefined ? data.smsConsent : true,
+          userPreferences: data.userPreferences || userPreferences,
+          cachedAt: new Date().toISOString()
+        };
+        localStorage.setItem(`autoleads_settings_${userId}`, JSON.stringify(settingsToCache));
+
         addNotification('Settings loaded successfully', 'success', 2000);
       }
     } catch (error) {
-      console.warn('Failed to load settings:', error);
-      addNotification('Using default settings', 'info', 2000);
+      console.warn('Failed to load settings from Firebase:', error);
+      if (!cachedSettings) {
+        addNotification('Using default settings', 'info', 2000);
+      }
     }
   };
 
@@ -5998,22 +6085,30 @@ export default function Dashboard() {
                       <div className="text-gray-400 mb-4">{pendingLeads.length} leads waiting for follow-up window</div>
                       <div className="max-w-2xl mx-auto bg-gray-800/50 rounded-lg p-4 text-left">
                         <div className="text-sm text-gray-300 mb-2">Next available follow-ups:</div>
-                        {pendingLeads.slice(0, showAllPendingLeads ? pendingLeads.length : 3).map((lead, idx) => (
+                        {pendingLeads.slice(0, showAllPendingLeads ? pendingLeads.length : 3).map((lead, idx) => {
+                          const timeUntilFollowUp = new Date(lead.followUpAt) - currentTime;
+                          const hoursUntil = Math.floor(timeUntilFollowUp / (1000 * 60 * 60));
+                          const minutesUntil = Math.floor((timeUntilFollowUp % (1000 * 60 * 60)) / (1000 * 60));
+                          const secondsUntil = Math.floor((timeUntilFollowUp % (1000 * 60)) / 1000);
+                          const isReady = timeUntilFollowUp <= 0;
+                          
+                          return (
                           <div key={idx} className="text-sm text-gray-400 py-2 border-b border-gray-700 last:border-0 flex justify-between items-center">
                             <div>
                               <div className="font-medium text-gray-300">{lead.email}</div>
                               <div className="text-xs text-gray-500">{lead.businessName || 'No company'}</div>
                             </div>
                             <div className="text-right">
-                              <div className={`font-bold ${lead.hoursUntilFollowUp <= 24 ? 'text-green-400' : lead.hoursUntilFollowUp <= 48 ? 'text-yellow-400' : 'text-gray-400'}`}>
-                                {lead.hoursUntilFollowUp <= 24 ? 'Ready soon' : `${lead.hoursUntilFollowUp}h`}
+                              <div className={`font-bold ${isReady ? 'text-green-400 animate-pulse' : hoursUntil <= 1 ? 'text-yellow-400' : 'text-gray-400'}`}>
+                                {isReady ? '🔓 Ready Now!' : hoursUntil > 0 ? `${hoursUntil}h ${minutesUntil}m ${secondsUntil}s` : `${minutesUntil}m ${secondsUntil}s`}
                               </div>
                               <div className="text-xs text-gray-500">
-                                {new Date(lead.followUpAt).toLocaleDateString()}
+                                {new Date(lead.followUpAt).toLocaleString()}
                               </div>
                             </div>
                           </div>
-                        ))}
+                        );
+                        })}
                         {pendingLeads.length > 3 && (
                           <button
                             onClick={() => setShowAllPendingLeads(!showAllPendingLeads)}
