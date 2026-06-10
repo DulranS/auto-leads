@@ -2398,26 +2398,14 @@ export default function Dashboard() {
     }
 
     try {
-      // Find the lead data
-      const lead = sentLeads.find(l => l.email === email);
-      if (!lead) {
-        addNotification(`❌ Lead not found: ${email}`, 'error');
-        return;
-      }
-
-      // Create minimal CSV content for follow-up
-      const csvContent = `email,firstName,lastName,company\n${email},${lead.firstName || ''},${lead.lastName || ''},${lead.businessName || ''}`;
-
-      const res = await fetch('/api/send-email', {
+      // Use the dedicated follow-up API for proper tracking
+      const res = await fetch('/api/send-followup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contact: lead,
-          followUpCount: followUpCount + 1,
-          userId: user.uid,
+          email,
           accessToken,
-          csvContent,
-          templateToSend: 'followup',
+          userId: user.uid,
           senderName
         })
       });
@@ -2593,20 +2581,15 @@ export default function Dashboard() {
               continue;
             }
 
-            // Create minimal CSV content for follow-up
-            const csvContent = `email,firstName,lastName,company\n${contact.email},${contact.firstName || ''},${contact.lastName || ''},${contact.businessName || ''}`;
-
-            // Send email
-            const res = await fetch('/api/send-email', {
+            // Send follow-up using the dedicated follow-up API
+            const res = await fetch('/api/send-followup', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                contact,
-                followUpCount: followUpCount + 1,
-                userId: user.uid,
+                email: contact.email,
                 accessToken,
-                csvContent,
-                templateToSend: 'followup'
+                userId: user.uid,
+                senderName
               })
             });
 
