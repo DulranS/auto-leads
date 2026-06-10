@@ -476,39 +476,12 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         messageId: response.data.id
       });
     } else {
-      // Fallback: create new record
-      const emailData = {
-        userId,
-        to: email.toLowerCase(),
-        businessName,
-        subject,
-        body,
-        template: templateToSend || 'followup',
-        sentAt: now,
-        opened: false,
-        openedCount: 0,
-        clicked: false,
-        clickCount: 0,
-        replied: false,
-        followUpCount: 1,
-        followUpSentCount: 1,
-        followUpAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
-        lastFollowUpAt: now,
-        lastFollowUpSentAt: now,
-        followUpDates: [now],
-        messageId: response.data.id,
-        threadId: response.data.threadId,
-        csvSource: 'followup'
-      };
-      
-      await addDoc(collection(db, 'sent_emails'), emailData);
-      
+      // No existing record found - this should not happen for follow-ups
       return NextResponse.json({
-        success: true,
-        followUpCount: 1,
-        email,
-        messageId: response.data.id
-      });
+        success: false,
+        error: 'No original email record found. Cannot send follow-up without initial email.',
+        code: 'NO_ORIGINAL_EMAIL'
+      }, { status: 404 });
     }
     
   } catch (sendError) {
