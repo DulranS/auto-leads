@@ -1490,6 +1490,27 @@ export default function Dashboard() {
   }, []);
 
   // ============================================================================
+  // CACHE STATS MONITORING (Log every 5 minutes)
+  // ============================================================================
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch('/api/cache-stats');
+          if (res.ok) {
+            const data = await res.json();
+            console.log('[Cache Stats]', data.stats);
+          }
+        } catch (error) {
+          console.warn('Failed to fetch cache stats:', error);
+        }
+      }, 5 * 60 * 1000); // Every 5 minutes
+
+      return () => clearInterval(interval);
+    }
+  }, []);
+
+  // ============================================================================
   // LOAD MANUAL CONTACT STATUS FROM FIREBASE
   // ============================================================================
   const loadManualContactStatus = async (userId) => {

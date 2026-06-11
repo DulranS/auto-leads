@@ -14,6 +14,15 @@ class FirebaseCache {
   constructor() {
     this.cache = new Map();
     this.defaultTTL = 5 * 60 * 1000; // 5 minutes
+    this.collectionTTLs = {
+      'settings': 30 * 60 * 1000, // 30 minutes for settings
+      'templates': 30 * 60 * 1000, // 30 minutes for templates
+      'sent_emails': 2 * 60 * 1000, // 2 minutes for sent emails (changes frequently)
+      'deals': 5 * 60 * 1000, // 5 minutes for deals
+      'company_tracking': 10 * 60 * 1000 // 10 minutes for company tracking
+    };
+    this.hits = 0;
+    this.misses = 0;
   }
 
   /**
@@ -34,30 +43,38 @@ class FirebaseCache {
   get(collectionName, filters = {}, options = {}) {
     const key = this.generateKey(collectionName, filters, options);
     const cached = this.cache.get(key);
-    
-    if (!cached) return null;
-    
+
+    if (!cached) {
+      this.misses++;
+      return null;
+    }
+
     // Check if cache is expired
     if (Date.now() > cached.expiresAt) {
       this.cache.delete(key);
+      this.misses++;
       return null;
     }
-    
+
+    this.hits++;
     return cached.data;
   }
 
   /**
    * Set data in cache with expiration
    */
-  set(collectionName, data, filters = {}, options = {}, ttl = this.defaultTTL) {
+  set(collectionName, data, filters = {}, options = {}, ttl) {
     const key = this.generateKey(collectionName, filters, options);
-    
+
+    // Use collection-specific TTL if provided, otherwise use default
+    const effectiveTTL = ttl || this.collectionTTLs[collectionName] || this.defaultTTL;
+
     this.cache.set(key, {
       data,
-      expiresAt: Date.now() + ttl,
+      expiresAt: Date.now() + effectiveTTL,
       createdAt: Date.now()
     });
-    
+
     // Clean up old entries periodically
     if (this.cache.size > 100) {
       this.cleanup();
@@ -101,7 +118,7 @@ class FirebaseCache {
     const now = Date.now();
     let activeCount = 0;
     let expiredCount = 0;
-    
+
     for (const value of this.cache.values()) {
       if (now > value.expiresAt) {
         expiredCount++;
@@ -109,11 +126,17 @@ class FirebaseCache {
         activeCount++;
       }
     }
-    
+
+    const totalRequests = this.hits + this.misses;
+    const hitRate = totalRequests > 0 ? (this.hits / totalRequests * 100).toFixed(2) : 0;
+
     return {
       totalEntries: this.cache.size,
       activeEntries: activeCount,
-      expiredEntries: expiredCount
+      expiredEntries: expiredCount,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate: `${hitRate}%`
     };
   }
 }
@@ -172,3 +195,4 @@ export function getCacheStats() {
 }
 
 export default firebaseCache;
+export { firebaseCache };

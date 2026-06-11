@@ -4,6 +4,41 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { google } from 'googleapis';
 
+// ============================================================================
+// GMAIL THREAD CACHE (In-memory, 5 minute TTL)
+// ============================================================================
+const threadCache = new Map();
+const THREAD_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+const getCachedThread = (threadId) => {
+  const cached = threadCache.get(threadId);
+  if (!cached) return null;
+
+  if (Date.now() > cached.expiresAt) {
+    threadCache.delete(threadId);
+    return null;
+  }
+
+  return cached.data;
+};
+
+const setCachedThread = (threadId, data) => {
+  threadCache.set(threadId, {
+    data,
+    expiresAt: Date.now() + THREAD_CACHE_TTL
+  });
+
+  // Clean up old entries
+  if (threadCache.size > 50) {
+    const now = Date.now();
+    for (const [key, value] of threadCache.entries()) {
+      if (now > value.expiresAt) {
+        threadCache.delete(key);
+      }
+    }
+  }
+};
+
 // Firebase Config
 const getFirebaseConfig = () => {
   const requiredEnvVars = [
@@ -137,8 +172,19 @@ export async function POST(request) {
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
     
     let thread;
-    
+
     // Try to get thread by threadId first, or find by messageId
+    const cacheKey = threadId || messageId || email;
+
+    // Check cache first
+    const cachedThread = getCachedThread(cacheKey);
+    if (cachedThread) {
+      return NextResponse.json({
+        success: true,
+        cached: true,
+        ...cachedThread
+      });
+    }
     if (threadId) {
       thread = await gmail.users.threads.get({
         userId: 'me',
@@ -190,15 +236,23 @@ export async function POST(request) {
     
     // Format all messages in the thread
     const messages = thread.data.messages.map(formatMessage);
-    
+
     // Sort messages by date (oldest first)
     messages.sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    return NextResponse.json({
-      success: true,
+
+    const threadData = {
       threadId: thread.data.id,
       messages,
       totalMessages: messages.length
+    };
+
+    // Cache the result
+    setCachedThread(cacheKey, threadData);
+
+    return NextResponse.json({
+      success: true,
+      cached: false,
+      ...threadData
     });
     
   } catch (error) {

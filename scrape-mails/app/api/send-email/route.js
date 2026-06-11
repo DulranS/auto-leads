@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, doc, updateDoc, query, where, getDocs } from 'firebase/firestore';
 import { google } from 'googleapis';
+import { cachedQuery, invalidateCache } from '../../../lib/firebase-cache.js';
 
 // Firebase Config
 const getFirebaseConfig = () => {
@@ -328,10 +329,10 @@ export async function POST(request) {
         };
         
         await addDoc(collection(db, 'sent_emails'), emailData);
-        
+
         successCount++;
         results.push({ email, status: 'success', messageId: response.data.id });
-        
+
         await new Promise(resolve => setTimeout(resolve, CONFIG.RATE_LIMIT_DELAY_MS));
         
       } catch (sendError) {
@@ -339,7 +340,10 @@ export async function POST(request) {
         results.push({ email, status: 'failed', reason: sendError.message });
       }
     }
-    
+
+    // Invalidate cache after batch send
+    invalidateCache('sent_emails');
+
     return NextResponse.json({
       success: true,
       total: dataRows.length,
@@ -468,7 +472,10 @@ async function handleFollowUpSend(contact, followUpCount, userId, accessToken, r
         messageId: response.data.id,
         threadId: response.data.threadId
       });
-      
+
+      // Invalidate cache to ensure fresh data
+      invalidateCache('sent_emails');
+
       return NextResponse.json({
         success: true,
         followUpCount: newFollowUpCount,
